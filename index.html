@@ -1,0 +1,2077 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>INDUCASOS · Dashboard Inteligente de Abastecimiento</title>
+  <meta name="description" content="Centro de Control CEDI — Solo Cascos"/>
+
+  <!-- Favicon SVG inline -->
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%23040c17'/><rect x='7' y='8' width='18' height='16' rx='3' fill='none' stroke='%2338bdf8' stroke-width='2'/><line x1='7' y1='14' x2='25' y2='14' stroke='%2338bdf8' stroke-width='1.5'/></svg>"/>
+
+  <!-- React 18 -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js" crossorigin></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js" crossorigin></script>
+
+  <!-- Babel Standalone (transpila JSX en el navegador) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js" crossorigin></script>
+
+  <!-- SheetJS (XLSX) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" crossorigin></script>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; background: #040c17; }
+    #root { min-height: 100vh; }
+    /* Loading screen mientras Babel transpila */
+    #loading-screen {
+      position: fixed; inset: 0;
+      background: #040c17;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      gap: 16px; z-index: 9999;
+      font-family: 'JetBrains Mono', monospace;
+      color: #4a6380; font-size: 13px;
+    }
+    #loading-screen .spinner {
+      width: 36px; height: 36px; border-radius: 50%;
+      border: 3px solid #152236;
+      border-top-color: #38bdf8;
+      animation: spin .7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+
+  <!-- Google Fonts preload -->
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet"/>
+</head>
+<body>
+  <!-- Loading screen visible mientras carga -->
+  <div id="loading-screen">
+    <div class="spinner"></div>
+    <div>Iniciando Dashboard CEDI...</div>
+    <div style="font-size:10px;color:#253045">Cargando dependencias</div>
+  </div>
+
+  <div id="root"></div>
+
+  <script type="text/babel" data-presets="react">
+const { useState, useMemo, useCallback } = React;
+// XLSX loaded via CDN
+
+// ── Design tokens ─────────────────────────────────────────────────────────────
+const C = {
+  bg0:"#040c17",bg1:"#070f1c",bg2:"#0b1628",bg3:"#0f1e35",
+  b0:"#152236",b1:"#1c3050",
+  t1:"#eef2ff",t2:"#8ba4c0",t3:"#4a6380",t4:"#253045",
+  accent:"#38bdf8",accentDim:"#38bdf820",
+  green:"#10b981",greenDim:"#10b98118",
+  yellow:"#f59e0b",yellowDim:"#f59e0b18",
+  orange:"#f97316",orangeDim:"#f9731618",
+  red:"#ef4444",redDim:"#ef444418",
+  purple:"#a78bfa",purpleDim:"#a78bfa18",
+  teal:"#2dd4bf",tealDim:"#2dd4bf18",
+};
+const sem={
+  ruptura:{c:"#ef4444",dim:"#ef444418",l:"RUPTURA"},
+  critico:{c:"#f97316",dim:"#f9731618",l:"CRÍTICO"},
+  preventivo:{c:"#f59e0b",dim:"#f59e0b18",l:"PREVENTIVO"},
+  ok:{c:"#10b981",dim:"#10b98118",l:"OK"},
+};
+const abcCol={A:{c:C.orange,dim:C.orangeDim},B:{c:C.accent,dim:C.accentDim},C:{c:C.t3,dim:C.bg3}};
+const vtCol={tarde:{c:C.red,l:"INICIAR YA"},urgente:{c:C.orange,l:"URGENTE"},proximo:{c:C.yellow,l:"PRÓXIMO"},prog:{c:C.green,l:"PROGRAMAR"}};
+const semCol={ok:C.green,preventivo:C.yellow,critico:C.orange,ruptura:C.red,proceso:C.accent};
+
+// ── Motor predictivo ──────────────────────────────────────────────────────────
+const R9=n=>Math.ceil(Math.max(0,n)/9)*9, LEAD=12, TREP=8;
+const gap=s=>{if(s.nota)return 0;if(s.stock_piso>=s.comp)return 0;return Math.max(0,s.comp-s.stock_piso);};
+const tRup=s=>s.stock_piso===0?0:Math.round((s.stock_piso/(Math.max(s.vel_dia,1)/10))*60);
+const estado=s=>{
+  if(s.stock_piso===0&&s.comp>0&&!s.nota)return"ruptura";
+  const g=gap(s),t=tRup(s);
+  if(g>0&&t<60)return"critico";
+  if(g>0&&t<180)return"preventivo";
+  return"ok";
+};
+const cantSug=(s,bH,bF)=>R9(gap(s)+Math.ceil((Math.max(s.vel_dia,1)/10)*bH*bF));
+const ventana=s=>{
+  const t=tRup(s),v=t-(LEAD+TREP);
+  if(t===0)return{min:-(LEAD+TREP),st:"tarde"};
+  if(v<=0)return{min:v,st:"tarde"};
+  if(v<=20)return{min:v,st:"urgente"};
+  if(v<=60)return{min:v,st:"proximo"};
+  return{min:v,st:"prog"};
+};
+// C1: score sin prioridad MDE — todas las ciudades igual
+const score=s=>({ruptura:100,critico:75,preventivo:40,ok:0}[estado(s)]+({A:40,B:25,C:10}[s.abc]||0));
+const esEXPO=d=>(d||"").toUpperCase().includes("EXPO");
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+const tick=()=>new Promise(r=>setTimeout(r,0));
+const toNum=v=>{const n=parseFloat(String(v||0).replace(/[^0-9.-]/g,""));return isNaN(n)?0:n;};
+
+// C2: esAtipico — solo para badge visual en pipeline, NO filtra comprometido
+const tieneNota=nota=>{
+  const n=String(nota||"").trim().toLowerCase();
+  return n.length>1&&!["n","n.",".","-","nan","none"].includes(n);
+};
+
+// ── processFiles — ITAGUÍ únicamente para WMS ────────────────────────────────
+// INVENTARIO : header fila 5, sheet 'InvxUbiMULTI'
+// WMS BANDEJA: header fila 5, solo sheet ITAGUÍ (PROMICAL y RADAR excluidos)
+// UBICACION  : código X##YY → calle(B-E) · módulo(01-42) · nivel · pos
+async function processFiles(wbInv, wbFact, onStep){
+
+  onStep("Leyendo inventario...");await tick();
+
+  // ── INVENTARIO: range:5 salta las 5 filas vacías/título antes del header ──
+  const invSheet=wbInv.Sheets[wbInv.SheetNames[0]];
+  const invRows=XLSX.utils.sheet_to_json(invSheet,{range:5,defval:""});
+
+  // Filtrar CASCO sin EXPO
+  const invCasco=invRows.filter(r=>{
+    const linea=String(r["Linea"]||"").trim();
+    const desc=String(r["Descripcion"]||"");
+    return linea==="CASCO"&&!esEXPO(desc);
+  });
+
+  if(invCasco.length===0){
+    throw new Error("No se encontraron SKUs CASCO en el inventario.\nVerifica que sea el archivo 'Inventario x Posición'.");
+  }
+
+  // ── PATCH 2: Parser de ubicación X##YY ───────────────────────────────────────
+  // B0111 = calle B · módulo 01 · nivel 1 · pos 1
+  // Mapeo: B→C1 · C→C2 · D→C3 · E→C4
+  const CALLE_MAP={B:"C1",C:"C2",D:"C3",E:"C4"};
+  const parseUbi=u=>{
+    const m=/^([B-E])0?(\d{1,2})(\d)(\d)$/.exec(String(u).trim());
+    if(!m)return null;
+    return{calleKey:CALLE_MAP[m[1]],calleLetra:m[1],modulo:parseInt(m[2]),nivel:parseInt(m[3]),pos:parseInt(m[4])};
+  };
+
+  // Stock por referencia + invByModule (clave "B01", "C14", etc.)
+  const stockMap={};
+  const invByModule={};   // key: "B01" → [{ref,desc,stock,nivel,pos,comp,gap}]
+  for(const r of invCasco){
+    const ref=String(r["Referencia"]||"").trim();
+    const desc=String(r["Descripcion"]||"").trim();
+    const saldo=toNum(r["saldo"]);
+    const ubi=String(r["ubicacion"]||"").trim();
+    if(!ref)continue;
+    if(!stockMap[ref])stockMap[ref]={ref,desc,stock:0};
+    stockMap[ref].stock+=saldo;
+    const p=parseUbi(ubi);
+    if(p&&saldo>0){
+      const modKey=`${p.calleLetra}${String(p.modulo).padStart(2,"0")}`;
+      if(!invByModule[modKey])invByModule[modKey]=[];
+      invByModule[modKey].push({ref,desc,saldo,nivel:p.nivel,pos:p.pos,ubi,calleKey:p.calleKey,modulo:p.modulo});
+    }
+  }
+  const cascoRefs=new Set(Object.keys(stockMap));
+
+  onStep(`${cascoRefs.size.toLocaleString()} SKUs CASCO encontrados. Leyendo pedidos ITAGUÍ...`);await tick();
+
+  // ── PATCH 1: Solo ITAGUÍ — PROMICAL y RADAR excluidos ────────────────────────
+  const wmsSheets=["ITAGUÍ"];
+  let allWmsRows=[];
+  for(const shName of wmsSheets){
+    const ws=wbFact.Sheets[shName];
+    if(!ws)continue;
+    // range:5 para saltar filas vacías/título y usar fila 5 como header
+    const rows=XLSX.utils.sheet_to_json(ws,{range:5,defval:""});
+    allWmsRows=allWmsRows.concat(rows);
+  }
+
+  if(allWmsRows.length===0){
+    throw new Error("No se encontraron pedidos en la Bandeja WMS.\nVerifica que sea el archivo 'Bandeja de planeación'.");
+  }
+
+  onStep("Calculando comprometido vs stock (todos los pedidos)...");await tick();
+
+  // C2: compMap incluye TODOS los pedidos — sin filtro de nota
+  const compMap={};
+  const pedidosRaw={};  // key: picking → {meta, rows[]}
+  for(const r of allWmsRows){
+    const ref=String(r["referencia"]||"").trim();
+    const cant=toNum(r["cantidad"]);
+    const nota=r["notas"];
+    const ciudad=String(r["ciudad"]||"").trim();
+    const estado_val=String(r["Estado"]||"").trim();
+    const picking=String(r["Picking"]||r["PedidoSiesa"]||"").trim();
+    const cliente=String(r["NOMBRECLIENTE"]||"").trim();
+    const pedidoSiesa=String(r["PedidoSiesa"]||"").trim();
+    const fecha=r["F_pedido"]?String(r["F_pedido"]).slice(0,10):"";
+    const desc=String(r["descripcion"]||"").trim();
+    const tipoDocto=String(r["TipoDocto"]||"").trim().toUpperCase();
+    if(!ref||cant===0||!cascoRefs.has(ref))continue;
+    // Comprometido total
+    compMap[ref]=(compMap[ref]||0)+cant;
+    // Agrupar por picking
+    if(!pedidosRaw[picking]){
+      pedidosRaw[picking]={
+        id:picking,
+        pedidoSiesa,
+        est:estado_val==="5"?"planeado":estado_val==="3"?"en_picking":"sin_planear",
+        cliente,ciudad,fecha,
+        nota:tieneNota(nota),
+        tipoDocto,
+        rows:[],
+      };
+    }
+    pedidosRaw[picking].rows.push({ref,desc,cant,nota:tieneNota(nota)});
+  }
+
+  onStep("Clasificando SKUs y calculando gaps...");await tick();
+
+  // Enriquecer invByModule con comp y gap por referencia
+  for(const key of Object.keys(invByModule)){
+    invByModule[key]=invByModule[key].map(row=>({
+      ...row,
+      comp:compMap[row.ref]||0,
+      gap:Math.max(0,(compMap[row.ref]||0)-( stockMap[row.ref]?.stock||0)),
+    })).sort((a,b)=>b.saldo-a.saldo);
+  }
+
+  // Merge stock + comprometido → puntos operacionales completos
+  const items=Object.values(stockMap).map(it=>{
+    const comp=compMap[it.ref]||0;
+    const g=Math.max(0,comp-it.stock);
+    const vel_dia=comp>0?+(comp/1).toFixed(1):1;
+    const cajas_d=+(vel_dia/9).toFixed(3);
+    // ── BLOQUE 2: Puntos operacionales ─────────────────────────────────────
+    const pto_min = Math.ceil(vel_dia * 1);           // 1 día de demanda
+    const pto_seg = Math.ceil(vel_dia * ((LEAD+TREP)/60) * 2); // 2× ciclo reposición
+    const pto_max = Math.ceil(vel_dia * 5);           // 5 días de cobertura máx
+    const dias_cob= it.stock>0&&vel_dia>0 ? +(it.stock/vel_dia).toFixed(1) : 0;
+    // Estado operacional ampliado
+    let estado_op="normal";
+    if(comp>0&&it.stock===0)              estado_op="urgente";
+    else if(comp>0&&it.stock<pto_seg)     estado_op="critico";
+    else if(comp>0&&it.stock<pto_min*2)   estado_op="preventivo";
+    // ────────────────────────────────────────────────────────────────────────
+    return{...it,comp,gap:g,vel_dia,cajas_d,pto_min,pto_seg,pto_max,dias_cob,estado_op};
+  }).sort((a,b)=>b.gap-a.gap||b.comp-a.comp);
+
+  // Slotting: piso vs altura
+  const PALLET=72; // 8 cajas × 9u = 72u por pallet en altura
+  for(const it of items){
+    if(it.stock===0)                               {it.destino="SIN_STOCK";it.razon="Sin stock en piso";}
+    else if(it.comp===0&&it.stock<9)               {it.destino="ALTURA";it.razon="Stock fraccionado sin demand.";}
+    else if(it.comp===0&&it.stock>0)               {it.destino="ALTURA";it.razon="Sin pedidos activos";}
+    else                                            {it.destino="PISO";it.razon="OK";}
+    // #2: sugerir ×9 real — NO forzar pallet completo si gap < 72u
+    if(it.destino==="ALTURA"&&it.stock>0){
+      if(it.gap>0&&it.gap<PALLET){
+        it.u_subir=Math.ceil(it.gap/9)*9; // solo lo necesario en ×9
+        it.sugerencia_mixto=true; // puede ir en pallet mixto (hasta 8 SKUs distintos)
+      } else {
+        it.u_subir=Math.ceil(it.stock/PALLET)*PALLET;
+        it.sugerencia_mixto=false;
+      }
+    } else {
+      it.u_subir=0;
+      it.sugerencia_mixto=false;
+    }
+    it.pallets_subir=Math.ceil(it.u_subir/PALLET);
+    it.cajas_sub=it.pallets_subir*8;
+  }
+
+  const pisoItems=items.filter(it=>it.destino==="PISO");
+  const alturaItems=items.filter(it=>it.destino==="ALTURA"&&it.stock>0&&!esEXPO(it.desc));
+
+  // C3: Sugerencia de pallets en altura — posiciones nivel>=3 con SKUs requeridos
+  // Agrupar posiciones de altura por ubicación exacta (cada ubicación = 1 pallet físico)
+  const alturaPos={};  // key: ubicación WMS (ej: "B0311")
+  for(const [modKey,rows] of Object.entries(invByModule)){
+    for(const row of rows){
+      if(row.nivel<2)continue;  // solo altura real (nivel 2+)
+      const ubi=row.ubi;
+      if(!alturaPos[ubi])alturaPos[ubi]={
+        ubi, modKey,
+        calleLetra:ubi[0], modulo:parseInt(ubi.slice(1,3)),
+        nivel:row.nivel, pos:row.pos,
+        skus:[], totalStock:0,
+      };
+      const comp=compMap[row.ref]||0;
+      const stockPiso=stockMap[row.ref]?.stock||0;
+      const g=Math.max(0,comp-stockPiso);
+      alturaPos[ubi].totalStock+=row.saldo;
+      alturaPos[ubi].skus.push({ref:row.ref,desc:row.desc,saldo:row.saldo,comp,stockPiso,gap:g});
+    }
+  }
+  // Filtrar pallets con al menos 1 SKU con gap>0 → SUGERIR BAJAR
+  const palletsSugeridos=Object.values(alturaPos)
+    .map(p=>{
+      const needed=p.skus.filter(s=>s.gap>0);
+      const totalGap=needed.reduce((t,s)=>t+s.gap,0);
+      const skusUnicos=[...new Set(p.skus.map(s=>s.ref))].length;
+      return{...p,needed,totalGap,skusUnicos,esPallet:Math.abs(p.totalStock-PALLET)<=9};
+    })
+    .filter(p=>p.needed.length>0)
+    .sort((a,b)=>b.totalGap-a.totalGap);
+
+  // SKUS para el motor predictivo (top con gap o comprometido)
+  const skusMotor=[...items].sort((a,b)=>b.gap-a.gap||b.comp-a.comp).slice(0,30).map((it,i)=>{
+    const eABC=it.gap>0?"A":it.comp>0?"A":"C";
+    return{
+      id:it.ref,
+      tipo:it.desc.includes("INTEGRAL")?"INTEGRAL":it.desc.includes("ABATIBLE")?"ABATIBLE":"ABIERTO",
+      label:it.desc.slice(0,35),
+      abc:eABC,
+      vel_dia:it.vel_dia,
+      stock_piso:it.stock,
+      stock_res:Math.round(it.stock*0.5),
+      comp:it.comp,
+      nota:false,
+      ciudad:i%3===0?"MDE":i%3===1?"BOG":"CAL",
+      tend:it.gap>0?"DECRECIENTE":it.comp>0?"ESTABLE":"CRECIENTE",
+      calle:`C${(i%4)+1}`,
+      m:(i%14)+1,
+      qty90:it.stock,
+      ped:0,cli:0,frec:0.7,
+    };
+  });
+
+  // ── BLOQUE 3: invBySKU — todas las posiciones por referencia ────────────────
+  const invBySKU={};
+  for(const[modKey,rows] of Object.entries(invByModule)){
+    for(const row of rows){
+      if(!invBySKU[row.ref])invBySKU[row.ref]=[];
+      invBySKU[row.ref].push({ubi:row.ubi,saldo:row.saldo,nivel:row.nivel,pos:row.pos,modKey,calleLetra:modKey[0],modulo:parseInt(modKey.slice(1))});
+    }
+  }
+
+  // ── Construir pedidosActivos con cobertura piso/altura ───────────────────────
+  const pedidosActivos=Object.values(pedidosRaw).map(p=>{
+    const refs=p.rows.map(row=>{
+      const pos=invBySKU[row.ref]||[];
+      const hasPiso=pos.some(x=>x.nivel<=1&&x.saldo>0);
+      const hasAlt =pos.some(x=>x.nivel>=2&&x.saldo>0);
+      return{...row,hasPiso,hasAlt,sinStock:!hasPiso&&!hasAlt};
+    });
+    const lineas=refs.length;
+    const uni=refs.reduce((t,r)=>t+r.cant,0);
+    // % por UNIDADES reales del pedido (no por líneas)
+    const uniPiso=refs.filter(r=>r.hasPiso).reduce((t,r)=>t+r.cant,0);
+    const uniAlt =refs.filter(r=>!r.hasPiso&&r.hasAlt).reduce((t,r)=>t+r.cant,0);
+    const uniSin =refs.filter(r=>r.sinStock).reduce((t,r)=>t+r.cant,0);
+    const soloAlt=refs.filter(r=>!r.hasPiso&&r.hasAlt).length;
+    const sinStock=refs.filter(r=>r.sinStock).length;
+    const pctPiso=uni>0?Math.round((uniPiso/uni)*100):0;
+    const pctAlt =uni>0?Math.round((uniAlt/uni)*100):0;
+    let cobertura="SIN STOCK";
+    if(pctPiso===100)cobertura="PISO";
+    else if(pctPiso===0&&uniAlt>0)cobertura="ALTURA";
+    else if(pctPiso>0)cobertura="MIXTO";
+    // Clasificación de despacho para priorización logística
+    let clasificacion="ruptura"; // rojo: <40% piso o sin stock
+    if(pctPiso===100)clasificacion="despachable";      // verde: sale directo de piso
+    else if(pctPiso>=40)clasificacion="parcial";       // amarillo: parcial en piso
+    else if(uniAlt>0)clasificacion="reabasto";         // naranja: hay en altura, bajar
+    return{...p,refs,lineas,uni,uniPiso,uniAlt,uniSin,pctPiso,pctAlt,soloAlt,sinStock,cobertura,clasificacion};
+  }).sort((a,b)=>{
+    const ord={sin_planear:0,planeado:1,en_picking:2};
+    return (ord[a.est]||0)-(ord[b.est]||0)||b.uni-a.uni;
+  });
+
+  // ── REPORTE: datos completos sin límites ──────────────────────────────────
+  // Stock en altura por referencia (nivel >= 3)
+  const stockAltMap={};
+  for(const[,rows] of Object.entries(invByModule)){
+    for(const row of rows){
+      if(row.nivel>=2){
+        stockAltMap[row.ref]=(stockAltMap[row.ref]||0)+row.saldo;
+      }
+    }
+  }
+
+  // Rupturas: comprometido>0, stock_piso=0 — ordenadas por comp desc
+  const rupturas=items
+    .filter(it=>it.comp>0&&it.stock===0)
+    .map(it=>({...it,stock_alt:stockAltMap[it.ref]||0}))
+    .sort((a,b)=>b.comp-a.comp);
+
+  // Gaps: stock_piso>0 pero stock_piso < comp
+  const gapsReport=items
+    .filter(it=>it.gap>0&&it.stock>0)
+    .map(it=>({...it,stock_alt:stockAltMap[it.ref]||0}))
+    .sort((a,b)=>b.gap-a.gap);
+
+  // Reporte por ciudad: comprometido total y SKUs
+  // #4 FIX: contar PEDIDOS únicos (pickings), no SKUs
+  const cityMap={};
+  for(const r of allWmsRows){
+    const ciudad=String(r["ciudad"]||"").trim();
+    const cant=toNum(r["cantidad"]);
+    const ref=String(r["referencia"]||"").trim();
+    const picking=String(r["Picking"]||r["PedidoSiesa"]||"").trim();
+    if(!ciudad||!cascoRefs.has(ref)||cant===0)continue;
+    if(!cityMap[ciudad])cityMap[ciudad]={ciudad,comp:0,refs:new Set(),pickings:new Set()};
+    cityMap[ciudad].comp+=cant;
+    cityMap[ciudad].refs.add(ref);
+    if(picking)cityMap[ciudad].pickings.add(picking);
+  }
+  const cityReport=Object.values(cityMap)
+    .map(c=>({ciudad:c.ciudad,comp:c.comp,skus:c.refs.size,pedidos:c.pickings.size}))
+    .sort((a,b)=>b.comp-a.comp);
+
+  // Reporte módulos: estado real por calle
+  const CALLE_LETRAS={B:"C1",C:"C2",D:"C3",E:"C4"};
+  const modReport=Object.entries(CALLE_LETRAS).map(([letra,calleId])=>{
+    const moduloStats={};
+    for(const[modKey,rows] of Object.entries(invByModule)){
+      if(modKey[0]!==letra)continue;
+      const modNum=parseInt(modKey.slice(1));
+      const pisoRows=rows.filter(r=>r.nivel<=1);
+      const altRows=rows.filter(r=>r.nivel>=2);
+      const skusPiso=new Set(pisoRows.map(r=>r.ref)).size;
+      const stockP=pisoRows.reduce((t,r)=>t+r.saldo,0);
+      const stockA=altRows.reduce((t,r)=>t+r.saldo,0);
+      const gapMod=pisoRows.reduce((t,r)=>t+(r.gap||0),0);
+      moduloStats[modNum]={modKey,modNum,skusPiso,stockP,stockA,gapMod,
+        estado:stockP===0&&gapMod>0?"ruptura":gapMod>0?"critico":skusPiso>1?"mezcla":"ok"};
+    }
+    const mods=Object.values(moduloStats);
+    return{
+      calleId,letra,
+      modulos:mods,
+      stockPiso:mods.reduce((t,m)=>t+m.stockP,0),
+      mezcla:mods.filter(m=>m.skusPiso>1).length,
+      sinMezcla:mods.filter(m=>m.skusPiso===1).length,
+      vacios:42-mods.length,
+      conGap:mods.filter(m=>m.gapMod>0).length,
+    };
+  });
+
+  const stats={
+    totalSKUs:items.length,
+    skusPiso:pisoItems.length,
+    skusAltura:alturaItems.length,
+    sinMov:items.filter(it=>it.comp===0).length,
+    totalComp:Object.values(compMap).reduce((t,v)=>t+v,0),
+    totalStock:items.reduce((t,it)=>t+it.stock,0),
+    totalStockAlt:Object.values(stockAltMap).reduce((t,v)=>t+v,0),
+    totalGap:items.reduce((t,it)=>t+it.gap,0),
+    totalCajas:alturaItems.reduce((t,s)=>t+s.cajas_sub,0),
+    totalUSubir:alturaItems.reduce((t,s)=>t+s.u_subir,0),
+    pedidosActivos:pedidosActivos.length,
+    pedDespachables:pedidosActivos.filter(p=>p.clasificacion==="despachable").length,
+    pedParciales:pedidosActivos.filter(p=>p.clasificacion==="parcial").length,
+    pedReabasto:pedidosActivos.filter(p=>p.clasificacion==="reabasto").length,
+    pedRuptura:pedidosActivos.filter(p=>p.clasificacion==="ruptura").length,
+    uniDespachables:pedidosActivos.filter(p=>p.clasificacion==="despachable").reduce((t,p)=>t+p.uni,0),
+    totalRupturas:rupturas.length,
+    totalGaps:gapsReport.length,
+    totalCiudades:cityReport.length,
+    ahora:new Date().toLocaleTimeString("es-CO",{hour:"2-digit",minute:"2-digit"}),
+    fecha:new Date().toLocaleDateString("es-CO",{day:"2-digit",month:"short",year:"numeric"}),
+  };
+
+  return{SKUS:skusMotor,pisoItems,alturaItems,allItems:items,stats,pedidosActivos,invByModule,invBySKU,palletsSugeridos,rupturas,gapsReport,cityReport,modReport};
+}
+
+// ── UI primitives ─────────────────────────────────────────────────────────────
+const Badge=({label,c,dim,sz=9,px=7,py=2})=>(
+  <span style={{background:dim,color:c,border:`1px solid ${c}35`,borderRadius:5,padding:`${py}px ${px}px`,fontSize:sz,fontWeight:700,letterSpacing:"0.3px",whiteSpace:"nowrap"}}>{label}</span>
+);
+const Pill=({label,c,dim})=>(
+  <span style={{background:dim,color:c,border:`1px solid ${c}40`,borderRadius:20,padding:"2px 9px",fontSize:9,fontWeight:700}}>{label}</span>
+);
+const TH=({children,right})=>(
+  <th style={{padding:"9px 14px",textAlign:right?"right":"left",fontSize:10,fontWeight:600,color:C.t3,textTransform:"uppercase",letterSpacing:"0.8px",fontFamily:"'Inter',sans-serif",whiteSpace:"nowrap",background:C.bg1,borderBottom:`1px solid ${C.b0}`}}>{children}</th>
+);
+const TD=({children,right,mono,c,fw,fs,style={}})=>(
+  <td style={{padding:"9px 14px",textAlign:right?"right":"left",fontFamily:mono?"'JetBrains Mono',monospace":"'Inter',sans-serif",color:c,fontWeight:fw,fontSize:fs,verticalAlign:"middle",...style}}>{children}</td>
+);
+
+const DropZone=({label,icon,file,onFile,color,hint})=>{
+  const [drag,setDrag]=useState(false);
+  return(
+    <label onDragOver={e=>{e.preventDefault();setDrag(true);}} onDragLeave={()=>setDrag(false)}
+      onDrop={e=>{e.preventDefault();setDrag(false);const f=e.dataTransfer.files[0];if(f)onFile(f);}}
+      style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:10,
+        background:file?`${color}0c`:drag?`${color}0e`:C.bg3,
+        border:`2px dashed ${file?color:drag?color:C.b1}`,
+        borderRadius:12,padding:"26px 18px",cursor:"pointer",transition:"all .2s",minHeight:130,
+        boxShadow:file?`0 0 0 1px ${color}25,inset 0 0 30px ${color}06`:"none"}}>
+      <input type="file" accept=".xlsx,.xls" style={{display:"none"}} onChange={e=>{const f=e.target.files[0];if(f)onFile(f);}}/>
+      <div style={{fontSize:26}}>{file?"✅":icon}</div>
+      <div style={{textAlign:"center"}}>
+        <div style={{color:file?color:C.t2,fontWeight:700,fontSize:12,marginBottom:2}}>{file?file.name:label}</div>
+        <div style={{color:C.t3,fontSize:10}}>{file?"Cargado correctamente":hint}</div>
+      </div>
+      {file&&<Badge label="✓ LISTO" c={color} dim={`${color}18`} sz={10} px={9} py={3}/>}
+    </label>
+  );
+};
+
+const GS=`
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600;700&display=swap');
+  *{box-sizing:border-box}
+  @keyframes fadeUp{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+  @keyframes blink{0%,100%{opacity:1}50%{opacity:.1}}
+  @keyframes pulse{0%,100%{box-shadow:0 0 0 0 #ef444440}50%{box-shadow:0 0 0 8px #ef444400}}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .row:hover{background:#0f1e35!important;transition:background .12s}
+  ::-webkit-scrollbar{width:4px;height:4px}
+  ::-webkit-scrollbar-track{background:#070f1c}
+  ::-webkit-scrollbar-thumb{background:#1c3050;border-radius:4px}
+`;
+
+// ── Sec: sección reutilizable para el tab Reporte ────────────────────────────
+function Sec({title,sub,c,children}){
+  return(
+    <div style={{background:"#0b1628",border:"1px solid #152236",borderRadius:13,overflow:"hidden",marginBottom:14}}>
+      <div style={{padding:"11px 18px",borderBottom:"1px solid #152236",display:"flex",justifyContent:"space-between",alignItems:"center",background:"#070f1c"}}>
+        <div>
+          <span style={{fontWeight:700,color:"#eef2ff",fontSize:13}}>{title}</span>
+          {sub&&<span style={{color:"#4a6380",fontSize:11,marginLeft:10}}>{sub}</span>}
+        </div>
+        {c&&<span style={{background:"#f9731618",color:"#f97316",border:"1px solid #f9731635",borderRadius:5,padding:"4px 9px",fontSize:10,fontWeight:700}}>{c}</span>}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+// ── BLOQUE 3: SKUPanel — todas las posiciones de un SKU ──────────────────────
+function SKUPanel({ref,invBySKU,allItems,onClose}){
+  const pos=invBySKU[ref]||[];
+  const item=allItems?.find(it=>it.ref===ref)||{};
+  const CALLE_NOMBRES={B:"Calle 1",C:"Calle 2",D:"Calle 3",E:"Calle 4"};
+  const piso=pos.filter(p=>p.nivel<=1);
+  const altura=pos.filter(p=>p.nivel>=2);
+  const stockPiso=piso.reduce((t,p)=>t+p.saldo,0);
+  const stockAltura=altura.reduce((t,p)=>t+p.saldo,0);
+  const eOP={urgente:{c:C.red,l:"URGENTE"},critico:{c:C.orange,l:"CRÍTICO"},preventivo:{c:C.yellow,l:"PREVENTIVO"},normal:{c:C.green,l:"NORMAL"}};
+  const op=eOP[item.estado_op||"normal"];
+  return(
+    <div style={{position:"fixed",top:0,right:0,bottom:0,width:440,background:C.bg1,borderLeft:`1px solid ${C.b1}`,zIndex:201,display:"flex",flexDirection:"column",animation:"slideIn .2s ease",boxShadow:"-8px 0 40px #000c"}}>
+      <style>{`@keyframes slideIn{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}`}</style>
+      {/* Header */}
+      <div style={{padding:"14px 18px",borderBottom:`1px solid ${C.b0}`,background:C.bg2}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+          <div style={{flex:1,minWidth:0,marginRight:8}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:5}}>
+              <span style={{fontFamily:"'JetBrains Mono',monospace",color:C.teal,fontWeight:800,fontSize:16}}>{ref}</span>
+              {op&&<span style={{background:`${op.c}18`,color:op.c,border:`1px solid ${op.c}35`,borderRadius:5,padding:"2px 8px",fontSize:9,fontWeight:700}}>{op.l}</span>}
+            </div>
+            <div style={{color:C.t2,fontSize:11,lineHeight:1.4}}>{item.desc?.slice(0,65)}</div>
+          </div>
+          <button onClick={onClose} style={{width:28,height:28,borderRadius:"50%",background:C.bg3,border:`1px solid ${C.b0}`,color:C.t2,fontSize:15,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>×</button>
+        </div>
+      </div>
+      {/* KPIs SKU */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:1,borderBottom:`1px solid ${C.b0}`}}>
+        {[
+          {l:"Stock Piso",   v:stockPiso,   c:stockPiso===0?C.red:C.green},
+          {l:"Stock Altura", v:stockAltura, c:C.purple},
+          {l:"Comprometido", v:item.comp||0,c:C.yellow},
+          {l:"Días Cob.",    v:item.dias_cob||0, c:item.dias_cob<1?C.red:item.dias_cob<3?C.orange:C.green},
+        ].map(k=>(
+          <div key={k.l} style={{background:C.bg2,padding:"10px 12px",textAlign:"center"}}>
+            <div style={{fontSize:8,color:C.t3,fontWeight:600,textTransform:"uppercase",letterSpacing:"0.7px",marginBottom:3}}>{k.l}</div>
+            <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:18,fontWeight:800,color:k.c}}>{k.v}</div>
+          </div>
+        ))}
+      </div>
+      {/* Puntos operacionales */}
+      <div style={{padding:"10px 16px",borderBottom:`1px solid ${C.b0}`,background:C.bg0}}>
+        <div style={{fontSize:9,color:C.t3,fontWeight:600,textTransform:"uppercase",letterSpacing:"0.8px",marginBottom:7}}>Puntos Operacionales</div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8}}>
+          {[
+            {l:"Punto Mínimo", v:item.pto_min||0, c:C.red,    s:"1d demanda"},
+            {l:"Punto Seguridad",v:item.pto_seg||0,c:C.yellow, s:"2× ciclo repos."},
+            {l:"Punto Máximo", v:item.pto_max||0, c:C.green,  s:"5d cobertura"},
+          ].map(k=>(
+            <div key={k.l} style={{background:C.bg2,borderRadius:7,padding:"8px 10px",borderTop:`2px solid ${k.c}`}}>
+              <div style={{fontSize:8,color:C.t3,marginBottom:3}}>{k.l}</div>
+              <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:16,fontWeight:800,color:k.c}}>{k.v}u</div>
+              <div style={{fontSize:8,color:C.t4}}>{k.s}</div>
+            </div>
+          ))}
+        </div>
+        {/* Barra cobertura */}
+        {item.pto_max>0&&(
+          <div style={{marginTop:8}}>
+            <div style={{display:"flex",justifyContent:"space-between",fontSize:9,color:C.t3,marginBottom:3}}>
+              <span>Cobertura actual</span>
+              <span style={{color:stockPiso>=item.pto_seg?C.green:stockPiso>=item.pto_min?C.yellow:C.red,fontWeight:700}}>
+                {item.dias_cob}d
+              </span>
+            </div>
+            <div style={{height:6,background:C.b0,borderRadius:3,overflow:"hidden",position:"relative"}}>
+              <div style={{width:`${Math.min(100,(stockPiso/Math.max(item.pto_max,1))*100)}%`,height:"100%",background:stockPiso>=item.pto_seg?C.green:stockPiso>=item.pto_min?C.yellow:C.red,borderRadius:3}}/>
+              {/* Líneas de referencia */}
+              {[item.pto_min,item.pto_seg].map((pt,i)=>(
+                <div key={i} style={{position:"absolute",top:0,bottom:0,left:`${Math.min(100,(pt/Math.max(item.pto_max,1))*100)}%`,width:1,background:`${i===0?C.red:C.yellow}90`}}/>
+              ))}
+            </div>
+            <div style={{display:"flex",gap:10,marginTop:4,fontSize:8,color:C.t3}}>
+              <span style={{color:C.red}}>│ Mín:{item.pto_min}</span>
+              <span style={{color:C.yellow}}>│ Seg:{item.pto_seg}</span>
+              <span style={{color:C.green}}>Máx:{item.pto_max}</span>
+            </div>
+          </div>
+        )}
+      </div>
+      {/* #5: Recomendación operativa — cuánto reponer + qué pallet bajar */}
+      {(()=>{
+        const g=Math.max(0,(item.comp||0)-(item.stock||0));
+        const repoSug=Math.ceil(g/9)*9;
+        const palletsBajar=altura.filter(p=>p.saldo>0).sort((a,b)=>b.saldo-a.saldo);
+        if(g<=0&&palletsBajar.length===0)return null;
+        return(
+          <div style={{padding:"10px 16px",borderBottom:`1px solid ${C.b0}`,background:`${C.orange}06`}}>
+            <div style={{fontSize:9,color:C.t3,fontWeight:600,textTransform:"uppercase",letterSpacing:"0.8px",marginBottom:7}}>Acción Recomendada</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+              {g>0&&<div style={{background:C.bg2,borderRadius:7,padding:"9px 11px",borderLeft:`3px solid ${C.orange}`}}>
+                <div style={{fontSize:8,color:C.t3,marginBottom:3}}>Reponer al piso</div>
+                <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:22,fontWeight:800,color:C.orange}}>{repoSug}u</div>
+                <div style={{fontSize:8,color:C.t3}}>{Math.ceil(repoSug/9)} cajas · ×9</div>
+              </div>}
+              {palletsBajar.length>0&&<div style={{background:C.bg2,borderRadius:7,padding:"9px 11px",borderLeft:`3px solid ${C.purple}`}}>
+                <div style={{fontSize:8,color:C.t3,marginBottom:3}}>Pallet sugerido bajar</div>
+                <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:13,fontWeight:700,color:C.teal}}>{palletsBajar[0].ubi}</div>
+                <div style={{fontSize:8,color:C.t3}}>Niv {palletsBajar[0].nivel} · {palletsBajar[0].saldo}u disponibles</div>
+              </div>}
+            </div>
+          </div>
+        );
+      })()}
+      {/* Posiciones */}
+      <div style={{flex:1,overflowY:"auto"}}>
+        {pos.length===0?(
+          <div style={{padding:20,textAlign:"center",color:C.t3,fontSize:12}}>Sin posiciones registradas en el inventario</div>
+        ):(
+          <>
+            {[{list:piso,title:"Piso Picking (Nivel 1-2)",c:C.green},{list:altura,title:"Altura (Nivel 3-5)",c:C.purple}].map(({list,title,c})=>
+              list.length>0&&(
+                <div key={title}>
+                  <div style={{padding:"7px 16px",fontSize:9,color:c,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.8px",background:C.bg1,borderBottom:`1px solid ${C.b0}`,position:"sticky",top:0}}>
+                    {title} · {list.length} posiciones · {list.reduce((t,p)=>t+p.saldo,0)}u total
+                  </div>
+                  {list.map((p,i)=>(
+                    <div key={i} style={{padding:"9px 16px",borderBottom:`1px solid ${C.bg3}`,display:"flex",justifyContent:"space-between",alignItems:"center",background:i%2===0?C.bg1:"transparent"}}>
+                      <div style={{display:"flex",gap:10,alignItems:"center"}}>
+                        <span style={{fontFamily:"'JetBrains Mono',monospace",color:C.teal,fontWeight:700,fontSize:12}}>{p.ubi}</span>
+                        <span style={{color:C.t3,fontSize:10}}>{CALLE_NOMBRES[p.calleLetra]} · M{String(p.modulo).padStart(2,"0")} · Niv {p.nivel}</span>
+                      </div>
+                      <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:16,fontWeight:800,color:c}}>{p.saldo}u</span>
+                    </div>
+                  ))}
+                </div>
+              )
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── [PATCH 5] ModulePanel ─────────────────────────────────────────────────────
+function ModulePanel({modKey,invByModule,compMap,onClose}){
+  const rows=invByModule[modKey]||[];
+  const calleLetra=modKey[0];
+  const modNum=modKey.slice(1);
+  const CALLE_NOMBRES={B:"Calle 1",C:"Calle 2",D:"Calle 3",E:"Calle 4"};
+  const totalStock=rows.reduce((t,r)=>t+r.saldo,0);
+  const totalComp=rows.reduce((t,r)=>t+(r.comp||0),0);
+  const skusUnicos=[...new Set(rows.map(r=>r.ref))].length;
+  const mezcla=skusUnicos>1;
+  // Agrupar por ref para mostrar total por SKU
+  const byRef={};
+  for(const r of rows){
+    if(!byRef[r.ref])byRef[r.ref]={ref:r.ref,desc:r.desc,stock:0,comp:r.comp||0,gap:r.gap||0,niveles:[]};
+    byRef[r.ref].stock+=r.saldo;
+    if(!byRef[r.ref].niveles.includes(r.nivel))byRef[r.ref].niveles.push(r.nivel);
+  }
+  const skuList=Object.values(byRef).sort((a,b)=>b.stock-a.stock);
+  return(
+    <div style={{position:"fixed",top:0,right:0,bottom:0,width:420,background:C.bg1,borderLeft:`1px solid ${C.b1}`,zIndex:200,display:"flex",flexDirection:"column",animation:"slideIn .2s ease",boxShadow:"-8px 0 40px #000a"}}>
+      <style>{`@keyframes slideIn{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}`}</style>
+      {/* Header */}
+      <div style={{padding:"16px 18px",borderBottom:`1px solid ${C.b0}`,display:"flex",justifyContent:"space-between",alignItems:"center",background:C.bg2}}>
+        <div>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+            <div style={{width:28,height:28,borderRadius:7,background:`${C.accent}20`,border:`1px solid ${C.accent}40`,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'JetBrains Mono',monospace",fontSize:12,fontWeight:800,color:C.accent}}>
+              {modNum}
+            </div>
+            <div>
+              <div style={{color:C.t1,fontWeight:800,fontSize:14}}>{CALLE_NOMBRES[calleLetra]} — Módulo {modNum}</div>
+              <div style={{color:C.t3,fontSize:10}}>Código WMS: {modKey}</div>
+            </div>
+          </div>
+          <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+            <span style={{background:mezcla?C.redDim:C.greenDim,color:mezcla?C.red:C.green,border:`1px solid ${mezcla?C.red:C.green}35`,borderRadius:5,padding:"2px 7px",fontSize:9,fontWeight:700}}>
+              {mezcla?`⚠ MEZCLA · ${skusUnicos} SKUs`:"✓ SKU ÚNICO"}
+            </span>
+            <span style={{background:C.accentDim,color:C.accent,border:`1px solid ${C.accent}35`,borderRadius:5,padding:"2px 7px",fontSize:9,fontWeight:700}}>{totalStock.toLocaleString()} u total</span>
+            {totalComp>0&&<span style={{background:C.yellowDim,color:C.yellow,border:`1px solid ${C.yellow}35`,borderRadius:5,padding:"2px 7px",fontSize:9,fontWeight:700}}>{totalComp} comp.</span>}
+          </div>
+        </div>
+        <button onClick={onClose} style={{width:30,height:30,borderRadius:"50%",background:C.bg3,border:`1px solid ${C.b0}`,color:C.t2,fontSize:16,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>×</button>
+      </div>
+      {/* Stats rápidos */}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:1,borderBottom:`1px solid ${C.b0}`}}>
+        {[{l:"SKUs",v:skusUnicos,c:mezcla?C.red:C.green},{l:"Stock Total",v:totalStock,c:C.accent},{l:"Comprometido",v:totalComp,c:totalComp>0?C.yellow:C.t4}].map(k=>(
+          <div key={k.l} style={{background:C.bg2,padding:"10px 14px",textAlign:"center"}}>
+            <div style={{fontSize:8,color:C.t3,fontWeight:600,textTransform:"uppercase",letterSpacing:"0.8px",marginBottom:3}}>{k.l}</div>
+            <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:20,fontWeight:800,color:k.c}}>{k.v}</div>
+          </div>
+        ))}
+      </div>
+      {/* Lista de SKUs */}
+      {rows.length===0?(
+        <div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",color:C.t3,fontSize:12}}>Sin registros de inventario para este módulo</div>
+      ):(
+        <div style={{flex:1,overflowY:"auto"}}>
+          <div style={{padding:"8px 18px 4px",fontSize:9,color:C.t3,fontWeight:600,textTransform:"uppercase",letterSpacing:"0.8px",background:C.bg1,borderBottom:`1px solid ${C.b0}`,position:"sticky",top:0}}>
+            Existencias por referencia · {skuList.length} SKUs distintos
+          </div>
+          {(()=>{
+            // LÓGICA CORRECTA DE NIVELES:
+            // Nivel 1 (pos 1 y 2) = piso operativo (picking directo)
+            // Nivel 2, 3, 4, 5 (pos 1 y 2) = altura, requiere montacargas
+            const PISO_MAX=1;  // solo nivel 1 = piso
+            const pisoSKUs=skuList.filter(s=>s.niveles.some(n=>n<=PISO_MAX)).sort((a,b)=>{
+              const ga=Math.max(0,a.comp-a.stock),gb=Math.max(0,b.comp-b.stock);
+              return gb-ga||b.stock-a.stock;
+            });
+            const alturaSKUs=skuList.filter(s=>!s.niveles.some(n=>n<=PISO_MAX)&&s.niveles.some(n=>n>PISO_MAX)).sort((a,b)=>b.stock-a.stock);
+            const ordered=[...pisoSKUs,...alturaSKUs];
+            // Formato: M{mod}-{nivel}-{pos}  donde pos 1=derecha, 2=izquierda
+            const POS_LABEL={1:"Der",2:"Izq"};
+            const fmtUbiNivel=(ref,esAltura)=>{
+              const nivFilt=rows.filter(r=>r.ref===ref&&(esAltura?r.nivel>PISO_MAX:r.nivel<=PISO_MAX));
+              const porNivel={};
+              nivFilt.forEach(r=>{
+                if(!porNivel[r.nivel])porNivel[r.nivel]=[];
+                porNivel[r.nivel].push(r);
+              });
+              return Object.entries(porNivel).sort((a,b)=>Number(a[0])-Number(b[0])).map(([niv,ps])=>{
+                const mod=String(parseInt(modNum)).padStart(2,"0");
+                // Mostrar posiciones con etiqueta Der/Izq
+                const posStr=ps.sort((a,b)=>a.pos-b.pos).map(p=>`${p.pos}(${POS_LABEL[p.pos]||p.pos})`).join(" · ");
+                return{
+                  niv:Number(niv),
+                  label:`M${mod}-${niv}-${ps.sort((a,b)=>a.pos-b.pos).map(p=>p.pos).join("/")}`,
+                  labelFull:`M${mod} · Niv ${niv} · ${posStr}`,
+                  stock:ps.reduce((t,p)=>t+p.saldo,0),
+                  esPiso:Number(niv)<=PISO_MAX,
+                };
+              });
+            };
+            return ordered.map((s,i)=>{
+              const g=Math.max(0,s.comp-s.stock);
+              const esPiso=s.niveles.some(n=>n<=2);
+              const esAltura=s.niveles.some(n=>n>=3);
+              const acColor=g>0?C.red:s.comp>0?C.green:C.t3;
+              const acLabel=g>0?"ABASTECER":s.comp>0?"CUBIERTO":"SIN PEDIDOS";
+              const ubisPiso=fmtUbiNivel(s.ref,false);
+              const ubisAltura=fmtUbiNivel(s.ref,true);
+              const seccion=i===0&&esPiso?"piso":i===pisoSKUs.length&&esAltura?"altura":null;
+              const esInicioPiso=i===0;
+              const esInicioAltura=i===pisoSKUs.length;
+              return(
+                <React.Fragment key={s.ref}>
+                  {/* Separador de sección */}
+                  {(esInicioPiso&&pisoSKUs.length>0)&&(
+                    <div style={{padding:"6px 18px",background:`${C.green}12`,borderBottom:`1px solid ${C.b0}`,fontSize:9,color:C.green,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.8px",position:"sticky",top:34}}>
+                      📦 Piso — {pisoSKUs.length} SKUs
+                    </div>
+                  )}
+                  {(esInicioAltura&&alturaSKUs.length>0)&&(
+                    <div style={{padding:"6px 18px",background:`${C.purple}12`,borderBottom:`1px solid ${C.b0}`,fontSize:9,color:C.purple,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.8px",position:"sticky",top:34}}>
+                      ⬆ Altura — {alturaSKUs.length} SKUs
+                    </div>
+                  )}
+                  <div style={{padding:"10px 18px",borderBottom:`1px solid ${C.bg3}`,background:g>0?`${C.red}07`:esPiso?`${C.green}04`:`${C.purple}04`}}>
+                    {/* Fila 1: ref + desc + stock + badge */}
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6}}>
+                      <div style={{flex:1,minWidth:0,marginRight:8}}>
+                        <div style={{display:"flex",gap:5,marginBottom:3,flexWrap:"wrap",alignItems:"center"}}>
+                          <span style={{fontFamily:"'JetBrains Mono',monospace",color:C.teal,fontWeight:800,fontSize:12}}>{s.ref}</span>
+                          {esPiso&&<span style={{background:C.greenDim,color:C.green,border:`1px solid ${C.green}35`,borderRadius:3,padding:"1px 5px",fontSize:8,fontWeight:700}}>PISO</span>}
+                          {esAltura&&<span style={{background:C.purpleDim,color:C.purple,border:`1px solid ${C.purple}35`,borderRadius:3,padding:"1px 5px",fontSize:8,fontWeight:700}}>ALTURA</span>}
+                          <span style={{background:`${acColor}18`,color:acColor,border:`1px solid ${acColor}35`,borderRadius:3,padding:"1px 5px",fontSize:8,fontWeight:700}}>{acLabel}</span>
+                        </div>
+                        <div style={{color:C.t2,fontSize:10,lineHeight:1.3}}>{s.desc.slice(0,55)}</div>
+                      </div>
+                      <div style={{textAlign:"right",flexShrink:0}}>
+                        <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:20,fontWeight:800,color:esPiso?C.green:C.purple,lineHeight:1}}>{s.stock}</div>
+                        <div style={{fontSize:8,color:C.t3}}>u · Comp:{s.comp} {g>0&&<span style={{color:C.red}}>Gap:-{g}</span>}</div>
+                      </div>
+                    </div>
+                    {/* Fila 2: ubicaciones formato M25-2-1 */}
+                    <div style={{display:"flex",flexDirection:"column",gap:3}}>
+                      {ubisPiso.map(u=>(
+                        <div key={u.label} style={{display:"flex",alignItems:"center",gap:8}}>
+                          <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:11,fontWeight:700,color:C.green,background:`${C.green}15`,border:`1px solid ${C.green}30`,borderRadius:5,padding:"2px 8px",letterSpacing:"0.5px"}}>{u.label}</span>
+                          <span style={{fontSize:10,color:C.green,fontWeight:600}}>{u.stock}u</span>
+                        </div>
+                      ))}
+                      {ubisAltura.map(u=>(
+                        <div key={u.label} style={{display:"flex",alignItems:"center",gap:8}}>
+                          <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:11,fontWeight:700,color:C.purple,background:`${C.purple}15`,border:`1px solid ${C.purple}30`,borderRadius:5,padding:"2px 8px",letterSpacing:"0.5px"}}>{u.label}</span>
+                          <span style={{fontSize:10,color:C.purple,fontWeight:600}}>{u.stock}u</span>
+                          {g>0&&<span style={{background:C.yellowDim,color:C.yellow,border:`1px solid ${C.yellow}35`,borderRadius:3,padding:"1px 5px",fontSize:8,fontWeight:700}}>BAJAR</span>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </React.Fragment>
+              );
+            });
+          })()}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Main ──────────────────────────────────────────────────────────────────────
+function CEDIDashboard(){
+  const [phase,setPhase]=useState("upload");
+  const [loadStep,setLoadStep]=useState("");
+  const [loadErr,setLoadErr]=useState("");
+  const [invFile,setInvFile]=useState(null);
+  const [factFile,setFactFile]=useState(null);
+  const [data,setData]=useState(null);
+  const [tab,setTab]=useState("dashboard");
+  const [bufH,setBufH]=useState(2);
+  const [bufF,setBufF]=useState(1.2);
+  const [cfgOpen,setCfgOpen]=useState(false);
+  const [tareas,setTareas]=useState({});
+  const [slotFilt,setSlotFilt]=useState("todos");
+  const [selMod,setSelMod]=useState(null);
+  const [expandedPed,setExpandedPed]=useState(null); // Pipeline expanded row
+  const [selSKU,setSelSKU]=useState(null);  // B3: SKU seleccionado
+  const [mapMode,setMapMode]=useState("estado"); // B4: "estado" | "heatmap"
+  const [pedFiltro,setPedFiltro]=useState("todos"); // pipeline: todos|despachable|reabasto|ruptura
+  const [pedSearch,setPedSearch]=useState(""); // pipeline: búsqueda cliente/ref/ciudad
+  const [tipoFiltro,setTipoFiltro]=useState("todos"); // pipeline: todos|PDV|REQ|PDE
+  const [skuSearch,setSkuSearch]=useState(""); // dashboard: búsqueda libre de SKU
+
+  // [FIX] activate: leer workbooks y pasar directamente a processFiles
+  const activate=useCallback(async()=>{
+    if(!invFile||!factFile)return;
+    setLoadErr("");setPhase("loading");await tick();
+    try{
+      const readWb=f=>new Promise((res,rej)=>{
+        const r=new FileReader();
+        r.onload=e=>res(XLSX.read(new Uint8Array(e.target.result),{type:"array",cellDates:true}));
+        r.onerror=()=>rej(new Error("No se pudo leer el archivo: "+f.name));
+        r.readAsArrayBuffer(f);
+      });
+      setLoadStep("Leyendo archivos Excel...");await tick();
+      const [wbInv,wbFact]=await Promise.all([readWb(invFile),readWb(factFile)]);
+      const result=await processFiles(wbInv,wbFact,s=>{setLoadStep(s);});
+      setData(result);setPhase("ready");
+    }catch(e){
+      setLoadErr(e.message||"Error desconocido al procesar los archivos.");
+      setPhase("upload");
+    }
+  },[invFile,factFile]);
+
+  const SKUS=data?.SKUS||[];
+  const sorted=useMemo(()=>[...SKUS].sort((a,b)=>score(b)-score(a)),[SKUS]);
+  const conGap=useMemo(()=>SKUS.filter(s=>gap(s)>0),[SKUS]);
+  const enRup=useMemo(()=>SKUS.filter(s=>estado(s)==="ruptura"),[SKUS]);
+  // C1: sin prioridad MDE — todas las ciudades igual
+  const palletsSugeridos=data?.palletsSugeridos||[];
+  const invBySKU=data?.invBySKU||{};        // B3
+  const allItemsData=data?.allItems||[];    // B3
+  // Mapeo calles dashboard → letra WMS
+  const DASH_TO_LETRA={C1:"B",C2:"C",C3:"D",C4:"E"};
+  const invByModule=data?.invByModule||{};
+
+  const calles=useMemo(()=>["C1","C2","C3","C4"].map(c=>{
+    const letra=DASH_TO_LETRA[c];
+    const mods=Array.from({length:42},(_,i)=>{
+      const n=i+1;
+      const modKey=`${letra}${String(n).padStart(2,"0")}`;
+      const rows=invByModule[modKey]||[];
+      const totalStock=rows.reduce((t,r)=>t+r.saldo,0);
+      const totalComp=rows.reduce((t,r)=>t+(r.comp||0),0);
+      const g=Math.max(0,totalComp-totalStock);
+      // Estado real desde datos
+      let est="ok";
+      if(rows.length===0){const h=(n*7+c.charCodeAt(1)*3)%20;est=h<1?"ruptura":h<3?"critico":h<5?"preventivo":h<6?"proceso":"ok";}
+      else if(totalStock===0&&totalComp>0)est="ruptura";
+      else if(g>0&&totalStock>0)est=totalComp>totalStock*0.9?"critico":"preventivo";
+      else est="ok";
+      const skus=[...new Set(rows.map(r=>r.ref))].length;
+      return{n,est,modKey,totalStock,totalComp,gap:g,skus,letra};
+    });
+    const cnt={ok:0,preventivo:0,critico:0,ruptura:0,proceso:0};
+    mods.forEach(m=>cnt[m.est]++);
+    const abst=cnt.ok+cnt.proceso;
+    return{c,mods,cnt,abst,pct:Math.round(abst/42*100)};
+  }),[SKUS,invByModule]);
+  const globAbst=calles.reduce((t,c)=>t+c.abst,0);
+  const st=data?.stats;
+  const altFilt=useMemo(()=>{
+    const arr=data?.alturaItems||[];
+    if(slotFilt==="sin_mov")return arr.filter(s=>s.comp===0);
+    if(slotFilt==="frac")return arr.filter(s=>s.stock<9);
+    return arr;
+  },[data,slotFilt]);
+  const calleCol={C1:C.accent,C2:C.orange,C3:C.red,C4:C.purple};
+  const calleSub={C1:"ICH 102 · 3110",C2:"TECH T-10",C3:"ICH 501_SP",C4:"ICH 3120"};
+
+  // Datos para tab Reporte — memo para no recalcular en cada render
+  const rupturas   = useMemo(()=>data?.rupturas||[],   [data]);
+  const gapsR      = useMemo(()=>data?.gapsReport||[], [data]);
+  const cityR      = useMemo(()=>data?.cityReport||[], [data]);
+  const modR       = useMemo(()=>data?.modReport||[],  [data]);
+  const maxCityComp= useMemo(()=>cityR[0]?.comp||1,    [cityR]);
+
+  // ── UPLOAD ──────────────────────────────────────────────────────────────────
+  if(phase==="upload")return(
+    <div style={{background:C.bg0,minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",fontFamily:"'Inter',system-ui,sans-serif",padding:32}}>
+      <style>{GS}</style>
+      <div style={{textAlign:"center",marginBottom:36,animation:"fadeUp .5s ease"}}>
+        <div style={{display:"inline-flex",alignItems:"center",gap:10,marginBottom:14}}>
+          <div style={{width:34,height:34,borderRadius:9,background:`linear-gradient(135deg,${C.accent},${C.purple})`,display:"flex",alignItems:"center",justifyContent:"center"}}>
+            <div style={{width:16,height:16,borderRadius:3,border:"2.5px solid white",borderBottom:"none"}}/>
+          </div>
+          <span style={{fontSize:18,fontWeight:800,color:C.t1,letterSpacing:"-0.4px"}}>INDUCASOS</span>
+          <Badge label="CEDI CONTROL" c={C.accent} dim={C.accentDim} sz={10} px={9} py={3}/>
+        </div>
+        <h1 style={{margin:"0 0 8px",fontSize:24,fontWeight:800,color:C.t1,letterSpacing:"-0.5px"}}>Dashboard Inteligente de Abastecimiento</h1>
+        <p style={{margin:0,color:C.t3,fontSize:13}}>Carga los archivos del WMS para activar el análisis · Solo CASCO · EXPO excluido automáticamente</p>
+      </div>
+
+      {loadErr&&<div style={{background:"#3f0a0a",border:"1px solid #ef444450",borderRadius:10,padding:"12px 18px",marginBottom:20,maxWidth:600,width:"100%",animation:"fadeUp .3s ease"}}>
+        <div style={{color:C.red,fontWeight:700,fontSize:12,marginBottom:4}}>⚠ Error al procesar los archivos</div>
+        <div style={{color:"#fca5a5",fontSize:11,whiteSpace:"pre-line"}}>{loadErr}</div>
+      </div>}
+
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,width:"100%",maxWidth:620,marginBottom:18,animation:"fadeUp .4s .1s ease both"}}>
+        <div style={{background:C.bg2,border:`1px solid ${C.b0}`,borderRadius:14,padding:16}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
+            <span style={{fontSize:16}}>📦</span>
+            <div><div style={{color:C.t1,fontWeight:700,fontSize:12}}>Inventario en Piso</div>
+            <div style={{color:C.t3,fontSize:10}}>Inventario x Posición.xlsx</div></div>
+          </div>
+          <DropZone label="Inventario x Posición" icon="📦" file={invFile} onFile={setInvFile} color={C.green} hint="Sheet: InvxUbiMULTI · headers fila 5"/>
+        </div>
+        <div style={{background:C.bg2,border:`1px solid ${C.b0}`,borderRadius:14,padding:16}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
+            <span style={{fontSize:16}}>📋</span>
+            <div><div style={{color:C.t1,fontWeight:700,fontSize:12}}>Bandeja de Pedidos WMS</div>
+            <div style={{color:C.t3,fontSize:10}}>Bandeja de planeación*.xlsx</div></div>
+          </div>
+          <DropZone label="Bandeja de planeación WMS" icon="📋" file={factFile} onFile={setFactFile} color={C.accent} hint="Sheets: ITAGUÍ + PROMICAL + RADAR"/>
+        </div>
+      </div>
+
+      <button onClick={activate} disabled={!invFile||!factFile}
+        style={{padding:"12px 34px",borderRadius:11,border:"none",background:invFile&&factFile?`linear-gradient(135deg,${C.accent},${C.purple})`:C.bg3,color:invFile&&factFile?C.bg0:C.t4,fontWeight:700,fontSize:13,cursor:invFile&&factFile?"pointer":"not-allowed",fontFamily:"'Inter',sans-serif",boxShadow:invFile&&factFile?`0 6px 20px ${C.accent}30`:"none",transition:"all .2s",animation:"fadeUp .4s .2s ease both"}}>
+        {invFile&&factFile?"⚡ Activar Dashboard":"Carga los dos archivos para continuar"}
+      </button>
+
+      <div style={{display:"flex",gap:8,marginTop:18,flexWrap:"wrap",justifyContent:"center",animation:"fadeUp .4s .3s ease both"}}>
+        {["Solo CASCO","EXPO excluido","Stock vs Comprometido","Gap = abastecer inmediato","100% local · sin servidor"].map(t=>(
+          <span key={t} style={{background:C.bg2,border:`1px solid ${C.b0}`,color:C.t3,borderRadius:20,padding:"4px 10px",fontSize:10}}>{t}</span>
+        ))}
+      </div>
+    </div>
+  );
+
+  // ── LOADING ──────────────────────────────────────────────────────────────────
+  if(phase==="loading")return(
+    <div style={{background:C.bg0,minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",fontFamily:"'Inter',system-ui,sans-serif",gap:18}}>
+      <style>{GS}</style>
+      <div style={{width:42,height:42,borderRadius:"50%",border:`3px solid ${C.b1}`,borderTop:`3px solid ${C.accent}`,animation:"spin .7s linear infinite"}}/>
+      <div style={{textAlign:"center"}}>
+        <div style={{color:C.t1,fontWeight:700,fontSize:15,marginBottom:5}}>Procesando archivos WMS...</div>
+        <div style={{color:C.t3,fontSize:12}}>{loadStep}</div>
+      </div>
+      <div style={{display:"flex",flexDirection:"column",gap:5,width:280}}>
+        {["Leyendo inventario...","1.234 SKUs CASCO encontrados. Leyendo pedidos WMS...","Calculando comprometido vs stock...","Clasificando SKUs y calculando gaps..."].map((s,i)=>(
+          <div key={i} style={{display:"flex",alignItems:"center",gap:8}}>
+            <div style={{width:5,height:5,borderRadius:"50%",background:loadStep.startsWith(s.slice(0,15))?C.accent:C.t4,flexShrink:0,transition:"background .2s"}}/>
+            <span style={{color:loadStep.startsWith(s.slice(0,15))?C.t2:C.t4,fontSize:11}}>{s}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
+  // ── DASHBOARD ────────────────────────────────────────────────────────────────
+  return(
+    <div style={{background:C.bg0,minHeight:"100vh",color:C.t2,fontFamily:"'Inter',system-ui,sans-serif",fontSize:13}}>
+      <style>{GS}</style>
+      {/* B3: SKUPanel overlay */}
+      {selSKU&&(
+        <>
+          <div onClick={()=>setSelSKU(null)} style={{position:"fixed",inset:0,background:"#000b",zIndex:200}}/>
+          <SKUPanel ref={selSKU} invBySKU={invBySKU} allItems={allItemsData} onClose={()=>setSelSKU(null)}/>
+        </>
+      )}
+      {/* ModulePanel overlay */}
+      {selMod&&!selSKU&&(
+        <>
+          <div onClick={()=>setSelMod(null)} style={{position:"fixed",inset:0,background:"#000a",zIndex:199}}/>
+          <ModulePanel modKey={selMod} invByModule={data?.invByModule||{}} onClose={()=>setSelMod(null)}/>
+        </>
+      )}
+
+      {/* HEADER */}
+      <header style={{background:C.bg1,borderBottom:`1px solid ${C.b0}`,padding:"0 24px",height:52,display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:100}}>
+        <div style={{display:"flex",alignItems:"center",gap:14}}>
+          <div style={{display:"flex",alignItems:"center",gap:8}}>
+            <div style={{width:26,height:26,borderRadius:7,background:`linear-gradient(135deg,${C.accent},${C.purple})`,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+              <div style={{width:13,height:13,borderRadius:3,border:"2px solid white",borderBottom:"none"}}/>
+            </div>
+            <span style={{fontSize:13,fontWeight:800,color:C.t1,letterSpacing:"-0.3px"}}>INDUCASOS</span>
+            <div style={{width:1,height:14,background:C.b0}}/>
+            <span style={{color:C.t3,fontSize:11}}>Torre de Control CEDI</span>
+          </div>
+          <Badge label="SOLO CASCOS" c={C.teal} dim={C.tealDim}/>
+          <span style={{color:C.t4,fontSize:10}}>Stock: {(st?.totalStock||0).toLocaleString()}u · Comprometido: {(st?.totalComp||0).toLocaleString()}u</span>
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:7}}>
+          {enRup.length>0&&<div style={{display:"flex",alignItems:"center",gap:5,background:C.redDim,border:`1px solid ${C.red}40`,borderRadius:7,padding:"4px 10px",animation:"pulse 2s infinite"}}>
+            <div style={{width:5,height:5,borderRadius:"50%",background:C.red,animation:"blink 1s infinite"}}/>
+            <span style={{color:C.red,fontWeight:700,fontSize:11,fontFamily:"'JetBrains Mono',monospace"}}>{enRup.length} RUPTURAS</span>
+          </div>}
+          {palletsSugeridos.length>0&&<div style={{background:C.yellowDim,border:`1px solid ${C.yellow}40`,borderRadius:7,padding:"4px 10px"}}>
+            <span style={{color:C.yellow,fontWeight:700,fontSize:11}}>📦 {palletsSugeridos.length} pallets sugeridos</span>
+          </div>}
+          <button onClick={()=>setCfgOpen(v=>!v)} style={{background:cfgOpen?C.accentDim:C.bg2,border:`1px solid ${cfgOpen?C.accent:C.b0}`,color:cfgOpen?C.accent:C.t3,borderRadius:7,padding:"4px 10px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>⚙ {bufH}h×{bufF}x</button>
+          <button onClick={()=>{setPhase("upload");setData(null);setInvFile(null);setFactFile(null);setLoadErr("");}} style={{background:C.bg2,border:`1px solid ${C.b0}`,color:C.t3,borderRadius:7,padding:"4px 10px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>↺ Recargar</button>
+          <div style={{background:C.bg2,border:`1px solid ${C.b0}`,borderRadius:7,padding:"4px 10px",fontSize:10,color:C.t3,fontFamily:"'JetBrains Mono',monospace"}}>{st?.fecha} {st?.ahora}</div>
+        </div>
+      </header>
+
+      {cfgOpen&&<div style={{background:C.bg1,borderBottom:`1px solid ${C.b0}`,padding:"10px 24px",display:"flex",gap:18,alignItems:"center",animation:"fadeUp .2s ease",flexWrap:"wrap"}}>
+        <div>
+          <div style={{fontSize:9,color:C.t3,fontWeight:600,textTransform:"uppercase",letterSpacing:"1px",marginBottom:5}}>Buffer</div>
+          <div style={{display:"flex",gap:3}}>{[0.5,1,2,4,8].map(h=><button key={h} onClick={()=>setBufH(h)} style={{padding:"4px 9px",borderRadius:5,background:bufH===h?C.accent:C.bg3,color:bufH===h?C.bg0:C.t3,border:`1px solid ${bufH===h?C.accent:C.b0}`,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>{h}h</button>)}</div>
+        </div>
+        <div>
+          <div style={{fontSize:9,color:C.t3,fontWeight:600,textTransform:"uppercase",letterSpacing:"1px",marginBottom:5}}>Factor seguridad</div>
+          <div style={{display:"flex",gap:3}}>{[{v:1.0,l:"0%"},{v:1.2,l:"+20%"},{v:1.5,l:"+50%"},{v:2.0,l:"+100%"}].map(f=><button key={f.v} onClick={()=>setBufF(f.v)} style={{padding:"4px 9px",borderRadius:5,background:bufF===f.v?C.accent:C.bg3,color:bufF===f.v?C.bg0:C.t3,border:`1px solid ${bufF===f.v?C.accent:C.b0}`,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>{f.l}</button>)}</div>
+        </div>
+      </div>}
+
+      <div style={{padding:"16px 24px"}}>
+        {/* KPI STRIP */}
+        <div style={{display:"grid",gridTemplateColumns:"repeat(6,1fr)",gap:9,marginBottom:16}}>
+          {[
+            {l:"Módulos OK",       v:`${globAbst}/168`,                        c:C.green,  s:`${Math.round(globAbst/168*100)}%`},
+            {l:"Rupturas",         v:enRup.length,                             c:C.red,    s:"stock=0 con comprometido"},
+            {l:"Abastecer Ya",     v:conGap.length,                            c:C.yellow, s:"stock < comprometido"},
+            {l:"Pallets Sugeridos",v:palletsSugeridos.length,                  c:C.orange, s:"pallets altura requeridos"},
+            {l:"SKUs en Piso",     v:(st?.skusPiso||0).toLocaleString(),        c:C.accent, s:"con pedidos activos"},
+            {l:"Total Ciudades",   v:(st?.totalCiudades||"64"),                c:C.purple, s:`${(st?.totalComp||0).toLocaleString()}u comprometidas`},
+          ].map((k,i)=>(
+            <div key={i} style={{background:C.bg2,border:`1px solid ${C.b0}`,borderRadius:11,padding:"13px 14px",borderTop:`2px solid ${k.c}`,animation:`fadeUp .4s ease both`,animationDelay:`${i*0.05}s`}}>
+              <div style={{fontSize:9,fontWeight:600,color:C.t3,textTransform:"uppercase",letterSpacing:"0.8px",marginBottom:5}}>{k.l}</div>
+              <div style={{fontSize:24,fontWeight:800,color:k.c,lineHeight:1,fontFamily:"'JetBrains Mono',monospace",marginBottom:3}}>{k.v}</div>
+              <div style={{fontSize:10,color:C.t4}}>{k.s}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* TABS */}
+        <div style={{display:"flex",gap:2,marginBottom:16,background:C.bg2,border:`1px solid ${C.b0}`,padding:3,borderRadius:9,width:"fit-content"}}>
+          {[{k:"dashboard",l:"🗺 CEDI Live"},{k:"plan",l:"📋 Reposición"},{k:"pipeline",l:"📦 Pipeline"},{k:"stock",l:"📊 Stock"},{k:"slotting",l:"⬆ Slotting"},{k:"reporte",l:"📑 Reporte"}].map(t=>(
+            <button key={t.k} onClick={()=>setTab(t.k)} style={{padding:"6px 14px",borderRadius:7,fontSize:11,fontWeight:600,fontFamily:"'Inter',sans-serif",background:tab===t.k?C.accent:"transparent",color:tab===t.k?C.bg0:C.t3,border:"none",cursor:"pointer",transition:"all .15s"}}>
+              {t.l}
+            </button>
+          ))}
+        </div>
+
+        {/* ═ DASHBOARD ═ */}
+        {tab==="dashboard"&&(
+          <div style={{display:"flex",flexDirection:"column",gap:14,animation:"fadeUp .3s ease"}}>
+            {/* RESUMEN EJECUTIVO — panorama operativo en 3 segundos */}
+            <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10}}>
+              {[
+                {l:"Despachables ya",v:st?.pedDespachables||0,sub:`${(st?.uniDespachables||0).toLocaleString()} u · 100% piso`,c:C.green,ic:"✓",act:()=>{setTab("pipeline");setPedFiltro("despachable");}},
+                {l:"Requieren reabasto",v:(st?.pedReabasto||0)+(st?.pedParciales||0),sub:"bajar de altura a piso",c:C.orange,ic:"⬇",act:()=>{setTab("pipeline");setPedFiltro("reabasto");}},
+                {l:"En ruptura",v:st?.pedRuptura||0,sub:"baja disponibilidad piso",c:C.red,ic:"⚠",act:()=>{setTab("pipeline");setPedFiltro("ruptura");}},
+                {l:"SKUs en ruptura",v:st?.totalRupturas||0,sub:"piso=0 con demanda",c:C.purple,ic:"▦",act:()=>setTab("stock")},
+              ].map((k,i)=>(
+                <button key={i} onClick={k.act} style={{textAlign:"left",background:C.bg2,border:`1px solid ${k.c}30`,borderTop:`2px solid ${k.c}`,borderRadius:12,padding:"13px 15px",cursor:"pointer",fontFamily:"inherit",transition:"all .15s"}}
+                  onMouseEnter={e=>e.currentTarget.style.background=C.bg3}
+                  onMouseLeave={e=>e.currentTarget.style.background=C.bg2}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6}}>
+                    <span style={{fontSize:9,color:k.c,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.8px"}}>{k.l}</span>
+                    <span style={{color:k.c,fontSize:13}}>{k.ic}</span>
+                  </div>
+                  <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:28,fontWeight:800,color:C.t1,lineHeight:1,marginBottom:4}}>{k.v}</div>
+                  <div style={{fontSize:9,color:C.t3}}>{k.sub}</div>
+                </button>
+              ))}
+            </div>
+
+          {/* ═ BUSCADOR DE SKU ═ */}
+          {(()=>{
+            const q=skuSearch.trim().toUpperCase();
+            const resultados=q.length>=2?(allItemsData||[]).filter(it=>it.ref.toUpperCase().includes(q)||it.desc.toUpperCase().includes(q)).slice(0,5):[];
+            const CALLE_N={B:"Calle 1",C:"Calle 2",D:"Calle 3",E:"Calle 4"};
+            return(
+              <div style={{background:C.bg2,border:`1px solid ${C.b0}`,borderRadius:13,overflow:"hidden"}}>
+                {/* Input */}
+                <div style={{padding:"12px 18px",borderBottom:q&&resultados.length>0?`1px solid ${C.b0}`:"none",display:"flex",alignItems:"center",gap:12}}>
+                  <span style={{fontSize:16,flexShrink:0}}>🔍</span>
+                  <input
+                    value={skuSearch}
+                    onChange={e=>setSkuSearch(e.target.value)}
+                    placeholder="Buscar SKU por referencia o descripción... ej: 171142"
+                    style={{flex:1,background:"transparent",border:"none",outline:"none",color:C.t1,fontSize:13,fontFamily:"'JetBrains Mono',monospace",fontWeight:600}}
+                  />
+                  {skuSearch&&<button onClick={()=>setSkuSearch("")} style={{background:"transparent",border:"none",color:C.t3,fontSize:16,cursor:"pointer",padding:"0 4px",flexShrink:0}}>×</button>}
+                  <span style={{fontSize:10,color:C.t4,flexShrink:0}}>Escribe mínimo 2 caracteres</span>
+                </div>
+                {/* Resultados */}
+                {q.length>=2&&resultados.length===0&&(
+                  <div style={{padding:"18px",textAlign:"center",color:C.t3,fontSize:12}}>
+                    <div style={{fontSize:20,marginBottom:6}}>🪖</div>
+                    SKU <span style={{color:C.t1,fontFamily:"'JetBrains Mono',monospace",fontWeight:700}}>{q}</span> no encontrado en línea CASCO
+                  </div>
+                )}
+                {resultados.map(it=>{
+                  const posAll=invBySKU[it.ref]||[];
+                  const piso=posAll.filter(p=>p.nivel<=1);
+                  const altura=posAll.filter(p=>p.nivel>=2);
+                  const stockPiso=piso.reduce((t,p)=>t+p.saldo,0);
+                  const stockAltura=altura.reduce((t,p)=>t+p.saldo,0);
+                  const g=Math.max(0,(it.comp||0)-stockPiso);
+                  const eOP={urgente:{c:C.red,l:"URGENTE"},critico:{c:C.orange,l:"CRÍTICO"},preventivo:{c:C.yellow,l:"PREVENTIVO"},normal:{c:C.green,l:"NORMAL"}}[it.estado_op||"normal"];
+                  const mejorAltura=[...altura].sort((a,b)=>b.saldo-a.saldo)[0];
+                  return(
+                    <div key={it.ref} style={{borderTop:`1px solid ${C.b0}`,padding:"14px 18px",animation:"fadeUp .2s ease"}}>
+                      {/* Header SKU */}
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
+                        <div>
+                          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+                            <span style={{fontFamily:"'JetBrains Mono',monospace",color:C.teal,fontWeight:800,fontSize:18}}>{it.ref}</span>
+                            <span style={{background:`${eOP.c}18`,color:eOP.c,border:`1px solid ${eOP.c}35`,borderRadius:5,padding:"2px 8px",fontSize:9,fontWeight:700}}>{eOP.l}</span>
+                            {g>0&&<span style={{background:C.redDim,color:C.red,border:`1px solid ${C.red}35`,borderRadius:5,padding:"2px 8px",fontSize:9,fontWeight:700}}>GAP -{g}u</span>}
+                          </div>
+                          <div style={{color:C.t2,fontSize:11}}>{it.desc}</div>
+                        </div>
+                        <button onClick={()=>setSelSKU(it.ref)} style={{background:C.accentDim,border:`1px solid ${C.accent}40`,color:C.accent,borderRadius:7,padding:"5px 11px",fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit",flexShrink:0}}>Ver detalle →</button>
+                      </div>
+                      {/* KPIs rápidos */}
+                      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:12}}>
+                        {[
+                          {l:"Stock Piso",    v:stockPiso,    c:stockPiso===0?C.red:C.green,   ic:"📦"},
+                          {l:"Comprometido",  v:it.comp||0,   c:it.comp>0?C.yellow:C.t3,       ic:"📋"},
+                          {l:"Stock Altura",  v:stockAltura,  c:stockAltura>0?C.purple:C.t4,   ic:"⬆"},
+                          {l:"Gap",           v:g>0?`-${g}`:"✓", c:g>0?C.red:C.green,          ic:"⚡"},
+                        ].map(k=>(
+                          <div key={k.l} style={{background:C.bg1,borderRadius:8,padding:"10px 12px",borderTop:`2px solid ${k.c}`}}>
+                            <div style={{fontSize:8,color:C.t3,fontWeight:600,textTransform:"uppercase",letterSpacing:"0.7px",marginBottom:4}}>{k.ic} {k.l}</div>
+                            <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:20,fontWeight:800,color:k.c,lineHeight:1}}>{k.v}</div>
+                          </div>
+                        ))}
+                      </div>
+                      {/* Posiciones */}
+                      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+                        {/* Piso */}
+                        <div style={{background:C.bg1,borderRadius:8,padding:"10px 12px"}}>
+                          <div style={{fontSize:9,color:C.green,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.8px",marginBottom:6}}>📦 Piso — {piso.length} posiciones</div>
+                          {piso.length===0
+                            ?<div style={{color:C.t4,fontSize:11}}>Sin stock en piso</div>
+                            :<div style={{maxHeight:220,overflowY:"auto"}}>{[...piso].sort((a,b)=>b.saldo-a.saldo).map((p,i)=>(
+                              <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"4px 0",borderBottom:i<piso.length-1?`1px solid ${C.b0}`:"none"}}>
+                                <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                                  <span style={{fontFamily:"'JetBrains Mono',monospace",color:C.teal,fontWeight:700,fontSize:11}}>{p.ubi}</span>
+                                  <span style={{color:C.t3,fontSize:9}}>{CALLE_N[p.ubi?.[0]]} · Niv {p.nivel}</span>
+                                </div>
+                                <span style={{fontFamily:"'JetBrains Mono',monospace",color:C.green,fontWeight:700,fontSize:13}}>{p.saldo}u</span>
+                              </div>
+                            ))}
+                          </div>}
+                        </div>
+                        {/* Altura */}
+                        <div style={{background:C.bg1,borderRadius:8,padding:"10px 12px"}}>
+                          <div style={{fontSize:9,color:C.purple,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.8px",marginBottom:6}}>⬆ Altura — {altura.length} posiciones</div>
+                          {altura.length===0
+                            ?<div style={{color:C.t4,fontSize:11}}>Sin stock en altura</div>
+                            :<div style={{maxHeight:220,overflowY:"auto"}}>{[...altura].sort((a,b)=>b.saldo-a.saldo).map((p,i)=>(
+                              <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"4px 0",borderBottom:i<altura.length-1?`1px solid ${C.b0}`:"none"}}>
+                                <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                                  <span style={{fontFamily:"'JetBrains Mono',monospace",color:C.teal,fontWeight:700,fontSize:11}}>{p.ubi}</span>
+                                  <span style={{color:C.t3,fontSize:9}}>{CALLE_N[p.ubi?.[0]]} · Niv {p.nivel}</span>
+                                  {g>0&&p.ubi===mejorAltura?.ubi&&<span style={{background:C.yellowDim,color:C.yellow,border:`1px solid ${C.yellow}35`,borderRadius:3,padding:"1px 5px",fontSize:8,fontWeight:700}}>BAJAR</span>}
+                                </div>
+                                <span style={{fontFamily:"'JetBrains Mono',monospace",color:C.purple,fontWeight:700,fontSize:13}}>{p.saldo}u</span>
+                              </div>
+                            ))}
+                          </div>}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
+
+          <div style={{display:"grid",gridTemplateColumns:"1fr 280px",gap:14}}>
+            <div style={{display:"flex",flexDirection:"column",gap:12}}>
+              {/* CEDI Map */}
+              <div style={{background:C.bg2,border:`1px solid ${C.b0}`,borderRadius:13}}>
+                <div style={{padding:"11px 18px",borderBottom:`1px solid ${C.b0}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <span style={{fontWeight:700,color:C.t1,fontSize:12}}>Mapa CEDI — Estado Módulos</span>
+                  <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                    {/* B4: toggle heatmap */}
+                    <div style={{display:"flex",gap:2,background:C.bg3,borderRadius:6,padding:2}}>
+                      {[{k:"estado",l:"Estado"},{k:"heatmap",l:"Cobertura"}].map(m=>(
+                        <button key={m.k} onClick={()=>setMapMode(m.k)} style={{padding:"3px 9px",borderRadius:5,background:mapMode===m.k?C.accent:C.bg3,color:mapMode===m.k?C.bg0:C.t3,border:"none",fontSize:9,fontWeight:700,cursor:"pointer",fontFamily:"inherit",transition:"all .15s"}}>{m.l}</button>
+                      ))}
+                    </div>
+                    {[{c:C.green,l:"OK"},{c:C.yellow,l:"Prev"},{c:C.orange,l:"Crít"},{c:C.red,l:"Rupt"},{c:C.accent,l:"Proc"}].map(({c,l})=>(
+                      <div key={l} style={{display:"flex",alignItems:"center",gap:3,fontSize:10,color:C.t3}}>
+                        <div style={{width:7,height:7,borderRadius:2,background:c}}/>{l}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div style={{padding:"12px 18px",display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10}}>
+                  {calles.map(cs=>(
+                    <div key={cs.c} style={{background:C.bg1,borderRadius:10,padding:"12px 10px",border:`1px solid ${cs.cnt.ruptura>0?C.red:cs.cnt.critico>0?C.orange:C.b0}20`}}>
+                      <div style={{display:"flex",justifyContent:"space-between",marginBottom:7}}>
+                        <div>
+                          <div style={{color:calleCol[cs.c],fontSize:10,fontWeight:700}}>Calle {cs.c.slice(1)}</div>
+                          <div style={{color:C.t3,fontSize:9}}>{calleSub[cs.c]}</div>
+                        </div>
+                        <div style={{textAlign:"right"}}>
+                          <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:18,fontWeight:800,color:cs.pct>80?C.green:cs.pct>60?C.yellow:C.red,lineHeight:1}}>{cs.pct}%</div>
+                          <div style={{fontSize:9,color:C.t3}}>{cs.abst}/42</div>
+                        </div>
+                      </div>
+                      <div style={{height:2,background:C.b0,borderRadius:1,overflow:"hidden",marginBottom:8}}>
+                        <div style={{width:`${cs.pct}%`,height:"100%",background:cs.pct>80?C.green:cs.pct>60?C.yellow:C.red}}/>
+                      </div>
+                      <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:2}}>
+                        {cs.mods.map(m=>{
+                          // B4: heatmap = color por % cobertura (stock/72 pallet capacity)
+                          const heatColor=mapMode==="heatmap"?(()=>{
+                            if(!m.totalStock)return C.bg3;
+                            const pct=Math.min(100,(m.totalStock/72)*100);
+                            if(pct>=80)return C.green;
+                            if(pct>=40)return C.yellow;
+                            if(pct>0) return C.orange;
+                            return C.red;
+                          })():semCol[m.est];
+                          const heatOp=mapMode==="heatmap"?0.85:(m.est==="ok"?0.45:1);
+                          const tipExtra=mapMode==="heatmap"&&m.totalStock?` · ${Math.round((m.totalStock/72)*100)}% cap.`:"";
+                          return(
+                            <div key={m.n}
+                              title={`M${String(m.n).padStart(2,"0")} ${m.est.toUpperCase()}${m.totalStock?` · ${m.totalStock}u`:""}${tipExtra}`}
+                              onClick={()=>setSelMod(m.modKey)}
+                              style={{aspectRatio:"1",borderRadius:2,background:heatColor,opacity:heatOp,cursor:"pointer",transition:"all .1s",position:"relative",display:"flex",alignItems:"center",justifyContent:"center"}}
+                              onMouseEnter={e=>{e.currentTarget.style.transform="scale(1.8)";e.currentTarget.style.zIndex="10";e.currentTarget.style.opacity="1";}}
+                              onMouseLeave={e=>{e.currentTarget.style.transform="scale(1)";e.currentTarget.style.zIndex="1";e.currentTarget.style.opacity=String(heatOp);}}
+                            ><span style={{fontSize:"6px",fontWeight:700,color:"rgba(255,255,255,0.75)",fontFamily:"'JetBrains Mono',monospace",lineHeight:1,pointerEvents:"none",userSelect:"none"}}>{String(m.n).padStart(2,"0")}</span></div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Critical table */}
+              <div style={{background:C.bg2,border:`1px solid ${C.b0}`,borderRadius:13,overflow:"hidden"}}>
+                <div style={{padding:"11px 18px",borderBottom:`1px solid ${C.b0}`,display:"flex",justifyContent:"space-between"}}>
+                  <span style={{fontWeight:700,color:C.t1,fontSize:12}}>Cascos Críticos — Stock vs Comprometido</span>
+                  <span style={{fontSize:11,color:C.t3}}>{conGap.length} requieren abastecimiento</span>
+                </div>
+                <table style={{width:"100%",borderCollapse:"collapse"}}>
+                  <thead><tr>{["Tipo","Ref.","ABC","Estado","Stock Piso","Comprometido","Gap","Sugerir","Pedidos Afectados"].map(h=><TH key={h}>{h}</TH>)}</tr></thead>
+                  <tbody>
+                    {sorted.slice(0,30).map(s=>{
+                      const e=estado(s),g=gap(s),cs2=cantSug(s,bufH,bufF),eM=sem[e],aM=abcCol[s.abc];
+                      const tc=s.tipo==="INTEGRAL"?C.orange:s.tipo==="ABATIBLE"?C.purple:C.teal;
+                      // #6: pedidos afectados por este SKU con gap — agrupar por ciudad
+                      const pedAf=(data?.pedidosActivos||[]).filter(p=>(p.refs||[]).some(r=>r.ref===s.id&&!r.hasPiso));
+                      const porCiudad={};
+                      pedAf.forEach(p=>{const ci=p.ciudad||"?";porCiudad[ci]=(porCiudad[ci]||0)+1;});
+                      const ciudadStr=Object.entries(porCiudad).sort((a,b)=>b[1]-a[1]).map(([ci,n])=>`${ci}:${n}`).join(" · ");
+                      return(
+                        <tr key={s.id} className="row" style={{borderBottom:`1px solid ${C.bg1}`}}>
+                          <TD><Badge label={s.tipo} c={tc} dim={`${tc}15`}/></TD>
+                          <TD mono c={C.t1} fw={700}>
+                            <span onClick={()=>setSelSKU(s.id)} style={{color:C.teal,cursor:"pointer",textDecoration:"underline",textDecorationColor:`${C.teal}40`}}>{s.id}</span>
+                            <div style={{color:C.t3,fontSize:9,fontFamily:"Inter",fontWeight:400,marginTop:1}}>{s.label.slice(0,28)}</div>
+                          </TD>
+                          <TD><Pill label={s.abc} c={aM.c} dim={aM.dim}/></TD>
+                          <TD><Pill label={eM.l} c={eM.c} dim={eM.dim}/></TD>
+                          <TD right mono c={s.stock_piso===0?C.red:C.green} fw={700} fs={14}>{s.stock_piso}</TD>
+                          <TD right mono c={C.yellow} fw={700} fs={14}>{s.comp}</TD>
+                          <TD right mono c={g>0?C.red:C.green} fw={800} fs={14}>{g>0?`-${g}`:"✓"}</TD>
+                          <TD right mono c={C.orange} fw={800} fs={15}>{g>0?cs2:"—"}</TD>
+                          <TD>
+                            {pedAf.length>0
+                              ?<div style={{fontSize:9,color:C.t2,lineHeight:1.5}}>
+                                <span style={{color:pedAf.some(p=>p.ciudad==="MDE"||p.ciudad==="Medellin"||p.ciudad==="MEDELLÍN")?C.orange:C.accent,fontWeight:700,fontFamily:"'JetBrains Mono',monospace"}}>{pedAf.length} ped.</span>
+                                <div style={{color:C.t3,fontSize:8,marginTop:1}}>{ciudadStr.slice(0,38)}</div>
+                              </div>
+                              :<span style={{color:C.t4,fontSize:10}}>—</span>}
+                          </TD>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* SIDE PANEL */}
+            <div style={{display:"flex",flexDirection:"column",gap:10}}>
+              <div style={{background:C.bg2,border:`1px solid ${C.b0}`,borderRadius:11,padding:"14px"}}>
+                <div style={{fontSize:9,fontWeight:600,color:C.t3,textTransform:"uppercase",letterSpacing:"1px",marginBottom:7}}>Resumen Operación</div>
+                {[
+                  {l:"Rupturas",v:enRup.length,c:C.red},
+                  {l:"Abastecer Ya",v:conGap.length,c:C.orange},
+                  {l:"SKUs Cubiertos",v:(st?.skusPiso||0)-(conGap.length),c:C.green},
+                  {l:"Sin Pedidos",v:st?.sinMov||0,c:C.t3},
+                ].map(m=>(
+                  <div key={m.l} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",borderBottom:`1px solid ${C.b0}`}}>
+                    <span style={{color:C.t3,fontSize:11}}>{m.l}</span>
+                    <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:18,fontWeight:800,color:m.c}}>{m.v}</span>
+                  </div>
+                ))}
+              </div>
+
+              <div style={{background:C.bg2,border:`1px solid ${C.b0}`,borderRadius:11,overflow:"hidden",flex:1}}>
+                <div style={{padding:"10px 13px",borderBottom:`1px solid ${C.b0}`,fontSize:11,fontWeight:700,color:C.t1}}>Urgencias — Por Prioridad</div>
+                <div style={{maxHeight:400,overflowY:"auto"}}>
+                  {sorted.filter(s=>gap(s)>0).slice(0,20).map(s=>{
+                    const e=estado(s),g=gap(s),cs2=cantSug(s,bufH,bufF),v=ventana(s),eM=sem[e],vM=vtCol[v.st];
+                    return(
+                      <div key={s.id} className="row" style={{padding:"10px 13px",borderBottom:`1px solid ${C.bg1}`,borderLeft:`3px solid ${eM.c}`}}>
+                        <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+                          <div>
+                            <div style={{display:"flex",gap:4,marginBottom:3,flexWrap:"wrap"}}>
+                              <Badge label={eM.l} c={eM.c} dim={eM.dim}/>
+                              {s.ciudad==="MDE"&&<Badge label="MDE" c={C.orange} dim={C.orangeDim}/>}
+                            </div>
+                            <div style={{color:C.t1,fontWeight:700,fontFamily:"'JetBrains Mono',monospace",fontSize:12}}>{s.id}</div>
+                            <div style={{color:C.t3,fontSize:9}}>{s.label.slice(0,25)}</div>
+                          </div>
+                          <div style={{textAlign:"right",flexShrink:0}}>
+                            <div style={{fontSize:8,color:C.t3}}>Llevar</div>
+                            <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:19,fontWeight:800,color:C.orange}}>{cs2}</div>
+                            <div style={{fontSize:8,color:C.t3}}>{Math.ceil(cs2/9)} cajas</div>
+                          </div>
+                        </div>
+                        <div style={{display:"flex",gap:8,fontSize:10,fontFamily:"'JetBrains Mono',monospace"}}>
+                          <span style={{color:C.red}}>P:{s.stock_piso}</span>
+                          <span style={{color:C.yellow}}>C:{s.comp}</span>
+                          <span style={{color:vM.c,fontWeight:700}}>{vM.l}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {conGap.length===0&&<div style={{padding:"20px",textAlign:"center",color:C.t3,fontSize:11}}>✅ Todos los SKUs cubiertos</div>}
+                </div>
+              </div>
+            </div>
+          </div>
+          </div>
+        )}
+
+        {/* ═ PLAN REPOSICIÓN ═ */}
+        {tab==="plan"&&(
+          <div style={{animation:"fadeUp .3s ease"}}>
+            <div style={{fontSize:11,color:C.t3,marginBottom:12}}>
+              {conGap.length} acciones · Buffer {bufH}h×{bufF}x · R1: stock≥comp = no abastecer · R3: EXPO excluido
+            </div>
+            {sorted.map((s,idx)=>{
+              const e=estado(s),g=gap(s),t=tRup(s),eM=sem[e],aM=abcCol[s.abc];
+              const cs2=cantSug(s,bufH,bufF),cap=Math.min(100,Math.round((s.stock_res/Math.max(cs2,1))*100));
+              const v=ventana(s),vM=vtCol[v.st],buf=Math.max(0,cs2-g),isOk=e==="ok",cubierto=s.stock_piso>=s.comp&&!s.nota;
+              return(
+                <div key={s.id} style={{background:C.bg2,borderRadius:11,marginBottom:7,border:`1px solid ${isOk?C.b0:eM.c+"25"}`,borderLeft:`3px solid ${isOk?C.b0:eM.c}`,opacity:isOk?0.3:1,animation:"fadeUp .3s ease both",animationDelay:`${idx*0.025}s`}}>
+                  <div style={{padding:"11px 16px",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:7}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                      <div style={{width:22,height:22,borderRadius:"50%",background:isOk?C.bg3:eM.dim,border:`1px solid ${isOk?C.b0:eM.c+"50"}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:800,color:isOk?C.t3:eM.c,fontFamily:"'JetBrains Mono',monospace",flexShrink:0}}>
+                        {isOk?"✓":idx+1}
+                      </div>
+                      <Pill label={s.abc} c={aM.c} dim={aM.dim}/>
+                      <Pill label={eM.l} c={eM.c} dim={eM.dim}/>
+                      <span style={{color:C.t1,fontWeight:700,fontFamily:"'JetBrains Mono',monospace"}}>{s.id}</span>
+                      <span style={{color:C.t3,fontSize:10}}>{s.label.slice(0,30)}</span>
+                      {s.ciudad==="MDE"&&<Badge label="📍 MDE 11AM" c={C.orange} dim={C.orangeDim}/>}
+                      {cubierto&&<Badge label="✓ CUBIERTO" c={C.green} dim={C.greenDim}/>}
+                    </div>
+                    {!isOk&&<button onClick={()=>setTareas(t=>({...t,[s.id]:!t[s.id]}))} style={{padding:"5px 13px",borderRadius:7,background:tareas[s.id]?C.bg3:C.teal,border:`1px solid ${C.teal}`,color:tareas[s.id]?C.teal:C.bg0,fontWeight:700,fontSize:11,cursor:"pointer",fontFamily:"inherit",flexShrink:0}}>
+                      {tareas[s.id]?"✓ Asignada":"Asignar"}
+                    </button>}
+                  </div>
+                  {!isOk&&(
+                    <div style={{borderTop:`1px solid ${C.b0}`,display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr"}}>
+                      <div style={{padding:"11px 14px",borderRight:`1px solid ${C.b0}`}}>
+                        <div style={{fontSize:8,fontWeight:700,color:C.t3,textTransform:"uppercase",letterSpacing:"1px",marginBottom:7}}>① QUÉ</div>
+                        {[{l:"Stock piso",v:s.stock_piso,c:s.stock_piso===0?C.red:C.green},{l:"Comprometido",v:s.comp,c:C.yellow},{l:"Gap",v:g>0?`-${g}`:"✓",c:g>0?C.red:C.green}].map(r=>(
+                          <div key={r.l} style={{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:3}}>
+                            <span style={{color:C.t3}}>{r.l}</span><span style={{color:r.c,fontWeight:700,fontFamily:"'JetBrains Mono',monospace"}}>{r.v}</span>
+                          </div>
+                        ))}
+                      </div>
+                      <div style={{padding:"11px 14px",borderRight:`1px solid ${C.b0}`}}>
+                        <div style={{fontSize:8,fontWeight:700,color:C.t3,textTransform:"uppercase",letterSpacing:"1px",marginBottom:7}}>② CUÁNDO</div>
+                        <div style={{background:`${vM.c}12`,border:`1px solid ${vM.c}30`,borderRadius:7,padding:"7px",textAlign:"center",marginBottom:7}}>
+                          <div style={{fontSize:8,color:vM.c,fontWeight:700}}>{vM.l}</div>
+                          <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:17,fontWeight:800,color:vM.c}}>{v.min<=0?`${Math.abs(v.min)}m tarde`:`en ${v.min}m`}</div>
+                        </div>
+                        <div style={{fontSize:10,color:C.t3}}>Ciclo: {LEAD+TREP}m total</div>
+                      </div>
+                      <div style={{padding:"11px 14px",borderRight:`1px solid ${C.b0}`}}>
+                        <div style={{fontSize:8,fontWeight:700,color:C.t3,textTransform:"uppercase",letterSpacing:"1px",marginBottom:7}}>③ CUÁNTO</div>
+                        <div style={{textAlign:"center",marginBottom:6}}>
+                          <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:36,fontWeight:800,color:C.orange,lineHeight:1}}>{cs2}</div>
+                          <div style={{fontSize:9,color:C.t3}}>u · {Math.ceil(cs2/9)} cajas · ×9</div>
+                        </div>
+                        {[{l:"Gap",v:`+${g}`,c:C.red},{l:`Buffer ${bufH}h`,v:`+${buf}`,c:C.yellow},{l:"Total",v:cs2,c:C.orange}].map((r,i)=>(
+                          <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:10,marginBottom:2,borderTop:i===2?`1px solid ${C.b0}`:"none",paddingTop:i===2?3:0}}>
+                            <span style={{color:C.t3}}>{r.l}</span><span style={{color:r.c,fontWeight:i===2?800:600,fontFamily:"'JetBrains Mono',monospace"}}>{r.v}</span>
+                          </div>
+                        ))}
+                      </div>
+                      <div style={{padding:"11px 14px"}}>
+                        <div style={{fontSize:8,fontWeight:700,color:C.t3,textTransform:"uppercase",letterSpacing:"1px",marginBottom:7}}>④ PUEDO</div>
+                        <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+                          <span style={{fontSize:10,color:C.t3}}>Reserva</span>
+                          <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:18,fontWeight:800,color:cap<70?C.red:cap<100?C.yellow:C.green}}>{cap}%</span>
+                        </div>
+                        <div style={{height:3,background:C.b0,borderRadius:2,overflow:"hidden",marginBottom:7}}>
+                          <div style={{width:`${cap}%`,height:"100%",background:cap<70?C.red:cap<100?C.yellow:C.green}}/>
+                        </div>
+                        <div style={{fontSize:10,color:C.t3}}>Tendencia: <span style={{color:s.tend==="CRECIENTE"?C.green:s.tend==="DECRECIENTE"?C.red:C.yellow,fontWeight:600}}>{s.tend}</span></div>
+                      </div>
+                    </div>
+                  )}
+                  {/* ⑤ BAJAR DE — posición en altura con más stock del mismo SKU */}
+                  {(()=>{
+                    if(e==="ok"||g<=0)return null;
+                    const CALLE_N={B:"C1",C:"C2",D:"C3",E:"C4"};
+                    const posAll=(invBySKU[s.id]||[]);
+                    const enAltura=posAll.filter(p=>p.nivel>=2).sort((a,b)=>b.saldo-a.saldo);
+                    if(enAltura.length===0)return(
+                      <div style={{borderTop:`1px solid ${C.b0}`,padding:"9px 14px",background:`${C.red}06`,display:"flex",alignItems:"center",gap:8}}>
+                        <span style={{fontSize:13}}>⚠</span>
+                        <div>
+                          <div style={{fontSize:8,fontWeight:700,color:C.red,textTransform:"uppercase",letterSpacing:"1px"}}>⑤ BAJAR DE</div>
+                          <div style={{fontSize:10,color:C.red,fontWeight:600,marginTop:2}}>Sin stock en altura — verificar bodega</div>
+                        </div>
+                      </div>
+                    );
+                    const mejor=enAltura[0];
+                    const calleN=CALLE_N[mejor.ubi?.[0]]||mejor.ubi?.[0]||"?";
+                    const modN=mejor.ubi?.slice(1,3)||"?";
+                    const totalEnUbi=enAltura.filter(p=>p.ubi===mejor.ubi).reduce((t,p)=>t+p.saldo,0);
+                    return(
+                      <div style={{borderTop:`1px solid ${C.b0}`,padding:"9px 14px",background:`${C.purple}08`,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:6}}>
+                        <div>
+                          <div style={{fontSize:8,fontWeight:700,color:C.purple,textTransform:"uppercase",letterSpacing:"1px",marginBottom:4}}>⑤ BAJAR DE</div>
+                          <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                            <span style={{fontFamily:"'JetBrains Mono',monospace",color:C.teal,fontWeight:800,fontSize:15,background:C.bg0,border:`1px solid ${C.teal}40`,borderRadius:6,padding:"3px 9px"}}>{mejor.ubi}</span>
+                            <div style={{fontSize:10,color:C.t3}}>
+                              <span style={{color:C.t2}}>Calle {calleN} · Mód {modN} · Niv {mejor.nivel}</span>
+                            </div>
+                          </div>
+                        </div>
+                        <div style={{textAlign:"right",flexShrink:0}}>
+                          <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:22,fontWeight:800,color:C.purple,lineHeight:1}}>{totalEnUbi}</div>
+                          <div style={{fontSize:8,color:C.t3}}>u en posición</div>
+                          {enAltura.length>1&&<div style={{fontSize:8,color:C.t4,marginTop:2}}>{enAltura.length} posiciones alt. disponibles</div>}
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* ═ PIPELINE ═ */}
+        {tab==="pipeline"&&(
+          <div style={{animation:"fadeUp .3s ease"}}>
+            {/* KPI cards por estado */}
+            <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:14}}>
+              {["sin_planear","planeado","en_picking"].map(k=>{
+                const ECOL2={sin_planear:{c:C.t3,l:"Sin Planear"},planeado:{c:C.accent,l:"Planeado"},en_picking:{c:C.yellow,l:"En Picking"}};
+                const ec=ECOL2[k];
+                const sp=(data?.pedidosActivos||[]).filter(p=>p.est===k);
+                const uni=sp.reduce((t,p)=>t+p.uni,0);
+                const lineas=sp.reduce((t,p)=>t+(p.lineas||0),0);
+                const piso=sp.filter(p=>p.cobertura==="PISO").length;
+                const mixto=sp.filter(p=>p.cobertura==="MIXTO").length;
+                return(
+                  <div key={k} style={{background:C.bg2,border:`1px solid ${ec.c}30`,borderRadius:12,padding:"14px 16px",borderTop:`2px solid ${ec.c}`}}>
+                    <div style={{fontSize:9,color:ec.c,fontWeight:700,textTransform:"uppercase",letterSpacing:"1px",marginBottom:6}}>{ec.l}</div>
+                    <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:30,fontWeight:800,color:C.t1,lineHeight:1,marginBottom:8}}>{sp.length}</div>
+                    <div style={{display:"flex",flexDirection:"column",gap:3,borderTop:`1px solid ${C.b0}`,paddingTop:7}}>
+                      {[["Unidades",uni,ec.c],["Líneas",lineas,C.t3],["100% Piso",piso,C.green],["Mixto",mixto,C.yellow]].map(([l,v,c])=>(
+                        <div key={l} style={{display:"flex",justifyContent:"space-between",fontSize:10}}>
+                          <span style={{color:C.t3}}>{l}</span>
+                          <span style={{color:c,fontWeight:700,fontFamily:"'JetBrains Mono',monospace"}}>{v}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Tabla de pedidos */}
+            <div style={{background:C.bg2,border:`1px solid ${C.b0}`,borderRadius:13,overflow:"hidden"}}>
+              <div style={{padding:"11px 18px",borderBottom:`1px solid ${C.b0}`,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
+                <span style={{fontWeight:700,color:C.t1,fontSize:12}}>Pedidos WMS — Bandeja ITAGUÍ</span>
+                <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+                  {/* Búsqueda global */}
+                  <input value={pedSearch} onChange={e=>setPedSearch(e.target.value)} placeholder="🔍 cliente, ref, ciudad..."
+                    style={{background:C.bg0,border:`1px solid ${C.b0}`,borderRadius:6,padding:"5px 10px",color:C.t1,fontSize:11,fontFamily:"inherit",width:175,outline:"none"}}/>
+                  {/* Filtros de clasificación */}
+                  <div style={{display:"flex",gap:2,background:C.bg3,borderRadius:6,padding:2}}>
+                    {[{k:"todos",l:"Todos",c:C.t2},{k:"despachable",l:"Despachables",c:C.green},{k:"reabasto",l:"Reabasto",c:C.orange},{k:"ruptura",l:"Ruptura",c:C.red}].map(f=>(
+                      <button key={f.k} onClick={()=>setPedFiltro(f.k)} style={{padding:"4px 9px",borderRadius:5,background:pedFiltro===f.k?f.c:"transparent",color:pedFiltro===f.k?C.bg0:C.t3,border:"none",fontSize:9,fontWeight:700,cursor:"pointer",fontFamily:"inherit",transition:"all .15s"}}>{f.l}</button>
+                    ))}
+                  </div>
+                  {/* Filtro TipoDocto */}
+                  <div style={{display:"flex",gap:2,background:C.bg3,borderRadius:6,padding:2}}>
+                    {[{k:"todos",l:"Tipo: Todos"},{k:"PDV",l:"PDV"},{k:"REQ",l:"REQ"},{k:"PDE",l:"PDE"}].map(f=>(
+                      <button key={f.k} onClick={()=>setTipoFiltro(f.k)} style={{padding:"4px 9px",borderRadius:5,background:tipoFiltro===f.k?C.purple:"transparent",color:tipoFiltro===f.k?C.bg0:C.t3,border:"none",fontSize:9,fontWeight:700,cursor:"pointer",fontFamily:"inherit",transition:"all .15s"}}>{f.l}</button>
+                    ))}
+                  </div>
+                  {/* Export CSV */}
+                  <button onClick={()=>{
+                    const peds=(data?.pedidosActivos||[]);
+                    const rows=[["Picking","PedidoSiesa","Cliente","Ciudad","Fecha","Estado","Lineas","Unidades","%Piso","%Altura","Cobertura","Nota"]];
+                    peds.forEach(p=>rows.push([p.id,p.pedidoSiesa||"",`"${(p.cliente||"").replace(/"/g,"'")}"`,p.ciudad||"",p.fecha||"",p.est,p.lineas||0,p.uni||0,p.pctPiso||0,p.pctAlt||0,p.cobertura,p.nota?"CON NOTA":"SIN NOTA"]));
+                    const csv=rows.map(r=>r.join(",")).join("\n");
+                    const blob=new Blob(["\ufeff"+csv],{type:"text/csv;charset=utf-8"});
+                    const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`pedidos_cedi_${new Date().toISOString().slice(0,10)}.csv`;a.click();
+                  }} style={{padding:"5px 11px",borderRadius:6,background:C.accentDim,color:C.accent,border:`1px solid ${C.accent}40`,fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>⬇ CSV</button>
+                </div>
+              </div>
+              <table style={{width:"100%",borderCollapse:"collapse"}}>
+                <thead>
+                  <tr>{["Estado","Picking","Cliente","Ciudad","Fecha","Líneas","Unidades","Nota","Despacho"].map(h=><TH key={h}>{h}</TH>)}</tr>
+                </thead>
+                <tbody>
+                  {(()=>{
+                    const q=pedSearch.trim().toLowerCase();
+                    const filtrados=(data?.pedidosActivos||[]).filter(p=>{
+                      if(pedFiltro==="despachable"&&p.clasificacion!=="despachable")return false;
+                      if(pedFiltro==="reabasto"&&p.clasificacion!=="reabasto"&&p.clasificacion!=="parcial")return false;
+                      if(pedFiltro==="ruptura"&&p.clasificacion!=="ruptura")return false;
+                      if(tipoFiltro!=="todos"&&p.tipoDocto!==tipoFiltro)return false;
+                      if(q){
+                        const hay=(p.cliente||"").toLowerCase().includes(q)||(p.ciudad||"").toLowerCase().includes(q)||(p.id||"").toLowerCase().includes(q)||(p.refs||[]).some(r=>(r.ref||"").toLowerCase().includes(q));
+                        if(!hay)return false;
+                      }
+                      return true;
+                    });
+                    if(filtrados.length===0)return(<tr><td colSpan={9} style={{padding:"30px",textAlign:"center",color:C.t3,fontSize:12}}>Sin pedidos que coincidan con el filtro</td></tr>);
+                    return filtrados.map((p,i)=>{
+                    const ECOL3={sin_planear:{c:C.t3,l:"Sin Planear"},planeado:{c:C.accent,l:"Planeado"},en_picking:{c:C.yellow,l:"En Picking"}};
+                    const ec=ECOL3[p.est]||{c:C.t3,l:p.est};
+                    // Semáforo de despacho
+                    const SEM={despachable:{c:C.green,l:"DESPACHABLE"},parcial:{c:C.yellow,l:"PARCIAL"},reabasto:{c:C.orange,l:"REABASTO"},ruptura:{c:C.red,l:"RUPTURA"}};
+                    const sm=SEM[p.clasificacion]||SEM.ruptura;
+                    const isExp=expandedPed===p.id;
+                    return(
+                      <React.Fragment key={p.id}>
+                        <tr className="row"
+                          onClick={()=>setExpandedPed(isExp?null:p.id)}
+                          style={{borderBottom:`1px solid ${C.bg1}`,cursor:"pointer",background:isExp?C.b0:"transparent"}}>
+                          <TD><Pill label={ec.l} c={ec.c} dim={`${ec.c}18`}/></TD>
+                          <TD>
+                            <div style={{display:"flex",alignItems:"center",gap:5}}>
+                              <div style={{fontFamily:"'JetBrains Mono',monospace",color:C.teal,fontWeight:700,fontSize:11}}>{p.id}</div>
+                              {p.tipoDocto&&<span style={{background:p.tipoDocto==="PDV"?C.purpleDim:p.tipoDocto==="REQ"?C.accentDim:C.tealDim,color:p.tipoDocto==="PDV"?C.purple:p.tipoDocto==="REQ"?C.accent:C.teal,border:`1px solid ${p.tipoDocto==="PDV"?C.purple:p.tipoDocto==="REQ"?C.accent:C.teal}35`,borderRadius:4,padding:"1px 5px",fontSize:8,fontWeight:700}}>{p.tipoDocto}</span>}
+                            </div>
+                            {p.pedidoSiesa&&p.pedidoSiesa!==p.id&&<div style={{color:C.t3,fontSize:9}}>{p.pedidoSiesa}</div>}
+                          </TD>
+                          <TD style={{maxWidth:180}}>
+                            <div style={{color:C.t1,fontSize:11,fontWeight:500,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{(p.cliente||"").slice(0,38)}</div>
+                          </TD>
+                          <TD c={C.t2} fs={11}>{p.ciudad}</TD>
+                          <TD c={C.t3} fs={10}>{p.fecha}</TD>
+                          <TD right mono c={C.accent} fw={700} fs={13}>{p.lineas||0}</TD>
+                          <TD right mono c={C.yellow} fw={700} fs={13}>{p.uni||0}</TD>
+                          <TD><Badge label={p.nota?"CON NOTA":"SIN NOTA"} c={p.nota?C.yellow:C.green} dim={p.nota?C.yellowDim:C.greenDim} sz={8}/></TD>
+                          <TD>
+                            <div style={{display:"flex",flexDirection:"column",gap:4,minWidth:140}}>
+                              {/* Semáforo + % piso */}
+                              <div style={{display:"flex",alignItems:"center",gap:6}}>
+                                <span style={{width:9,height:9,borderRadius:"50%",background:sm.c,flexShrink:0,boxShadow:`0 0 6px ${sm.c}80`}}/>
+                                <span style={{fontSize:9,fontFamily:"'JetBrains Mono',monospace",fontWeight:700,color:sm.c}}>{sm.l}</span>
+                              </div>
+                              {/* Barra dividida piso/altura */}
+                              <div style={{display:"flex",height:6,background:C.b0,borderRadius:3,overflow:"hidden"}}>
+                                <div style={{width:`${p.pctPiso||0}%`,height:"100%",background:C.green}} title={`${p.pctPiso}% piso`}/>
+                                <div style={{width:`${p.pctAlt||0}%`,height:"100%",background:C.purple}} title={`${p.pctAlt}% altura`}/>
+                              </div>
+                              {/* Etiqueta legible */}
+                              <div style={{fontSize:9,fontFamily:"'JetBrains Mono',monospace",fontWeight:700}}>
+                                {(p.pctPiso||0)===100
+                                  ? <span style={{color:C.green}}>100% PISO</span>
+                                  : (p.pctPiso||0)===0
+                                  ? <span style={{color:C.purple}}>100% ALTURA</span>
+                                  : <span><span style={{color:C.green}}>{p.pctPiso}% piso</span><span style={{color:C.t3}}> · </span><span style={{color:C.purple}}>{p.pctAlt}% alt</span></span>}
+                              </div>
+                            </div>
+                          </TD>
+                        </tr>
+                        {isExp&&(
+                          <tr style={{borderBottom:`1px solid ${C.b0}`}}>
+                            <td colSpan={9} style={{padding:0,background:C.bg1}}>
+                              <div style={{padding:"10px 18px 14px"}}>
+                                <div style={{fontSize:9,color:C.t3,fontWeight:600,textTransform:"uppercase",letterSpacing:"0.8px",marginBottom:8}}>
+                                  {p.lineas} líneas · {p.cliente}
+                                </div>
+                                <table style={{width:"100%",borderCollapse:"collapse"}}>
+                                  <thead>
+                                    <tr style={{borderBottom:`1px solid ${C.b0}`}}>
+                                      {["#","Referencia","Descripción","Cant.","Stock Piso","Stock Altura","Cobertura"].map(h=>(
+                                        <th key={h} style={{padding:"5px 10px",textAlign:"left",fontSize:9,fontWeight:600,color:C.t3,textTransform:"uppercase"}}>{h}</th>
+                                      ))}
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {(p.refs||[]).map((r,ri)=>{
+                                      const pos=(data?.invBySKU||{})[r.ref]||[];
+                                      const stockP=pos.filter(x=>x.nivel<=1).reduce((t,x)=>t+x.saldo,0);
+                                      const stockA=pos.filter(x=>x.nivel>=2).reduce((t,x)=>t+x.saldo,0);
+                                      const linCol=r.hasPiso?C.green:r.hasAlt?C.purple:C.red;
+                                      const linLbl=r.hasPiso?"PISO":r.hasAlt?"ALTURA":"SIN STOCK";
+                                      return(
+                                        <tr key={ri} style={{borderBottom:`1px solid ${C.bg3}`,background:ri%2===0?C.bg2:"transparent"}}>
+                                          <td style={{padding:"6px 10px",fontSize:10,color:C.t3}}>{ri+1}</td>
+                                          <td style={{padding:"6px 10px"}}>
+                                            <span onClick={(e)=>{e.stopPropagation();setSelSKU(r.ref);}} style={{fontFamily:"'JetBrains Mono',monospace",color:C.teal,fontWeight:700,fontSize:11,cursor:"pointer",textDecoration:"underline",textDecorationColor:`${C.teal}40`}}>{r.ref}</span>
+                                          </td>
+                                          <td style={{padding:"6px 10px",maxWidth:240}}><div style={{color:C.t2,fontSize:10,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{(r.desc||"").slice(0,55)}</div></td>
+                                          <td style={{padding:"6px 10px",textAlign:"right",fontFamily:"'JetBrains Mono',monospace",color:C.yellow,fontWeight:700,fontSize:12}}>{r.cant}</td>
+                                          <td style={{padding:"6px 10px",textAlign:"right",fontFamily:"'JetBrains Mono',monospace",color:stockP>0?C.green:C.t4,fontWeight:700}}>{stockP||"—"}</td>
+                                          <td style={{padding:"6px 10px",textAlign:"right",fontFamily:"'JetBrains Mono',monospace",color:stockA>0?C.purple:C.t4}}>{stockA||"—"}</td>
+                                          <td style={{padding:"6px 10px"}}><Badge label={linLbl} c={linCol} dim={`${linCol}18`} sz={8} px={6} py={2}/></td>
+                                        </tr>
+                                      );
+                                    })}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
+                    );
+                  });
+                  })()}
+                </tbody>
+              </table>
+            </div>
+
+            {/* CAMBIO 3: Orden de prioridad de reabastecimiento */}
+            {(()=>{
+              const reabasto=(data?.pedidosActivos||[]).filter(p=>p.clasificacion==="reabasto"||p.clasificacion==="parcial"||p.clasificacion==="ruptura");
+              // Agregar SKUs que faltan en piso (necesitan bajar de altura)
+              const skuFalta={};
+              reabasto.forEach(p=>{
+                (p.refs||[]).forEach(r=>{
+                  if(!r.hasPiso&&r.hasAlt){
+                    if(!skuFalta[r.ref])skuFalta[r.ref]={ref:r.ref,desc:r.desc,uniReq:0,pedidos:new Set(),stockAlt:0};
+                    skuFalta[r.ref].uniReq+=r.cant;
+                    skuFalta[r.ref].pedidos.add(p.id);
+                    const pos=(data?.invBySKU||{})[r.ref]||[];
+                    skuFalta[r.ref].stockAlt=pos.filter(x=>x.nivel>=2).reduce((t,x)=>t+x.saldo,0);
+                  }
+                });
+              });
+              const lista=Object.values(skuFalta).map(s=>({...s,nPedidos:s.pedidos.size,pallets:Math.ceil(s.uniReq/72)})).sort((a,b)=>b.uniReq-a.uniReq);
+              if(lista.length===0)return null;
+              return(
+                <div style={{background:C.bg2,border:`1px solid ${C.orange}30`,borderTop:`2px solid ${C.orange}`,borderRadius:13,overflow:"hidden",marginTop:14}}>
+                  <div style={{padding:"11px 18px",borderBottom:`1px solid ${C.b0}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <span style={{fontWeight:700,color:C.t1,fontSize:12}}>⬇ Prioridad de Reabastecimiento — Bajar de Altura</span>
+                    <span style={{color:C.orange,fontSize:11,fontWeight:600}}>{lista.length} SKUs · {lista.reduce((t,s)=>t+s.pallets,0)} pallets</span>
+                  </div>
+                  <table style={{width:"100%",borderCollapse:"collapse"}}>
+                    <thead><tr>{["#","Referencia","Descripción","Unid. Faltan","Pedidos Afectados","Stock Altura","Pallets a Bajar"].map(h=><TH key={h}>{h}</TH>)}</tr></thead>
+                    <tbody>
+                      {lista.slice(0,30).map((s,i)=>(
+                        <tr key={s.ref} className="row" style={{borderBottom:`1px solid ${C.bg1}`}}>
+                          <TD c={C.t3} fs={10}>{i+1}</TD>
+                          <TD><span onClick={()=>setSelSKU(s.ref)} style={{fontFamily:"'JetBrains Mono',monospace",color:C.teal,fontWeight:700,fontSize:11,cursor:"pointer",textDecoration:"underline",textDecorationColor:`${C.teal}40`}}>{s.ref}</span></TD>
+                          <TD c={C.t2} fs={10}>{(s.desc||"").slice(0,40)}</TD>
+                          <TD right mono c={C.orange} fw={700} fs={13}>{s.uniReq}</TD>
+                          <TD right mono c={C.accent} fw={600}>{s.nPedidos}</TD>
+                          <TD right mono c={s.stockAlt>=s.uniReq?C.green:C.red} fw={600}>{s.stockAlt}</TD>
+                          <TD right><span style={{fontFamily:"'JetBrains Mono',monospace",color:C.purple,fontWeight:700,fontSize:13}}>📦 {s.pallets}</span></TD>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              );
+            })()}
+          </div>
+        )}
+
+        {/* ═ STOCK vs COMPROMETIDO ═ */}
+        {tab==="stock"&&(
+          <div style={{animation:"fadeUp .3s ease"}}>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:14}}>
+              {[
+                {l:"Total Stock Piso",v:(st?.totalStock||0).toLocaleString(),c:C.green,s:"unidades en módulos"},
+                {l:"Total Comprometido",v:(st?.totalComp||0).toLocaleString(),c:C.yellow,s:"pedidos típicos activos"},
+                {l:"Gap Total",v:(st?.totalGap||0).toLocaleString(),c:C.red,s:"unidades a reponer"},
+                {l:"SKUs Sin Pedidos",v:(st?.sinMov||0).toLocaleString(),c:C.t3,s:"candidatos a altura"},
+              ].map((k,i)=>(
+                <div key={i} style={{background:C.bg2,border:`1px solid ${C.b0}`,borderRadius:11,padding:"13px 14px",borderTop:`2px solid ${k.c}`}}>
+                  <div style={{fontSize:9,fontWeight:600,color:C.t3,textTransform:"uppercase",letterSpacing:"0.8px",marginBottom:5}}>{k.l}</div>
+                  <div style={{fontSize:24,fontWeight:800,color:k.c,lineHeight:1,fontFamily:"'JetBrains Mono',monospace",marginBottom:3}}>{k.v}</div>
+                  <div style={{fontSize:10,color:C.t4}}>{k.s}</div>
+                </div>
+              ))}
+            </div>
+            <div style={{background:C.bg2,border:`1px solid ${C.b0}`,borderRadius:13,overflow:"hidden"}}>
+              <div style={{padding:"11px 18px",borderBottom:`1px solid ${C.b0}`,display:"flex",justifyContent:"space-between"}}>
+                <span style={{fontWeight:700,color:C.t1,fontSize:12}}>Todos los SKUs CASCO — Stock vs Comprometido</span>
+                <span style={{color:C.t3,fontSize:11}}>{(st?.totalSKUs||0).toLocaleString()} SKUs · EXPO excluido</span>
+              </div>
+              <table style={{width:"100%",borderCollapse:"collapse"}}>
+                <thead><tr>{["#","Referencia","Descripción","Stock Piso","Comprometido","Gap","Días Cob.","Estado Op.","Acción"].map(h=><TH key={h}>{h}</TH>)}</tr></thead>
+                <tbody>
+                  {(data?.allItems||[]).slice(0,60).map((s,i)=>{
+                    const g=Math.max(0,s.comp-s.stock);
+                    const ac=g>0?"ABASTECER":s.stock===0?"SIN STOCK":s.comp===0?"SIN PEDIDOS":"CUBIERTO";
+                    const acc={ABASTECER:{c:C.red,dim:C.redDim},CUBIERTO:{c:C.green,dim:C.greenDim},"SIN STOCK":{c:C.orange,dim:C.orangeDim},"SIN PEDIDOS":{c:C.t3,dim:C.bg3}}[ac];
+                    const eop={urgente:{c:C.red,l:"URGENTE"},critico:{c:C.orange,l:"CRÍTICO"},preventivo:{c:C.yellow,l:"PREVENTIVO"},normal:{c:C.green,l:"NORMAL"}}[s.estado_op||"normal"];
+                    return(
+                      <tr key={s.ref} className="row" style={{borderBottom:`1px solid ${C.bg1}`}}>
+                        <TD c={C.t3} fs={11}>{i+1}</TD>
+                        <TD mono c={C.teal} fw={700}>
+                          <span onClick={()=>setSelSKU(s.ref)} style={{cursor:"pointer",textDecoration:"underline",textDecorationColor:`${C.teal}40`}}>{s.ref}</span>
+                        </TD>
+                        <TD style={{maxWidth:200}}><div style={{whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",color:C.t2,fontSize:11}}>{s.desc}</div></TD>
+                        <TD right mono c={s.stock===0?C.red:C.green} fw={700} fs={13}>{s.stock.toLocaleString()}</TD>
+                        <TD right mono c={s.comp>0?C.yellow:C.t4} fw={700} fs={13}>{s.comp.toLocaleString()}</TD>
+                        <TD right mono c={g>0?C.red:C.green} fw={800} fs={13}>{g>0?`-${g}`:"✓"}</TD>
+                        <TD right mono c={!s.dias_cob||s.dias_cob<1?C.red:s.dias_cob<3?C.orange:C.green} fw={700}>{s.dias_cob||"—"}</TD>
+                        <TD><Badge label={eop.l} c={eop.c} dim={`${eop.c}18`} sz={9}/></TD>
+                        <TD><Badge label={ac} c={acc.c} dim={acc.dim} sz={9} px={8} py={3}/></TD>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* ═ SLOTTING ═ */}
+        {tab==="slotting"&&(
+          <div style={{animation:"fadeUp .3s ease"}}>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:14}}>
+              {[
+                {l:"SKUs con Pedidos Activos",v:(st?.skusPiso||0).toLocaleString(),c:C.green,s:"justifican módulo en piso"},
+                {l:"Cajas a Liberar",v:(st?.totalCajas||0).toLocaleString(),c:C.yellow,s:`${(st?.totalUSubir||0).toLocaleString()} u en ×9`},
+                {l:"Módulos Ganados",v:Math.round((st?.totalCajas||0)/18),c:C.orange,s:"módulos sencillos"},
+                {l:"Sin Pedidos Activos",v:(st?.sinMov||0).toLocaleString(),c:C.red,s:"candidatos a altura hoy"},
+              ].map((k,i)=>(
+                <div key={i} style={{background:C.bg2,border:`1px solid ${C.b0}`,borderRadius:11,padding:"13px 14px",borderTop:`2px solid ${k.c}`}}>
+                  <div style={{fontSize:9,fontWeight:600,color:C.t3,textTransform:"uppercase",letterSpacing:"0.8px",marginBottom:5}}>{k.l}</div>
+                  <div style={{fontSize:24,fontWeight:800,color:k.c,lineHeight:1,fontFamily:"'JetBrains Mono',monospace",marginBottom:3}}>{k.v}</div>
+                  <div style={{fontSize:10,color:C.t4}}>{k.s}</div>
+                </div>
+              ))}
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:14}}>
+              {[{id:"R1",txt:"stock piso ≥ comprometido → NO abastecer",c:C.green},{id:"R2",txt:"sin pedidos activos → organizar ×9 → subir a altura",c:C.yellow},{id:"R3",txt:"referencias EXPO excluidas del sistema completo",c:C.red}].map(r=>(
+                <div key={r.id} style={{background:C.bg2,border:`1px solid ${C.b0}`,borderRadius:9,padding:"9px 13px",display:"flex",gap:8,alignItems:"center"}}>
+                  <Badge label={r.id} c={r.c} dim={`${r.c}18`} sz={10} px={9} py={4}/>
+                  <span style={{color:C.t3,fontSize:11}}>{r.txt}</span>
+                </div>
+              ))}
+            </div>
+            <div style={{background:C.bg2,border:`1px solid ${C.b0}`,borderRadius:13,overflow:"hidden",marginBottom:12}}>
+              <div style={{padding:"11px 18px",borderBottom:`1px solid ${C.b0}`,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
+                <div>
+                  <span style={{fontWeight:700,color:C.t1,fontSize:12}}>SKUs → Subir a Altura · Acción Hoy</span>
+                  <span style={{color:C.t3,fontSize:11,marginLeft:10}}>Cantidades en ×9 · Operario elige ubicación</span>
+                </div>
+                <div style={{display:"flex",gap:4}}>
+                  {[{k:"todos",l:"Todos"},{k:"sin_mov",l:"Sin pedidos"},{k:"frac",l:"Stock fraccionado"}].map(f=>(
+                    <button key={f.k} onClick={()=>setSlotFilt(f.k)} style={{padding:"4px 10px",borderRadius:6,fontSize:10,fontWeight:600,fontFamily:"inherit",background:slotFilt===f.k?C.yellow:C.bg3,color:slotFilt===f.k?C.bg0:C.t3,border:`1px solid ${slotFilt===f.k?C.yellow:C.b0}`,cursor:"pointer"}}>
+                      {f.l}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <table style={{width:"100%",borderCollapse:"collapse"}}>
+                <thead><tr>{["#","Ref.","Descripción","Stock Piso","Comp.","Pallets","Unidades","Razón","Tipo Envío","Acción"].map(h=><TH key={h}>{h}</TH>)}</tr></thead>
+                <tbody>
+                  {altFilt.slice(0,30).map((s,i)=>{
+                    const ac=s.comp===0?{c:C.yellow,l:"SUBIR PALLET"}:{c:C.accent,l:"REVISAR"};
+                    return(
+                      <tr key={s.ref} className="row" style={{borderBottom:`1px solid ${C.bg1}`}}>
+                        <TD c={C.t3} fs={11}>{i+1}</TD>
+                        <TD mono c={C.teal} fw={700}>{s.ref}</TD>
+                        <TD style={{maxWidth:220}}><div style={{whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",color:C.t2,fontSize:11}}>{s.desc}</div></TD>
+                        <TD right mono c={C.green} fw={700}>{s.stock.toLocaleString()}</TD>
+                        <TD right mono c={s.comp>0?C.yellow:C.t4}>{s.comp||"—"}</TD>
+                        <TD right mono c={C.purple} fw={700}>{s.pallets_subir||0} 📦</TD>
+                        <TD right><span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:15,fontWeight:800,color:C.orange}}>{s.u_subir}</span><span style={{color:C.t3,fontSize:9,marginLeft:2}}>u</span></TD>
+                        <TD><Badge label={s.razon} c={C.t3} dim={C.bg3} sz={9}/></TD>
+                        <TD>
+                          {s.sugerencia_mixto
+                            ?<Badge label="PALLET MIXTO" c={C.yellow} dim={C.yellowDim} sz={8} px={6} py={2}/>
+                            :<Badge label="PALLET ÚNICO" c={C.accent} dim={C.accentDim} sz={8} px={6} py={2}/>}
+                        </TD>
+                        <TD><Badge label={ac.l} c={ac.c} dim={`${ac.c}18`} sz={9} px={8} py={3}/></TD>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              <div style={{padding:"8px 18px",borderTop:`1px solid ${C.b0}`,display:"flex",justifyContent:"space-between",fontSize:10,color:C.t3}}>
+                <span>{Math.min(altFilt.length,30)} de {altFilt.length} SKUs</span>
+                <span style={{color:C.yellow,fontWeight:600}}>Pallet = 72u · 8 cajas · {altFilt.reduce((t,s)=>t+(s.pallets_subir||0),0)} pallets total</span>
+              </div>
+            </div>
+
+            {/* C3: PALLETS EN ALTURA SUGERIDOS — bajar al piso */}
+            <div style={{background:C.bg2,border:`1px solid ${C.orange}30`,borderRadius:13,overflow:"hidden",marginTop:14}}>
+              <div style={{padding:"11px 18px",borderBottom:`1px solid ${C.b0}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <div>
+                  <span style={{fontWeight:700,color:C.t1,fontSize:12}}>📦 Pallets en Altura — Sugeridos para Bajar</span>
+                  <span style={{color:C.t3,fontSize:11,marginLeft:10}}>Contienen SKUs con gap en piso · 72u por pallet (8 cajas × 9u)</span>
+                </div>
+                <Badge label={`${palletsSugeridos.length} pallets`} c={C.orange} dim={C.orangeDim} sz={10} px={9} py={4}/>
+              </div>
+              {palletsSugeridos.length===0?(
+                <div style={{padding:20,textAlign:"center",color:C.t3,fontSize:12}}>✅ No hay pallets en altura con SKUs requeridos actualmente</div>
+              ):(
+                <table style={{width:"100%",borderCollapse:"collapse"}}>
+                  <thead><tr>{["Posición","Calle · Mod","Nivel","Stock Pallet","SKUs Totales","SKUs con Gap","Gap Total","Tipo Pallet","Acción"].map(h=><TH key={h}>{h}</TH>)}</tr></thead>
+                  <tbody>
+                    {palletsSugeridos.slice(0,25).map((p,i)=>{
+                      const CALLE_NOMBRES={B:"Calle 1",C:"Calle 2",D:"Calle 3",E:"Calle 4"};
+                      const esCombinado=p.skusUnicos>1;
+                      return(
+                        <tr key={i} className="row" style={{borderBottom:`1px solid ${C.bg1}`,background:i%2===0?`${C.orange}03`:"transparent"}}>
+                          <TD mono c={C.teal} fw={700}>{p.ubi}</TD>
+                          <TD c={C.t2} fs={11}>{CALLE_NOMBRES[p.calleLetra]} · M{String(p.modulo).padStart(2,"0")}</TD>
+                          <TD c={C.t3} fs={11}>Nivel {p.nivel}</TD>
+                          <TD right mono c={C.accent} fw={700}>{p.totalStock} u</TD>
+                          <TD right mono c={C.t2}>{p.skusUnicos}</TD>
+                          <TD right><span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:800,color:C.red,fontSize:14}}>{p.needed.length}</span></TD>
+                          <TD right><span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:800,color:C.red,fontSize:14}}>{p.totalGap}</span></TD>
+                          <TD>
+                            {esCombinado
+                              ? <Badge label="COMBINADO" c={C.yellow} dim={C.yellowDim} sz={9}/>
+                              : <Badge label="1 SKU" c={C.green} dim={C.greenDim} sz={9}/>}
+                          </TD>
+                          <TD>
+                            <div style={{display:"flex",flexDirection:"column",gap:3}}>
+                              <Badge label="⬇ BAJAR PALLET" c={C.orange} dim={C.orangeDim} sz={9} px={8} py={3}/>
+                              <div style={{fontSize:9,color:C.t3}}>{p.needed.map(s=>`${s.ref}(${s.gap})`).join(" · ")}</div>
+                            </div>
+                          </TD>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ═ REPORTE COMPLETO ═ */}
+        {tab==="reporte"&&(
+          <div style={{animation:"fadeUp .3s ease"}}>
+
+            {/* KPIs ejecutivos reales */}
+            <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:8,marginBottom:14}}>
+              {[
+                {l:"Stock Piso",    v:(st?.totalStock||0).toLocaleString(),    c:C.green,  s:"unidades nivel 1-2"},
+                {l:"Stock Altura",  v:(st?.totalStockAlt||0).toLocaleString(), c:C.purple, s:"unidades nivel 3-5"},
+                {l:"Comprometido",  v:(st?.totalComp||0).toLocaleString(),     c:C.yellow, s:"todas las ciudades"},
+                {l:"Gap Total",     v:(st?.totalGap||0).toLocaleString(),      c:C.red,    s:"unidades faltantes"},
+                {l:"Rupturas",      v:st?.totalRupturas||0,                   c:C.red,    s:"piso=0, hay comp."},
+                {l:"Para Abastecer",v:st?.totalGaps||0,                       c:C.orange, s:"piso < comprometido"},
+                {l:"Ciudades",      v:st?.totalCiudades||0,                   c:C.accent, s:"con pedidos activos"},
+              ].map((k,i)=>(
+                <div key={i} style={{background:C.bg2,border:`1px solid ${C.b0}`,borderRadius:10,padding:"11px 12px",borderTop:`2px solid ${k.c}`}}>
+                  <div style={{fontSize:8,fontWeight:600,color:C.t3,textTransform:"uppercase",letterSpacing:"0.7px",marginBottom:4}}>{k.l}</div>
+                  <div style={{fontSize:20,fontWeight:800,color:k.c,lineHeight:1,fontFamily:"'JetBrains Mono',monospace",marginBottom:2}}>{k.v}</div>
+                  <div style={{fontSize:9,color:C.t4}}>{k.s}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Alerta crítica */}
+            {rupturas.length>0&&(
+              <div style={{background:"#1a0505",border:`1px solid ${C.red}50`,borderRadius:10,padding:"12px 16px",marginBottom:14,display:"flex",gap:12,alignItems:"flex-start"}}>
+                <div style={{fontSize:20,flexShrink:0}}>🚨</div>
+                <div>
+                  <span style={{color:C.red,fontWeight:800,fontSize:13}}>{rupturas.length} RUPTURAS ACTIVAS — </span>
+                  <span style={{color:"#fca5a5",fontSize:12}}>
+                    Piso=0 con pedidos comprometidos.{" "}
+                    <strong style={{color:C.yellow}}>{rupturas.filter(r=>r.stock_alt>0).length} tienen stock en altura → BAJAR INMEDIATAMENTE.</strong>
+                    {rupturas.filter(r=>r.stock_alt===0).length>0&&<> · <strong style={{color:C.red}}>{rupturas.filter(r=>r.stock_alt===0).length} sin stock en ningún lado.</strong></>}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {/* Rupturas + Gaps en columnas */}
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
+
+              <Sec title={`🔴 Rupturas (${rupturas.length})`} sub="piso=0 con pedidos activos" c={`${rupturas.length} SKUs`}>
+                <div style={{maxHeight:420,overflowY:"auto"}}>
+                  <table style={{width:"100%",borderCollapse:"collapse"}}>
+                    <thead style={{position:"sticky",top:0,zIndex:1}}>
+                      <tr>{["Ref.","Descripción","Comp.","Alt.","Acción"].map(h=><TH key={h}>{h}</TH>)}</tr>
+                    </thead>
+                    <tbody>
+                      {rupturas.map((s,i)=>{
+                        const tieneAlt=s.stock_alt>0;
+                        return(
+                          <tr key={i} className="row" style={{borderBottom:`1px solid ${C.bg1}`,background:i%2===0?`${C.red}04`:"transparent"}}>
+                            <TD mono c={C.teal} fw={700} fs={11}>
+                              <span onClick={()=>setSelSKU(s.ref)} style={{cursor:"pointer",textDecoration:"underline",textDecorationColor:`${C.teal}40`}}>{s.ref}</span>
+                            </TD>
+                            <TD style={{maxWidth:150}}><div style={{color:C.t2,fontSize:10,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{s.desc.slice(0,44)}</div></TD>
+                            <TD right mono c={C.red} fw={800} fs={13}>{s.comp}</TD>
+                            <TD right mono c={tieneAlt?C.yellow:C.t4} fw={700}>{tieneAlt?s.stock_alt:"—"}</TD>
+                            <TD>
+                              {tieneAlt
+                                ?<Badge label="⬇ BAJAR" c={C.yellow} dim={C.yellowDim} sz={8} px={6} py={2}/>
+                                :<Badge label="SIN STOCK" c={C.red} dim={C.redDim} sz={8} px={6} py={2}/>}
+                            </TD>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </Sec>
+
+              <Sec title={`🟠 Para Abastecer (${gapsR.length})`} sub="piso < comprometido" c={`gap: ${(st?.totalGap||0).toLocaleString()}u`}>
+                <div style={{maxHeight:420,overflowY:"auto"}}>
+                  <table style={{width:"100%",borderCollapse:"collapse"}}>
+                    <thead style={{position:"sticky",top:0,zIndex:1}}>
+                      <tr>{["Ref.","Descripción","Piso","Comp.","Gap","% Falta"].map(h=><TH key={h}>{h}</TH>)}</tr>
+                    </thead>
+                    <tbody>
+                      {gapsR.map((s,i)=>{
+                        const pct=Math.round((s.gap/Math.max(s.comp,1))*100);
+                        const esCrit=pct>=50;
+                        return(
+                          <tr key={i} className="row" style={{borderBottom:`1px solid ${C.bg1}`,background:esCrit?`${C.orange}05`:"transparent"}}>
+                            <TD mono c={C.teal} fw={700} fs={11}>{s.ref}</TD>
+                            <TD style={{maxWidth:150}}><div style={{color:C.t2,fontSize:10,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{s.desc.slice(0,44)}</div></TD>
+                            <TD right mono c={C.green} fw={600} fs={12}>{s.stock}</TD>
+                            <TD right mono c={C.yellow} fw={700} fs={12}>{s.comp}</TD>
+                            <TD right mono c={esCrit?C.red:C.orange} fw={800} fs={13}>-{s.gap}</TD>
+                            <TD>
+                              <div style={{display:"flex",alignItems:"center",gap:5}}>
+                                <div style={{height:4,width:44,background:C.b0,borderRadius:2,overflow:"hidden"}}>
+                                  <div style={{width:`${Math.min(100,pct)}%`,height:"100%",background:esCrit?C.red:C.orange}}/>
+                                </div>
+                                <span style={{fontSize:9,color:esCrit?C.red:C.orange,fontWeight:700}}>{pct}%</span>
+                              </div>
+                            </TD>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </Sec>
+            </div>
+
+            {/* Ciudades */}
+            <Sec title="🌎 Comprometido por Ciudad" sub="todas las ciudades · ITAGUÍ WMS" c={`${cityR.length} ciudades`}>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)"}}>
+                {cityR.map((c,i)=>{
+                  const pct=Math.round((c.comp/maxCityComp)*100);
+                  return(
+                    <div key={i} style={{padding:"8px 16px",borderBottom:`1px solid ${C.bg3}`,display:"flex",gap:10,alignItems:"center",background:i<3?`${C.accent}04`:"transparent"}}>
+                      <div style={{width:18,textAlign:"right",fontSize:10,color:C.t3,fontWeight:700,fontFamily:"'JetBrains Mono',monospace",flexShrink:0}}>{i+1}</div>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:3}}>
+                          <span style={{color:i<3?C.t1:C.t2,fontWeight:i<3?700:400,fontSize:11,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",maxWidth:160}}>{c.ciudad}</span>
+                          <div style={{display:"flex",gap:8,flexShrink:0}}>
+                            <span style={{fontFamily:"'JetBrains Mono',monospace",color:C.yellow,fontWeight:700,fontSize:12}}>{c.comp}u</span>
+                            <span style={{color:C.t3,fontSize:10}}>{c.pedidos||0} pedidos · {c.skus} SKUs</span>
+                          </div>
+                        </div>
+                        <div style={{height:3,background:C.b0,borderRadius:1,overflow:"hidden"}}>
+                          <div style={{width:`${pct}%`,height:"100%",background:i<3?C.accent:C.b1}}/>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </Sec>
+
+            {/* Estado módulos */}
+            <Sec title="🏭 Estado Real de Módulos por Calle" sub="basado en inventario cargado">
+              <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)"}}>
+                {modR.map((calle,i)=>{
+                  const CLABEL={C1:"Calle 1 (B)",C2:"Calle 2 (C)",C3:"Calle 3 (D)",C4:"Calle 4 (E)"};
+                  const ocupados=42-calle.vacios;
+                  const pctMezcla=ocupados>0?Math.round((calle.mezcla/ocupados)*100):0;
+                  return(
+                    <div key={i} style={{padding:"14px 16px",borderRight:i<3?`1px solid ${C.b0}`:"none"}}>
+                      <div style={{color:calleCol[calle.calleId],fontWeight:700,fontSize:12,marginBottom:10}}>{CLABEL[calle.calleId]}</div>
+                      {[
+                        {l:"Stock piso",        v:`${calle.stockPiso.toLocaleString()}u`, c:C.green},
+                        {l:"Módulos con mezcla",v:`${calle.mezcla}/42`,                  c:pctMezcla>80?C.red:C.orange},
+                        {l:"Sin mezcla",         v:calle.sinMezcla,                       c:C.green},
+                        {l:"Vacíos",             v:calle.vacios,                          c:C.t3},
+                        {l:"Con gap",            v:calle.conGap,                          c:calle.conGap>0?C.red:C.green},
+                      ].map(m=>(
+                        <div key={m.l} style={{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:5}}>
+                          <span style={{color:C.t3}}>{m.l}</span>
+                          <span style={{color:m.c,fontWeight:700,fontFamily:"'JetBrains Mono',monospace"}}>{m.v}</span>
+                        </div>
+                      ))}
+                      <div style={{marginTop:8}}>
+                        <div style={{display:"flex",justifyContent:"space-between",fontSize:9,color:C.t3,marginBottom:3}}>
+                          <span>% mezcla</span>
+                          <span style={{color:pctMezcla>80?C.red:C.orange,fontWeight:700}}>{pctMezcla}%</span>
+                        </div>
+                        <div style={{height:4,background:C.b0,borderRadius:2,overflow:"hidden"}}>
+                          <div style={{width:`${pctMezcla}%`,height:"100%",background:pctMezcla>80?C.red:C.orange}}/>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </Sec>
+
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+    const rootEl=document.getElementById("root");const loadingEl=document.getElementById("loading-screen");const AppWrapper=()=>{React.useEffect(()=>{if(loadingEl)loadingEl.style.display="none";},[]);return React.createElement(CEDIDashboard);};ReactDOM.createRoot(rootEl).render(React.createElement(AppWrapper));
+  </script></body></html>
