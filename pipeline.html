@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>INDUCASOS · Picking Móvil</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  body{background:#070b14;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#e8edf5;overflow-x:hidden;}
+  #root{min-height:100vh;}
+  input{font-family:inherit;}
+  ::-webkit-scrollbar{width:0;height:0;}
+  @keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .mono{font-family:'JetBrains Mono','SF Mono',monospace;}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel" data-presets="react">
+const { useState, useMemo, useEffect, useCallback } = React;
+
+// ═══════════ PALETA ═══════════
+const C={
+  bg0:"#070b14",bg1:"#0d1320",bg2:"#131b2e",bg3:"#1a2438",
+  b0:"#1f2b42",b1:"#2a3854",
+  t1:"#e8edf5",t2:"#a8b5cc",t3:"#6b7a96",t4:"#46546e",
+  teal:"#2dd4bf",accent:"#3b82f6",green:"#22c55e",yellow:"#eab308",
+  orange:"#f97316",red:"#ef4444",purple:"#a855f7",
+};
+
+// ═══════════ HELPERS (misma lógica que el master) ═══════════
+const CAJA=9;
+const toNum=v=>{const n=parseFloat(String(v).replace(/[^0-9.-]/g,""));return isNaN(n)?0:n;};
+const CALLE_MAP={B:"C1",C:"C2",D:"C3",E:"C4"};
+const CALLE_NOM={B:"Calle 1",C:"Calle 2",D:"Calle 3",E:"Calle 4"};
+const TOPE_PISO=27; // máx 3 cajas del mismo SKU desde piso
+const parseUbi=u=>{
+  const m=/^([B-E])0?(\d{1,2})(\d)(\d)$/.exec(String(u).trim());
+  if(!m)return null;
+  return{calleKey:CALLE_MAP[m[1]],calleLetra:m[1],modulo:parseInt(m[2]),nivel:parseInt(m[3]),pos:parseInt(m[4])};
+};
+const esEXPO=d=>(d||"").toUpperCase().includes("EXPO");
+const marcaDe=desc=>{const p=String(desc||"").trim().split(/\s+/);return p.length>=3?p[2].toUpperCase():"";};
+const familia=d=>{const u=(d||"").toUpperCase();if(/\bT[- ]?10\b/.test(u))return "T-10";const m=u.match(/ICH[- ]?([0-9]{2,4})/);return m?m[1]:"OTRO";};
+const esMDE=ciudad=>{const x=String(ciudad||"").toUpperCase().trim();return x==="MDE"||x.includes("MEDELL")||x==="ITAGUI"||x==="ITAGÜI"||x.includes("ITAGU");};
+const tieneNota=n=>String(n||"").trim().length>0;
+
+// ═══════════ PROCESAR DATOS (lógica idéntica al master) ═══════════
+function procesar(wbInv,wbFact){
+  const MARCAS=["ICH"];
+  const toNum=v=>{const n=parseFloat(String(v).replace(/[^0-9.-]/g,""));return isNaN(n)?0:n;};
+
+
+  // ── INVENTARIO ──
+  const invSheet=wbInv.Sheets[wbInv.SheetNames[0]];
+  const invRows=XLSX.utils.sheet_to_json(invSheet,{range:5,defval:""});
+  const invCasco=invRows.filter(r=>{
+    const linea=String(r["Linea"]||"").trim();
+    const desc=String(r["Descripcion"]||"");
+    return linea==="CASCO"&&!esEXPO(desc)&&MARCAS.includes(marcaDe(desc));
+  });
+  if(invCasco.length===0)throw new Error("No se encontraron SKUs CASCO ICH en el inventario.");
+
+  const stockMap={};
+  const invBySKU={};
+  for(const r of invCasco){
+    const ref=String(r["Referencia"]||"").trim();
+    const desc=String(r["Descripcion"]||"").trim();
+    const saldo=toNum(r["saldo"]);
+    const ubi=String(r["ubicacion"]||"").trim();
+    const cajap=String(r["cajap"]||"").trim();
+    if(!ref)continue;
+    const p=parseUbi(ubi);
+    if(!stockMap[ref])stockMap[ref]={ref,desc,stock:0,stockAlt:0,stockTotal:0};
+    stockMap[ref].stockTotal+=saldo;
+    if(p&&p.nivel<=1) stockMap[ref].stock+=saldo;
+    else              stockMap[ref].stockAlt+=saldo;
+    if(p&&saldo>0){
+      if(!invBySKU[ref])invBySKU[ref]=[];
+      invBySKU[ref].push({ubi,saldo,nivel:p.nivel,pos:p.pos,calleLetra:p.calleLetra,modulo:p.modulo,cajap});
+    }
+  }
+  const cascoRefs=new Set(Object.keys(stockMap));
+
+  // ── PEDIDOS — solo ITAGUÍ (lógica idéntica al master) ──
+  const ws=wbFact.Sheets["ITAGUÍ"];
+  if(!ws)throw new Error("No se encontró la hoja ITAGUÍ en la bandeja de pedidos.");
+  const allWmsRows=XLSX.utils.sheet_to_json(ws,{range:5,defval:""});
+  if(allWmsRows.length===0)throw new Error("La hoja ITAGUÍ está vacía.");
+
+  const pedidosRaw={};
+  for(const r of allWmsRows){
+    const ref=String(r["referencia"]||"").trim();
+    const cant=toNum(r["cantidad"]);
+    const nota=r["notas"];
+    const ciudad=String(r["ciudad"]||"").trim();
+    const estado_val=String(r["Estado"]||"").trim();
+    const picking=String(r["Picking"]||r["PedidoSiesa"]||"").trim();
+    const cliente=String(r["NOMBRECLIENTE"]||"").trim();
+    const pedidoSiesa=String(r["PedidoSiesa"]||"").trim();
+    const fecha=r["F_pedido"]?String(r["F_pedido"]).slice(0,10):"";
+    const desc=String(r["descripcion"]||"").trim();
+    const tipoDocto=String(r["TipoDocto"]||"").trim().toUpperCase();
+    // Mismo filtro que el master: solo refs que están en cascoRefs
+    if(!ref||cant===0)continue;
+    if(!pedidosRaw[picking]){
+      pedidosRaw[picking]={
+        id:picking,
+        pedidoSiesa,
+        est:estado_val==="5"?"planeado":estado_val==="3"?"en_picking":"sin_planear",
+        cliente,ciudad,fecha,
+        nota:tieneNota(nota),
+        tipoDocto,
+        rows:[],
+      };
+    }
+    pedidosRaw[picking].rows.push({ref,desc,cant,nota:tieneNota(nota)});
+  }
+
+  // ── Construir pedidosActivos con cobertura (idéntico al master) ──
+  const TOPE_PISO=27;
+  const pedidosActivos=Object.values(pedidosRaw).map(p=>{
+    const refs=p.rows.map(row=>{
+      const pos=invBySKU[row.ref]||[];
+      const stockPiso=pos.filter(x=>x.nivel<=1).reduce((t,x)=>t+x.saldo,0);
+      const stockAlt =pos.filter(x=>x.nivel>=2).reduce((t,x)=>t+x.saldo,0);
+      const limitePiso=Math.min(stockPiso,TOPE_PISO);
+      const cubPiso=Math.min(limitePiso,row.cant);
+      const restoTrasPiso=row.cant-cubPiso;
+      const cubAlt=Math.min(stockAlt,restoTrasPiso);
+      const hasPiso=cubPiso>=row.cant;
+      const hasPisoParcial=cubPiso>0;
+      const hasAlt=stockAlt>0;
+      const sinStock=stockPiso===0&&stockAlt===0;
+      return{...row,stockPiso,stockAlt,cubPiso,cubAlt,restoTrasPiso,hasPiso,hasPisoParcial,hasAlt,sinStock};
+    });
+    const lineas=refs.length;
+    const uni=refs.reduce((t,r)=>t+r.cant,0);
+    const uniPiso=refs.reduce((t,r)=>t+r.cubPiso,0);
+    const uniAlt=refs.reduce((t,r)=>t+r.cubAlt,0);
+    const pctPiso=uni>0?Math.round((uniPiso/uni)*100):0;
+    const pctAlt=uni>0?Math.round((uniAlt/uni)*100):0;
+    let clasificacion="ruptura";
+    if(pctPiso===100)clasificacion="despachable";
+    else if(pctPiso>=40)clasificacion="parcial";
+    else if(uniAlt>0)clasificacion="reabasto";
+    return{
+      picking:p.id,
+      pedSiesa:p.pedidoSiesa||"",
+      cliente:p.cliente,
+      ciudad:p.ciudad,
+      estado:p.est,
+      nota:p.nota,
+      fecha:p.fecha,
+      refs,
+      nLineas:lineas,
+      uni,uniPiso,uniAlt,pctPiso,pctAlt,
+      clasif:clasificacion,
+    };
+  }).sort((a,b)=>{
+    const aMDE=esMDE(a.ciudad)?1:0,bMDE=esMDE(b.ciudad)?1:0;
+    if(aMDE!==bMDE)return bMDE-aMDE;
+    const ord={sin_planear:0,planeado:1,en_picking:2};
+    return(ord[a.estado]||0)-(ord[b.estado]||0)||b.uni-a.uni;
+  });
+
+  return{invBySKU,stockMap,pedidos:pedidosActivos};
+}
+
+// ═══════════ RECORRIDO (Opción B: por calle ascendente) ═══════════
+// Ordena posiciones por calle (B,C,D,E) → módulo ascendente → nivel
+function ordenarRecorrido(posiciones){
+  const ordenCalle={B:1,C:2,D:3,E:4};
+  return [...posiciones].sort((a,b)=>
+    (ordenCalle[a.calleLetra]||9)-(ordenCalle[b.calleLetra]||9)||
+    (a.modulo||0)-(b.modulo||0)||
+    (a.nivel||0)-(b.nivel||0)
+  );
+}
+
+// ═══════════ COMPONENTE PRINCIPAL ═══════════
+function PickingApp(){
+  const [phase,setPhase]=useState("loading"); // loading | ready | error
+  const [err,setErr]=useState("");
+  const [data,setData]=useState(null);
+  const [busca,setBusca]=useState("");
+  const [sel,setSel]=useState(null); // pedido seleccionado
+  const [modo,setModo]=useState("piso"); // piso | altura (en el detalle)
+  const [skuAbierto,setSkuAbierto]=useState({}); // SKUs expandidos para ver ubicaciones
+  const [skuDetAbierto,setSkuDetAbierto]=useState({}); // SKUs expandidos en tab SKUs
+  const [hechos,setHechos]=useState({}); // paradas completadas
+
+  const cargar=useCallback(async()=>{
+    setPhase("loading");setErr("");
+    try{
+      const fetchWb=async(url)=>{
+        const r=await fetch(url,{cache:"reload"});
+        if(!r.ok)throw new Error(`${url} → HTTP ${r.status}`);
+        const buf=await r.arrayBuffer();
+        if(buf.byteLength<100)throw new Error(`${url} llegó vacío`);
+        return XLSX.read(new Uint8Array(buf),{type:"array",cellDates:true});
+      };
+      const [wbInv,wbFact]=await Promise.all([fetchWb("./Inventario.xlsx"),fetchWb("./Bandejadeplaneacion.xlsx")]);
+      setData(procesar(wbInv,wbFact));
+      setPhase("ready");
+    }catch(e){setErr(e.message);setPhase("error");}
+  },[]);
+
+  useEffect(()=>{cargar();},[cargar]);
+
+  // Búsqueda de pedido por picking o pedidoSiesa
+  const resultados=useMemo(()=>{
+    if(!data)return [];
+    const q=busca.trim().toLowerCase();
+    if(!q)return [];
+    return data.pedidos.filter(p=>{
+      const pick=String(p.picking||"").toLowerCase();
+      const siesa=String(p.pedSiesa||"").toLowerCase();
+      const cli=String(p.cliente||"").toLowerCase();
+      return pick.includes(q)||siesa.includes(q)||cli.includes(q);
+    });
+  },[data,busca]);
+
+  // Búsqueda de SKUs
+  const [buscaSKU,setBuscaSKU]=useState("");
+  const [tab,setTab]=useState("pedidos"); // pedidos | skus
+
+  const resultadosSKU=useMemo(()=>{
+    if(!data)return [];
+    const q=buscaSKU.trim().toLowerCase();
+    if(!q||q.length<2)return [];
+    const refs=Object.keys(data.invBySKU);
+    return refs.filter(ref=>{
+      const sm=data.stockMap[ref];
+      return ref.toLowerCase().includes(q)||(sm&&sm.desc.toLowerCase().includes(q));
+    }).map(ref=>{
+      const sm=data.stockMap[ref]||{stock:0,stockAlt:0,desc:""};
+      const pos=ordenarRecorrido(data.invBySKU[ref]||[]);
+      return{ref,desc:sm.desc,stockPiso:sm.stock,stockAlt:sm.stockAlt,posiciones:pos};
+    });
+  },[data,buscaSKU]);
+
+  const clasifCol={despachable:C.green,parcial:C.yellow,reabasto:C.orange,ruptura:C.red};
+  const clasifLbl={despachable:"DESPACHABLE",parcial:"PARCIAL",reabasto:"REABASTO",ruptura:"RUPTURA"};
+
+  // ───────── construir recorrido del pedido seleccionado ─────────
+  const recorrido=useMemo(()=>{
+    if(!sel||!data)return {piso:[],altura:[]};
+    const paradasPiso=[],paradasAlt=[];
+    sel.refs.forEach(r=>{
+      const pos=data.invBySKU[r.ref]||[];
+      // PISO: posiciones nivel 1, hasta cubrir cant (con tope piso)
+      const piso=pos.filter(p=>p.nivel<=1&&p.saldo>0);
+      const alt=pos.filter(p=>p.nivel>=2&&p.saldo>0);
+      const pisoDisp=piso.reduce((t,p)=>t+p.saldo,0);
+      const tomarPiso=Math.min(r.cant,pisoDisp,TOPE_PISO);
+      if(tomarPiso>0&&piso.length){
+        // agrupar por ubicación
+        const grupos={};
+        piso.forEach(p=>{if(!grupos[p.ubi])grupos[p.ubi]={...p,saldo:0,cajas:[]};grupos[p.ubi].saldo+=p.saldo;if(p.cajap)grupos[p.ubi].cajas.push({cajap:p.cajap,saldo:p.saldo});});
+        Object.values(grupos).forEach(g=>paradasPiso.push({...g,ref:r.ref,desc:r.desc,cant:r.cant,tipo:"piso"}));
+      }
+      // ALTURA: si el piso no alcanza
+      const faltaTrasPiso=Math.max(0,r.cant-tomarPiso);
+      if(faltaTrasPiso>0&&alt.length){
+        const grupos={};
+        alt.forEach(p=>{if(!grupos[p.ubi])grupos[p.ubi]={...p,saldo:0,cajas:[]};grupos[p.ubi].saldo+=p.saldo;if(p.cajap)grupos[p.ubi].cajas.push({cajap:p.cajap,saldo:p.saldo});});
+        Object.values(grupos).forEach(g=>paradasAlt.push({...g,ref:r.ref,desc:r.desc,cant:r.cant,falta:faltaTrasPiso,tipo:"altura"}));
+      }
+    });
+    return {piso:ordenarRecorrido(paradasPiso),altura:ordenarRecorrido(paradasAlt)};
+  },[sel,data]);
+
+  // ═══════════ PANTALLAS ═══════════
+  if(phase==="loading")return(
+    <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"100vh",gap:16}}>
+      <div style={{width:40,height:40,border:`3px solid ${C.b1}`,borderTopColor:C.teal,borderRadius:"50%",animation:"spin 1s linear infinite"}}/>
+      <div style={{color:C.t3,fontSize:13}}>Conectando con el repositorio...</div>
+    </div>
+  );
+
+  if(phase==="error")return(
+    <div style={{padding:24,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"100vh",gap:14,textAlign:"center"}}>
+      <div style={{fontSize:32}}>⚠️</div>
+      <div style={{color:C.red,fontWeight:700,fontSize:15}}>No se pudo cargar</div>
+      <div style={{color:C.t3,fontSize:12,fontFamily:"monospace",maxWidth:340}}>{err}</div>
+      <button onClick={cargar} style={{marginTop:8,padding:"10px 22px",background:C.teal,border:"none",borderRadius:9,color:C.bg0,fontWeight:700,fontSize:14}}>↻ Reintentar</button>
+    </div>
+  );
+
+  // ─── DETALLE DEL PEDIDO ───
+  if(sel){
+    const lista=modo==="piso"?recorrido.piso:recorrido.altura;
+    return(
+      <div style={{minHeight:"100vh",paddingBottom:30}}>
+        {/* Header pedido */}
+        <div style={{position:"sticky",top:0,zIndex:10,background:C.bg1,borderBottom:`1px solid ${C.b0}`,padding:"14px 16px"}}>
+          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
+            <button onClick={()=>{setSel(null);setSkuAbierto({});setHechos({});}} style={{background:C.bg3,border:`1px solid ${C.b0}`,color:C.t2,borderRadius:8,width:34,height:34,fontSize:18,flexShrink:0}}>‹</button>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{display:"flex",alignItems:"center",gap:7}}>
+                <span className="mono" style={{color:C.teal,fontWeight:800,fontSize:16}}>{sel.picking}</span>
+                <span style={{background:`${clasifCol[sel.clasif]}20`,color:clasifCol[sel.clasif],borderRadius:5,padding:"2px 7px",fontSize:9,fontWeight:700}}>{clasifLbl[sel.clasif]}</span>
+              </div>
+              <div style={{color:C.t2,fontSize:12,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{sel.cliente}</div>
+            </div>
+          </div>
+          <div style={{display:"flex",gap:14,fontSize:11,color:C.t3}}>
+            <span>📍 {sel.ciudad}</span>
+            <span>📋 {sel.nLineas} líneas</span>
+            <span className="mono" style={{color:C.yellow}}>{sel.uni}u</span>
+            {sel.pedSiesa&&<span>#{sel.pedSiesa}</span>}
+            {tieneNota(sel.nota)?<span style={{color:C.orange}}>⚠ con nota</span>:<span style={{color:C.green}}>sin nota</span>}
+          </div>
+        </div>
+
+        {/* Toggle piso/altura */}
+        <div style={{display:"flex",gap:6,padding:"12px 16px"}}>
+          <button onClick={()=>setModo("piso")} style={{flex:1,padding:"11px",borderRadius:10,border:`1px solid ${modo==="piso"?C.green:C.b0}`,background:modo==="piso"?`${C.green}18`:C.bg2,color:modo==="piso"?C.green:C.t3,fontWeight:700,fontSize:13}}>📦 Piso ({recorrido.piso.length})</button>
+          <button onClick={()=>setModo("altura")} style={{flex:1,padding:"11px",borderRadius:10,border:`1px solid ${modo==="altura"?C.purple:C.b0}`,background:modo==="altura"?`${C.purple}18`:C.bg2,color:modo==="altura"?C.purple:C.t3,fontWeight:700,fontSize:13}}>⬆ Altura ({recorrido.altura.length})</button>
+        </div>
+
+        {/* Progreso */}
+        <div style={{padding:"0 16px 10px"}}>
+          <div style={{display:"flex",justifyContent:"space-between",fontSize:10,color:C.t3,marginBottom:4}}>
+            <span>Recorrido {modo==="piso"?"a pie":"con montacargas"} · por calle</span>
+            <span>{lista.filter((_,i)=>hechos[`${modo}-${i}`]).length}/{lista.length}</span>
+          </div>
+          <div style={{height:5,background:C.b0,borderRadius:3,overflow:"hidden"}}>
+            <div style={{height:"100%",width:`${lista.length?lista.filter((_,i)=>hechos[`${modo}-${i}`]).length/lista.length*100:0}%`,background:modo==="piso"?C.green:C.purple,transition:"width .3s"}}/>
+          </div>
+        </div>
+
+        {/* Lista de paradas (recorrido) */}
+        <div style={{padding:"0 12px"}}>
+          {lista.length===0
+            ?<div style={{textAlign:"center",color:C.t3,padding:30,fontSize:13}}>{modo==="piso"?"Sin paradas en piso":"Sin paradas en altura"}</div>
+            :lista.map((p,i)=>{
+              const key=`${modo}-${i}`;const hecho=hechos[key];
+              const skuKey=`${modo}-${p.ref}-${p.ubi}`;const abierto=skuAbierto[skuKey];
+              const col=modo==="piso"?C.green:C.purple;
+              return(
+                <div key={i} style={{background:hecho?C.bg1:C.bg2,borderRadius:12,marginBottom:8,border:`1px solid ${hecho?C.green+"30":C.b0}`,borderLeft:`4px solid ${hecho?C.green:col}`,opacity:hecho?0.5:1,animation:"fadeUp .25s ease both",transition:"opacity .3s"}}>
+                  {/* Fila principal */}
+                  <div style={{padding:"12px 14px"}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
+                      <div style={{display:"flex",alignItems:"center",gap:9}}>
+                        <div style={{width:26,height:26,borderRadius:"50%",background:`${col}20`,color:col,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:12,flexShrink:0}}>{i+1}</div>
+                        <div>
+                          <div className="mono" style={{color:C.teal,fontWeight:800,fontSize:17}}>{p.ubi}</div>
+                          <div style={{color:C.t3,fontSize:10}}>{CALLE_NOM[p.calleLetra]} · Mód {p.modulo} · Niv {p.nivel}</div>
+                        </div>
+                      </div>
+                      <div style={{textAlign:"right"}}>
+                        <div className="mono" style={{color:col,fontWeight:800,fontSize:18}}>{p.saldo}u</div>
+                        <div style={{color:C.t4,fontSize:9}}>{Math.floor(p.saldo/9)} caja{Math.floor(p.saldo/9)!==1?"s":""}</div>
+                      </div>
+                    </div>
+                    {/* SKU */}
+                    <div onClick={()=>setSkuAbierto(o=>({...o,[skuKey]:!o[skuKey]}))} style={{background:C.bg1,borderRadius:8,padding:"8px 10px",cursor:"pointer"}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                        <div style={{display:"flex",alignItems:"center",gap:6,minWidth:0}}>
+                          <span style={{color:C.t3,fontSize:10,transform:abierto?"rotate(90deg)":"none",transition:"transform .2s"}}>▶</span>
+                          <span className="mono" style={{color:C.accent,fontWeight:700,fontSize:12}}>{p.ref}</span>
+                          <span style={{color:C.t3,fontSize:10,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.desc?.slice(0,28)}</span>
+                        </div>
+                        <span style={{color:C.yellow,fontSize:11,fontWeight:700,flexShrink:0}} className="mono">pide {p.cant}u</span>
+                      </div>
+                      {/* Detalle expandido: cajas + todas las ubicaciones */}
+                      {abierto&&(
+                        <div style={{marginTop:8,paddingTop:8,borderTop:`1px solid ${C.b0}`}}>
+                          {p.cajas&&p.cajas.length>0&&(
+                            <div style={{marginBottom:8}}>
+                              <div style={{color:C.t3,fontSize:9,fontWeight:600,marginBottom:4}}>CAJAS EN ESTA POSICIÓN</div>
+                              {p.cajas.map((cj,ci)=>(
+                                <div key={ci} style={{display:"flex",justifyContent:"space-between",padding:"2px 0",fontSize:10}} className="mono">
+                                  <span style={{color:C.accent}}>📦 {cj.cajap}</span><span style={{color:C.t3}}>{cj.saldo}u</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          {/* Todas las ubicaciones del SKU */}
+                          {(()=>{
+                            const todas=ordenarRecorrido(data.invBySKU[p.ref]||[]);
+                            return(
+                              <div>
+                                <div style={{color:C.t3,fontSize:9,fontWeight:600,marginBottom:4}}>TODAS LAS UBICACIONES ({todas.length})</div>
+                                {todas.map((u,ui)=>(
+                                  <div key={ui} style={{display:"flex",justifyContent:"space-between",padding:"2px 0",fontSize:10}} className="mono">
+                                    <span style={{color:u.nivel<=1?C.green:C.purple}}>{u.nivel<=1?"📦":"⬆"} {u.ubi}</span>
+                                    <span style={{color:C.t3}}>{u.saldo}u{u.cajap?` · ${u.cajap}`:""}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  {/* Botón hecho */}
+                  <button onClick={()=>setHechos(h=>({...h,[key]:!h[key]}))} style={{width:"100%",padding:"9px",background:hecho?`${C.green}15`:C.bg3,border:"none",borderTop:`1px solid ${C.b0}`,color:hecho?C.green:C.t2,fontWeight:700,fontSize:12,borderRadius:"0 0 11px 11px"}}>
+                    {hecho?"✓ Recogido":"Marcar recogido"}
+                  </button>
+                </div>
+              );
+            })}
+        </div>
+      </div>
+    );
+  }
+
+  // ─── BUSCADOR ───
+  return(
+    <div style={{minHeight:"100vh"}}>
+      <div style={{background:C.bg1,borderBottom:`1px solid ${C.b0}`,padding:"16px 16px 14px"}}>
+        <div style={{display:"flex",alignItems:"center",gap:9,marginBottom:14}}>
+          <div style={{width:32,height:32,borderRadius:8,background:"linear-gradient(135deg,#3b82f6,#2dd4bf)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>📦</div>
+          <div>
+            <div style={{fontWeight:800,fontSize:15,letterSpacing:"0.5px"}}>INDUCASOS</div>
+            <div style={{color:C.t3,fontSize:10}}>Picking Móvil · Bandeja ITAGUÍ</div>
+          </div>
+          <button onClick={cargar} style={{marginLeft:"auto",background:C.bg3,border:`1px solid ${C.b0}`,color:C.t3,borderRadius:8,padding:"7px 11px",fontSize:11}}>↻</button>
+        </div>
+        {/* Tabs */}
+        <div style={{display:"flex",gap:6,marginBottom:12}}>
+          <button onClick={()=>setTab("pedidos")} style={{flex:1,padding:"9px",borderRadius:9,border:`1px solid ${tab==="pedidos"?C.teal:C.b0}`,background:tab==="pedidos"?`${C.teal}18`:C.bg2,color:tab==="pedidos"?C.teal:C.t3,fontWeight:700,fontSize:12}}>🗂 Pedidos</button>
+          <button onClick={()=>setTab("skus")} style={{flex:1,padding:"9px",borderRadius:9,border:`1px solid ${tab==="skus"?C.accent:C.b0}`,background:tab==="skus"?`${C.accent}18`:C.bg2,color:tab==="skus"?C.accent:C.t3,fontWeight:700,fontSize:12}}>🔍 SKUs</button>
+        </div>
+        {tab==="pedidos"
+          ?<input value={busca} onChange={e=>setBusca(e.target.value)} placeholder="🔍 Picking, pedido o cliente..." autoFocus style={{width:"100%",background:C.bg3,color:C.t1,border:`1px solid ${C.b1}`,borderRadius:11,padding:"13px 15px",fontSize:15}}/>
+          :<input value={buscaSKU} onChange={e=>setBuscaSKU(e.target.value)} placeholder="🔍 Referencia o descripción..." autoFocus style={{width:"100%",background:C.bg3,color:C.t1,border:`1px solid ${C.b1}`,borderRadius:11,padding:"13px 15px",fontSize:15}}/>
+        }
+      </div>
+
+      <div style={{padding:"14px 12px"}}>
+        {/* ── TAB PEDIDOS ── */}
+        {tab==="pedidos"&&(
+          !busca.trim()
+            ?<div style={{textAlign:"center",color:C.t3,padding:"40px 20px"}}>
+              <div style={{fontSize:36,marginBottom:12}}>🔎</div>
+              <div style={{fontSize:14,marginBottom:6}}>Busca un pedido para empezar</div>
+              <div style={{fontSize:11,color:C.t4}}>Ingresa el número de picking, pedido SIESA o nombre del cliente</div>
+              <div style={{marginTop:18,fontSize:11,color:C.t4}}>{data?.pedidos.length||0} pedidos disponibles</div>
+            </div>
+            :resultados.length===0
+              ?<div style={{textAlign:"center",color:C.t3,padding:30,fontSize:13}}>Sin resultados para "{busca}"</div>
+              :resultados.map((p,i)=>(
+                <div key={i} onClick={()=>{setSel(p);setModo("piso");}} style={{background:C.bg2,borderRadius:12,marginBottom:8,border:`1px solid ${C.b0}`,borderLeft:`4px solid ${clasifCol[p.clasif]}`,padding:"13px 15px",animation:"fadeUp .2s ease both",cursor:"pointer"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8}}>
+                      <span className="mono" style={{color:C.teal,fontWeight:800,fontSize:15}}>{p.picking}</span>
+                      <span style={{background:`${clasifCol[p.clasif]}20`,color:clasifCol[p.clasif],borderRadius:5,padding:"2px 7px",fontSize:9,fontWeight:700}}>{clasifLbl[p.clasif]}</span>
+                    </div>
+                    <span style={{color:C.t3,fontSize:18}}>›</span>
+                  </div>
+                  <div style={{color:C.t2,fontSize:12,marginBottom:6,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.cliente}</div>
+                  <div style={{display:"flex",gap:12,fontSize:10,color:C.t3}}>
+                    <span>📍 {p.ciudad}</span>
+                    <span>📋 {p.nLineas} líneas</span>
+                    <span className="mono" style={{color:C.yellow}}>{p.uni}u</span>
+                  </div>
+                </div>
+              ))
+        )}
+
+        {/* ── TAB SKUs ── */}
+        {tab==="skus"&&(
+          !buscaSKU.trim()||buscaSKU.trim().length<2
+            ?<div style={{textAlign:"center",color:C.t3,padding:"40px 20px"}}>
+              <div style={{fontSize:36,marginBottom:12}}>📦</div>
+              <div style={{fontSize:14,marginBottom:6}}>Busca cualquier SKU</div>
+              <div style={{fontSize:11,color:C.t4}}>Ingresa la referencia o parte de la descripción</div>
+              <div style={{marginTop:18,fontSize:11,color:C.t4}}>{data?Object.keys(data.invBySKU).length:0} SKUs en inventario</div>
+            </div>
+            :resultadosSKU.length===0
+              ?<div style={{textAlign:"center",color:C.t3,padding:30,fontSize:13}}>Sin resultados para "{buscaSKU}"</div>
+              :resultadosSKU.map((s,i)=>{
+                const abierto=skuDetAbierto[s.ref];
+                return(
+                  <div key={i} style={{background:C.bg2,borderRadius:12,marginBottom:8,border:`1px solid ${C.b0}`,animation:"fadeUp .2s ease both"}}>
+                    {/* Cabecera SKU */}
+                    <div onClick={()=>setSkuDetAbierto(o=>({...o,[s.ref]:!o[s.ref]}))} style={{padding:"13px 15px",cursor:"pointer"}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6}}>
+                        <div style={{flex:1,minWidth:0}}>
+                          <div style={{display:"flex",alignItems:"center",gap:7,marginBottom:3}}>
+                            <span className="mono" style={{color:C.teal,fontWeight:800,fontSize:14}}>{s.ref}</span>
+                            <span style={{color:C.t3,fontSize:10,transform:abierto?"rotate(90deg)":"none",transition:"transform .2s"}}>▶</span>
+                          </div>
+                          <div style={{color:C.t2,fontSize:11,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{s.desc}</div>
+                        </div>
+                        <div style={{textAlign:"right",flexShrink:0,marginLeft:10}}>
+                          <div style={{display:"flex",gap:8}}>
+                            <div style={{textAlign:"center"}}>
+                              <div className="mono" style={{color:C.green,fontWeight:800,fontSize:15}}>{s.stockPiso}</div>
+                              <div style={{color:C.t4,fontSize:8}}>PISO</div>
+                            </div>
+                            <div style={{textAlign:"center"}}>
+                              <div className="mono" style={{color:C.purple,fontWeight:800,fontSize:15}}>{s.stockAlt}</div>
+                              <div style={{color:C.t4,fontSize:8}}>ALTURA</div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                      <div style={{display:"flex",gap:10,fontSize:10,color:C.t3}}>
+                        <span>📍 {s.posiciones.length} ubicaciones</span>
+                        <span className="mono">{s.stockPiso+s.stockAlt}u total</span>
+                        <span>{Math.floor((s.stockPiso+s.stockAlt)/9)} cajas</span>
+                      </div>
+                    </div>
+                    {/* Detalle expandido */}
+                    {abierto&&(
+                      <div style={{borderTop:`1px solid ${C.b0}`,padding:"10px 15px 13px"}}>
+                        <div style={{color:C.t3,fontSize:9,fontWeight:600,marginBottom:8}}>TODAS LAS UBICACIONES ({s.posiciones.length})</div>
+                        {s.posiciones.map((u,ui)=>(
+                          <div key={ui} style={{background:C.bg1,borderRadius:8,padding:"8px 10px",marginBottom:6,borderLeft:`3px solid ${u.nivel<=1?C.green:C.purple}`}}>
+                            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:u.cajap?4:0}}>
+                              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                                <span style={{fontSize:12}}>{u.nivel<=1?"📦":"⬆"}</span>
+                                <span className="mono" style={{color:u.nivel<=1?C.green:C.purple,fontWeight:800,fontSize:15}}>{u.ubi}</span>
+                                <span style={{color:C.t3,fontSize:10}}>{CALLE_NOM[u.calleLetra]} · Mód {u.modulo} · Niv {u.nivel}</span>
+                              </div>
+                              <div style={{textAlign:"right"}}>
+                                <span className="mono" style={{color:C.t1,fontWeight:700,fontSize:14}}>{u.saldo}u</span>
+                                <div style={{color:C.t4,fontSize:9}}>{Math.floor(u.saldo/9)} caja{Math.floor(u.saldo/9)!==1?"s":""}</div>
+                              </div>
+                            </div>
+                            {u.cajap&&<div style={{display:"flex",alignItems:"center",gap:5,marginTop:3}}><span style={{color:C.t4,fontSize:9}}>📦</span><span className="mono" style={{color:C.accent,fontSize:10}}>{u.cajap}</span></div>}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })
+        )}
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<PickingApp/>);
+</script>
+</body>
+</html>
