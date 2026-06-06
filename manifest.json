@@ -1,0 +1,25 @@
+{
+  "name": "CEDI INDUCASOS — Torre de Control",
+  "short_name": "CEDI",
+  "description": "Dashboard inteligente de abastecimiento del CEDI INDUCASOS",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#070b14",
+  "theme_color": "#070b14",
+  "icons": [
+    {
+      "src": "./icon-cedi-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "./icon-cedi-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
