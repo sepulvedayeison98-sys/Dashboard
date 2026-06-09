@@ -1974,29 +1974,35 @@ function CEDIDashboard(){
             })()}
             {/* KPI cards por estado */}
             <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:14}}>
-              {["sin_planear","planeado","en_picking"].map(k=>{
-                const ECOL2={sin_planear:{c:C.t3,l:"Sin Planear"},planeado:{c:C.accent,l:"Planeado"},en_picking:{c:C.yellow,l:"En Picking"}};
-                const ec=ECOL2[k];
-                const sp=(data?.pedidosActivos||[]).filter(p=>p.est===k);
-                const uni=sp.reduce((t,p)=>t+p.uni,0);
-                const lineas=sp.reduce((t,p)=>t+(p.lineas||0),0);
-                const piso=sp.filter(p=>p.cobertura==="PISO").length;
-                const mixto=sp.filter(p=>p.cobertura==="MIXTO").length;
-                return(
-                  <div key={k} style={{background:C.bg2,border:`1px solid ${ec.c}30`,borderRadius:12,padding:"14px 16px",borderTop:`2px solid ${ec.c}`}}>
-                    <div style={{fontSize:9,color:ec.c,fontWeight:700,textTransform:"uppercase",letterSpacing:"1px",marginBottom:6}}>{ec.l}</div>
-                    <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:30,fontWeight:800,color:C.t1,lineHeight:1,marginBottom:8}}>{sp.length}</div>
-                    <div style={{display:"flex",flexDirection:"column",gap:3,borderTop:`1px solid ${C.b0}`,paddingTop:7}}>
-                      {[["Unidades",uni,ec.c],["Líneas",lineas,C.t3],["100% Piso",piso,C.green],["Mixto",mixto,C.yellow]].map(([l,v,c])=>(
-                        <div key={l} style={{display:"flex",justifyContent:"space-between",fontSize:10}}>
-                          <span style={{color:C.t3}}>{l}</span>
-                          <span style={{color:c,fontWeight:700,fontFamily:"'JetBrains Mono',monospace"}}>{v}</span>
-                        </div>
-                      ))}
+              {(()=>{
+                const todos=data?.pedidosActivos||[];
+                const grupos=[
+                  {k:"sin_planear",l:"Sin Planear",c:C.t3,pedidos:todos.filter(p=>p.est==="sin_planear")},
+                  {k:"planeado",l:"Planeado",c:C.accent,pedidos:todos.filter(p=>p.est==="planeado"||p.est==="en_picking")},
+                  {k:"total",l:"Total Pedidos",c:C.teal,pedidos:todos},
+                ];
+                return grupos.map(g=>{
+                  const sp=g.pedidos;
+                  const uni=sp.reduce((t,p)=>t+p.uni,0);
+                  const lineas=sp.reduce((t,p)=>t+(p.lineas||0),0);
+                  const piso=sp.filter(p=>p.cobertura==="PISO").length;
+                  const mixto=sp.filter(p=>p.cobertura==="MIXTO").length;
+                  return(
+                    <div key={g.k} style={{background:C.bg2,border:`1px solid ${g.c}30`,borderRadius:12,padding:"14px 16px",borderTop:`2px solid ${g.c}`}}>
+                      <div style={{fontSize:9,color:g.c,fontWeight:700,textTransform:"uppercase",letterSpacing:"1px",marginBottom:6}}>{g.l}</div>
+                      <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:30,fontWeight:800,color:C.t1,lineHeight:1,marginBottom:8}}>{sp.length}</div>
+                      <div style={{display:"flex",flexDirection:"column",gap:3,borderTop:`1px solid ${C.b0}`,paddingTop:7}}>
+                        {[["Unidades",uni,g.c],["Líneas",lineas,C.t3],["100% Piso",piso,C.green],["Mixto",mixto,C.yellow]].map(([l,v,c])=>(
+                          <div key={l} style={{display:"flex",justifyContent:"space-between",fontSize:10}}>
+                            <span style={{color:C.t3}}>{l}</span>
+                            <span style={{color:c,fontWeight:700,fontFamily:"'JetBrains Mono',monospace"}}>{v}</span>
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                });
+              })()}
             </div>
 
             {/* Tabla de pedidos */}
