@@ -313,6 +313,27 @@ function PickingApp(){
     return {piso:ordenarRecorrido(paradasPiso),altura:ordenarRecorrido(paradasAlt)};
   },[sel,data]);
 
+  // ── Plan óptimo de estibas a bajar: agrupa cajap × SKUs del pedido ──
+  const palletPlan=useMemo(()=>{
+    if(!recorrido.altura.length)return[];
+    const map={};
+    recorrido.altura.forEach(p=>{
+      (p.cajas||[]).forEach(cj=>{
+        if(!cj.cajap)return;
+        if(!map[cj.cajap])map[cj.cajap]={cajap:cj.cajap,ubi:p.ubi,calleLetra:p.calleLetra,modulo:p.modulo,nivel:p.nivel,skus:[]};
+        if(!map[cj.cajap].skus.find(s=>s.ref===p.ref)){
+          map[cj.cajap].skus.push({ref:p.ref,desc:p.desc,pide:p.falta||p.cant,enPallet:cj.saldo});
+        }
+      });
+    });
+    // Ordenar: más SKUs del pedido primero, luego más unidades cubiertas
+    return Object.values(map).sort((a,b)=>
+      b.skus.length-a.skus.length||
+      b.skus.reduce((t,s)=>t+Math.min(s.enPallet,s.pide),0)-
+      a.skus.reduce((t,s)=>t+Math.min(s.enPallet,s.pide),0)
+    );
+  },[recorrido.altura]);
+
   // ═══════════ PANTALLAS ═══════════
   if(phase==="loading")return(
     <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"100vh",gap:16}}>
@@ -372,6 +393,83 @@ function PickingApp(){
             <div style={{height:"100%",width:`${lista.length?lista.filter((_,i)=>hechos[`${modo}-${i}`]).length/lista.length*100:0}%`,background:modo==="piso"?C.green:C.purple,transition:"width .3s"}}/>
           </div>
         </div>
+
+        {/* ── Plan de estibas a bajar (solo en modo altura) ── */}
+        {modo==="altura"&&palletPlan.length>0&&(
+          <div style={{padding:"0 12px 10px"}}>
+            <div style={{background:C.bg2,border:`1px solid ${C.purple}40`,borderRadius:13,overflow:"hidden"}}>
+              {/* Header resumen */}
+              <div style={{padding:"10px 14px",borderBottom:`1px solid ${C.b0}`,background:`${C.purple}12`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <div>
+                  <div style={{color:C.purple,fontWeight:800,fontSize:13}}>⬇ Plan de Estibas a Bajar</div>
+                  <div style={{color:C.t3,fontSize:10,marginTop:2}}>Optimizado: estibas con más SKUs del pedido primero</div>
+                </div>
+                <div style={{textAlign:"right"}}>
+                  <div className="mono" style={{color:C.purple,fontWeight:800,fontSize:20,lineHeight:1}}>{palletPlan.length}</div>
+                  <div style={{color:C.t4,fontSize:9}}>estibas</div>
+                </div>
+              </div>
+              {/* Totales rápidos */}
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",borderBottom:`1px solid ${C.b0}`}}>
+                {[
+                  {l:"Multi-SKU",v:palletPlan.filter(p=>p.skus.length>1).length,c:C.yellow},
+                  {l:"SKUs a cubrir",v:[...new Set(palletPlan.flatMap(p=>p.skus.map(s=>s.ref)))].length,c:C.teal},
+                  {l:"Unidades",v:palletPlan.reduce((t,p)=>t+p.skus.reduce((s,k)=>s+Math.min(k.enPallet,k.pide),0),0),c:C.accent},
+                ].map(k=>(
+                  <div key={k.l} style={{padding:"8px 10px",textAlign:"center",borderRight:`1px solid ${C.b0}`}}>
+                    <div style={{fontSize:8,color:C.t3,fontWeight:600,textTransform:"uppercase",marginBottom:2}}>{k.l}</div>
+                    <div className="mono" style={{fontSize:18,fontWeight:800,color:k.c,lineHeight:1}}>{k.v}</div>
+                  </div>
+                ))}
+              </div>
+              {/* Lista de pallets optimizada */}
+              {palletPlan.map((pal,pi)=>{
+                const isMulti=pal.skus.length>1;
+                const uCubre=pal.skus.reduce((t,s)=>t+Math.min(s.enPallet,s.pide),0);
+                return(
+                  <div key={pal.cajap} style={{borderBottom:pi<palletPlan.length-1?`1px solid ${C.b0}`:"none",padding:"10px 14px",background:pi%2===0?C.bg1:"transparent"}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6}}>
+                      <div style={{display:"flex",alignItems:"center",gap:7}}>
+                        <div style={{width:22,height:22,borderRadius:"50%",background:`${isMulti?C.yellow:C.purple}20`,color:isMulti?C.yellow:C.purple,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:10,flexShrink:0}}>{pi+1}</div>
+                        <div>
+                          <div style={{display:"flex",alignItems:"center",gap:6}}>
+                            <span className="mono" style={{color:C.teal,fontWeight:800,fontSize:14}}>{pal.cajap}</span>
+                            {isMulti&&<span style={{background:`${C.yellow}20`,color:C.yellow,border:`1px solid ${C.yellow}40`,borderRadius:4,padding:"1px 5px",fontSize:8,fontWeight:700}}>{pal.skus.length} SKUs</span>}
+                          </div>
+                          <div style={{color:C.t3,fontSize:10}}>{CALLE_NOM[pal.calleLetra]} · Mód {pal.modulo} · Niv {pal.nivel} · <span className="mono" style={{color:C.t2}}>{pal.ubi}</span></div>
+                        </div>
+                      </div>
+                      <div style={{textAlign:"right",flexShrink:0}}>
+                        <div className="mono" style={{color:C.green,fontWeight:800,fontSize:15,lineHeight:1}}>{uCubre}u</div>
+                        <div style={{color:C.t4,fontSize:9}}>cubren</div>
+                      </div>
+                    </div>
+                    {/* SKUs que cubre este pallet */}
+                    <div style={{display:"flex",flexDirection:"column",gap:3,paddingLeft:29}}>
+                      {pal.skus.map(s=>{
+                        const cubre=Math.min(s.enPallet,s.pide);
+                        const falta=Math.max(0,s.pide-s.enPallet);
+                        return(
+                          <div key={s.ref} style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:C.bg3,borderRadius:6,padding:"5px 9px"}}>
+                            <div style={{minWidth:0,flex:1}}>
+                              <span className="mono" style={{color:C.accent,fontWeight:700,fontSize:11}}>{s.ref}</span>
+                              <span style={{color:C.t4,fontSize:9,marginLeft:6}}>{s.desc?.slice(0,22)}</span>
+                            </div>
+                            <div style={{display:"flex",gap:5,alignItems:"center",flexShrink:0,marginLeft:6}}>
+                              <span style={{background:`${C.yellow}18`,color:C.yellow,borderRadius:4,padding:"1px 6px",fontSize:9}} className="mono">pide {s.pide}u</span>
+                              <span style={{background:`${C.green}18`,color:C.green,borderRadius:4,padding:"1px 6px",fontSize:9}} className="mono">cubre {cubre}u</span>
+                              {falta>0&&<span style={{background:`${C.orange}18`,color:C.orange,borderRadius:4,padding:"1px 6px",fontSize:9}} className="mono">falta {falta}u</span>}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {/* Lista de paradas (recorrido) */}
         <div style={{padding:"0 12px"}}>
