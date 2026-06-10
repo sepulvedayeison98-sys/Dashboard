@@ -657,9 +657,9 @@ function Sec({title,sub,c,children}){
 }
 
 // ── BLOQUE 3: SKUPanel — todas las posiciones de un SKU ──────────────────────
-function SKUPanel({ref,invBySKU,allItems,onClose}){
-  const pos=invBySKU[ref]||[];
-  const item=allItems?.find(it=>it.ref===ref)||{};
+function SKUPanel({skuRef,invBySKU,allItems,pedidosActivos,onClose}){
+  const pos=invBySKU[skuRef]||[];
+  const item=allItems?.find(it=>it.ref===skuRef)||{};
   const CALLE_NOMBRES={B:"Calle 1",C:"Calle 2",D:"Calle 3",E:"Calle 4"};
   const piso=pos.filter(p=>p.nivel<=1);
   const altura=pos.filter(p=>p.nivel>=2);
@@ -667,15 +667,20 @@ function SKUPanel({ref,invBySKU,allItems,onClose}){
   const stockAltura=altura.reduce((t,p)=>t+p.saldo,0);
   const eOP={urgente:{c:C.red,l:"URGENTE"},critico:{c:C.orange,l:"CRÍTICO"},preventivo:{c:C.yellow,l:"PREVENTIVO"},normal:{c:C.green,l:"NORMAL"}};
   const op=eOP[item.estado_op||"normal"];
+  const clsCol={despachable:C.green,parcial:C.yellow,reabasto:C.orange,ruptura:C.red};
+  const clsLbl={despachable:"DESPACHABLE",parcial:"PARCIAL",reabasto:"REABASTO",ruptura:"RUPTURA"};
+  // Pedidos que contienen este SKU
+  const pedidosDelSKU=(pedidosActivos||[]).filter(p=>p.refs?.some(r=>r.ref===skuRef));
+  const totalComprometidoPedidos=pedidosDelSKU.reduce((t,p)=>{const r=p.refs.find(r=>r.ref===skuRef);return t+(r?.cant||0);},0);
   return(
-    <div style={{position:"fixed",top:0,right:0,bottom:0,width:440,background:C.bg1,borderLeft:`1px solid ${C.b1}`,zIndex:201,display:"flex",flexDirection:"column",animation:"slideIn .2s ease",boxShadow:"-8px 0 40px #000c"}}>
+    <div style={{position:"fixed",top:0,right:0,bottom:0,width:"min(440px,100vw)",background:C.bg1,borderLeft:`1px solid ${C.b1}`,zIndex:201,display:"flex",flexDirection:"column",animation:"slideIn .2s ease",boxShadow:"-8px 0 40px #000c"}}>
       <style>{`@keyframes slideIn{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}`}</style>
       {/* Header */}
       <div style={{padding:"14px 18px",borderBottom:`1px solid ${C.b0}`,background:C.bg2}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
           <div style={{flex:1,minWidth:0,marginRight:8}}>
             <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:5}}>
-              <span style={{fontFamily:"'JetBrains Mono',monospace",color:C.teal,fontWeight:800,fontSize:16}}>{ref}</span>
+              <span style={{fontFamily:"'JetBrains Mono',monospace",color:C.teal,fontWeight:800,fontSize:16}}>{skuRef}</span>
               {op&&<span style={{background:`${op.c}18`,color:op.c,border:`1px solid ${op.c}35`,borderRadius:5,padding:"2px 8px",fontSize:9,fontWeight:700}}>{op.l}</span>}
             </div>
             <div style={{color:C.t2,fontSize:11,lineHeight:1.4}}>{item.desc?.slice(0,65)}</div>
@@ -724,7 +729,6 @@ function SKUPanel({ref,invBySKU,allItems,onClose}){
             </div>
             <div style={{height:6,background:C.b0,borderRadius:3,overflow:"hidden",position:"relative"}}>
               <div style={{width:`${Math.min(100,(stockPiso/Math.max(item.pto_max,1))*100)}%`,height:"100%",background:stockPiso>=item.pto_seg?C.green:stockPiso>=item.pto_min?C.yellow:C.red,borderRadius:3}}/>
-              {/* Líneas de referencia */}
               {[item.pto_min,item.pto_seg].map((pt,i)=>(
                 <div key={i} style={{position:"absolute",top:0,bottom:0,left:`${Math.min(100,(pt/Math.max(item.pto_max,1))*100)}%`,width:1,background:`${i===0?C.red:C.yellow}90`}}/>
               ))}
@@ -737,7 +741,7 @@ function SKUPanel({ref,invBySKU,allItems,onClose}){
           </div>
         )}
       </div>
-      {/* #5: Recomendación operativa — cuánto reponer + qué pallet bajar */}
+      {/* Acción recomendada */}
       {(()=>{
         const g=Math.max(0,(item.comp||0)-(item.stock||0));
         const repoSug=Math.ceil(g/9)*9;
@@ -761,7 +765,55 @@ function SKUPanel({ref,invBySKU,allItems,onClose}){
           </div>
         );
       })()}
-      {/* Posiciones */}
+      {/* ── PEDIDOS COMPROMETIDOS ── */}
+      <div style={{borderBottom:`1px solid ${C.b0}`,background:C.bg0}}>
+        <div style={{padding:"8px 16px",display:"flex",justifyContent:"space-between",alignItems:"center",background:C.bg1,borderBottom:`1px solid ${C.b0}`}}>
+          <div style={{fontSize:9,color:C.t3,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.8px"}}>
+            Pedidos Comprometidos
+          </div>
+          <div style={{display:"flex",gap:6,alignItems:"center"}}>
+            <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:13,fontWeight:800,color:C.yellow}}>{totalComprometidoPedidos}u</span>
+            <span style={{background:C.bg3,border:`1px solid ${C.b0}`,color:C.t3,borderRadius:5,padding:"1px 7px",fontSize:9,fontWeight:700}}>{pedidosDelSKU.length} pedidos</span>
+          </div>
+        </div>
+        {pedidosDelSKU.length===0?(
+          <div style={{padding:"14px 16px",textAlign:"center",color:C.t3,fontSize:11}}>Sin pedidos activos para este SKU</div>
+        ):(
+          <div style={{maxHeight:220,overflowY:"auto"}}>
+            {pedidosDelSKU.map((ped,i)=>{
+              const row=ped.refs.find(r=>r.ref===skuRef);
+              const cant=row?.cant||0;
+              const cubPiso=row?.cubPiso||0;
+              const faltante=Math.max(0,cant-cubPiso);
+              const c=clsCol[ped.clasificacion]||C.t3;
+              const lbl=clsLbl[ped.clasificacion]||ped.clasificacion;
+              return(
+                <div key={ped.id} style={{padding:"9px 16px",borderBottom:`1px solid ${C.bg3}`,display:"flex",justifyContent:"space-between",alignItems:"flex-start",background:i%2===0?C.bg1:"transparent"}}>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:3,flexWrap:"wrap"}}>
+                      <span style={{fontFamily:"'JetBrains Mono',monospace",color:C.teal,fontWeight:700,fontSize:11}}>#{ped.id}</span>
+                      <span style={{color:C.t2,fontSize:10}}>{ped.ciudad}</span>
+                      {ped.cliente&&<span style={{color:C.t4,fontSize:9,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:100}}>{ped.cliente}</span>}
+                    </div>
+                    <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+                      <span style={{background:`${c}18`,color:c,border:`1px solid ${c}35`,borderRadius:4,padding:"1px 6px",fontSize:8,fontWeight:700}}>{lbl}</span>
+                      <span style={{fontSize:9,color:C.t3}}>
+                        Cubre piso: <span style={{color:cubPiso>0?C.green:C.red,fontWeight:700}}>{cubPiso}u</span>
+                        {faltante>0&&<span style={{color:C.orange}}> · Falta: {faltante}u</span>}
+                      </span>
+                    </div>
+                  </div>
+                  <div style={{textAlign:"right",flexShrink:0,marginLeft:8}}>
+                    <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:18,fontWeight:800,color:C.yellow,lineHeight:1}}>{cant}u</div>
+                    <div style={{fontSize:8,color:C.t4}}>solicitadas</div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+      {/* Posiciones en inventario */}
       <div style={{flex:1,overflowY:"auto"}}>
         {pos.length===0?(
           <div style={{padding:20,textAlign:"center",color:C.t3,fontSize:12}}>Sin posiciones registradas en el inventario</div>
@@ -1287,7 +1339,7 @@ function CEDIDashboard(){
       {selSKU&&(
         <>
           <div onClick={()=>setSelSKU(null)} style={{position:"fixed",inset:0,background:"#000b",zIndex:200}}/>
-          <SKUPanel ref={selSKU} invBySKU={invBySKU} allItems={allItemsData} onClose={()=>setSelSKU(null)}/>
+          <SKUPanel skuRef={selSKU} invBySKU={invBySKU} allItems={allItemsData} pedidosActivos={data?.pedidosActivos||[]} onClose={()=>setSelSKU(null)}/>
         </>
       )}
       {/* ModulePanel overlay */}
