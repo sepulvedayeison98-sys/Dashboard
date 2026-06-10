@@ -1326,9 +1326,6 @@ function CEDIDashboard(){
             <div style={{width:5,height:5,borderRadius:"50%",background:C.red,animation:"blink 1s infinite"}}/>
             <span style={{color:C.red,fontWeight:700,fontSize:11,fontFamily:"'JetBrains Mono',monospace"}}>{(st?.totalRupturas||0)} RUPTURAS</span>
           </div>}
-          {palletsSugeridos.length>0&&<div style={{background:C.yellowDim,border:`1px solid ${C.yellow}40`,borderRadius:7,padding:"4px 10px"}}>
-            <span style={{color:C.yellow,fontWeight:700,fontSize:11}}>📦 {palletsSugeridos.length} pallets sugeridos</span>
-          </div>}
           <button onClick={()=>setCfgOpen(v=>!v)} style={{background:cfgOpen?C.accentDim:C.bg2,border:`1px solid ${cfgOpen?C.accent:C.b0}`,color:cfgOpen?C.accent:C.t3,borderRadius:7,padding:"4px 10px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>⚙ {bufH}h×{bufF}x</button>
           <button onClick={()=>{if(autoConn){cargarAuto(true);}else{setPhase("upload");setData(null);setInvFile(null);setFactFile(null);setLoadErr("");}}} style={{background:C.bg2,border:`1px solid ${C.b0}`,color:C.t3,borderRadius:7,padding:"4px 10px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>↺ Recargar</button>
           {autoConn&&<span title="Datos cargados automáticamente desde el repositorio" style={{display:"inline-flex",alignItems:"center",gap:4,background:`${C.green}15`,border:`1px solid ${C.green}40`,color:C.green,borderRadius:6,padding:"3px 8px",fontSize:9,fontWeight:700}}>🔗 Conectado</span>}
@@ -1354,7 +1351,6 @@ function CEDIDashboard(){
             {l:"Módulos OK",       v:`${globAbst}/168`,                        c:C.green,  s:`${Math.round(globAbst/168*100)}%`},
             {l:"SKUs Ruptura",     v:st?.totalRupturas||0,                     c:C.red,    s:"referencia piso=0 + demanda"},
             {l:"Abastecer Ya",     v:st?.totalGaps||0,                         c:C.yellow, s:"stock < comprometido"},
-            {l:"Pallets Sugeridos",v:palletsSugeridos.length,                  c:C.orange, s:"pallets altura requeridos"},
             {l:"SKUs en Piso",     v:(st?.skusPiso||0).toLocaleString(),        c:C.accent, s:"con pedidos activos"},
             {l:"Total Ciudades",   v:(st?.totalCiudades||"64"),                c:C.purple, s:`${(st?.totalComp||0).toLocaleString()}u comprometidas`},
           ].map((k,i)=>(
@@ -1563,7 +1559,7 @@ function CEDIDashboard(){
             );
           })()}
 
-          <div style={{display:"grid",gridTemplateColumns:"1fr 280px",gap:14}}>
+          <div style={{display:"flex",flexDirection:"column",gap:12}}>
             <div style={{display:"flex",flexDirection:"column",gap:12}}>
               {/* CEDI Map */}
               <div style={{background:C.bg2,border:`1px solid ${C.b0}`,borderRadius:13}}>
@@ -1628,104 +1624,102 @@ function CEDIDashboard(){
                 </div>
               </div>
 
-              {/* Critical table */}
-              <div style={{background:C.bg2,border:`1px solid ${C.b0}`,borderRadius:13,overflow:"hidden"}}>
-                <div style={{padding:"11px 18px",borderBottom:`1px solid ${C.b0}`,display:"flex",justifyContent:"space-between"}}>
-                  <span style={{fontWeight:700,color:C.t1,fontSize:12}}>Cascos Críticos — Stock vs Comprometido</span>
-                  <span style={{fontSize:11,color:C.t3}}>{st?.totalGaps||0} requieren abastecimiento</span>
-                </div>
-                <div style={SCROLL_BOX}>
-                <table style={{width:"100%",borderCollapse:"collapse",minWidth:820}}>
-                  <thead><tr>{["Tipo","Ref.","ABC","Estado","Stock Piso","Comprometido","Gap","Sugerir","Pedidos Afectados"].map(h=><TH key={h}>{h}</TH>)}</tr></thead>
-                  <tbody>
-                    {sorted.filter(s=>gap(s)>0).map(s=>{
-                      const e=estado(s),g=gap(s),cs2=cantSug(s,bufH,bufF),eM=sem[e],aM=abcCol[s.abc];
-                      const tc=s.tipo==="INTEGRAL"?C.orange:s.tipo==="ABATIBLE"?C.purple:C.teal;
-                      // #6: pedidos afectados por este SKU con gap — agrupar por ciudad
-                      const pedAf=(data?.pedidosActivos||[]).filter(p=>(p.refs||[]).some(r=>r.ref===s.id&&!r.hasPiso));
-                      const porCiudad={};
-                      pedAf.forEach(p=>{const ci=p.ciudad||"?";porCiudad[ci]=(porCiudad[ci]||0)+1;});
-                      const ciudadStr=Object.entries(porCiudad).sort((a,b)=>b[1]-a[1]).map(([ci,n])=>`${ci}:${n}`).join(" · ");
-                      return(
-                        <tr key={s.id} className="row" style={{borderBottom:`1px solid ${C.bg1}`}}>
-                          <TD><Badge label={s.tipo} c={tc} dim={`${tc}15`}/></TD>
-                          <TD mono c={C.t1} fw={700}>
-                            <span onClick={()=>setSelSKU(s.id)} style={{color:C.teal,cursor:"pointer",textDecoration:"underline",textDecorationColor:`${C.teal}40`}}>{s.id}</span>
-                            <div style={{color:C.t3,fontSize:9,fontFamily:"Inter",fontWeight:400,marginTop:1}}>{s.label.slice(0,28)}</div>
-                          </TD>
-                          <TD><Pill label={s.abc} c={aM.c} dim={aM.dim}/></TD>
-                          <TD><Pill label={eM.l} c={eM.c} dim={eM.dim}/></TD>
-                          <TD right mono c={s.stock_piso===0?C.red:C.green} fw={700} fs={14}>{s.stock_piso}</TD>
-                          <TD right mono c={C.yellow} fw={700} fs={14}>{s.comp}</TD>
-                          <TD right mono c={g>0?C.red:C.green} fw={800} fs={14}>{g>0?`-${g}`:"✓"}</TD>
-                          <TD right mono c={C.orange} fw={800} fs={15}>{g>0?cs2:"—"}</TD>
-                          <TD>
-                            {pedAf.length>0
-                              ?<div style={{fontSize:9,color:C.t2,lineHeight:1.5}}>
-                                <span style={{color:pedAf.some(p=>p.ciudad==="MDE"||p.ciudad==="Medellin"||p.ciudad==="MEDELLÍN")?C.orange:C.accent,fontWeight:700,fontFamily:"'JetBrains Mono',monospace"}}>{pedAf.length} ped.</span>
-                                <div style={{color:C.t3,fontSize:8,marginTop:1}}>{ciudadStr.slice(0,38)}</div>
-                              </div>
-                              :<span style={{color:C.t4,fontSize:10}}>—</span>}
-                          </TD>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-                </div>
-              </div>
-            </div>
-
-            {/* SIDE PANEL */}
-            <div style={{display:"flex",flexDirection:"column",gap:10}}>
-              <div style={{background:C.bg2,border:`1px solid ${C.b0}`,borderRadius:11,padding:"14px"}}>
-                <div style={{fontSize:9,fontWeight:600,color:C.t3,textTransform:"uppercase",letterSpacing:"1px",marginBottom:7}}>Resumen Operación</div>
-                {[
-                  {l:"Rupturas",v:st?.totalRupturas||0,c:C.red},
-                  {l:"Abastecer Ya",v:st?.totalGaps||0,c:C.orange},
-                  {l:"SKUs Cubiertos",v:Math.max(0,(st?.skusPiso||0)-(st?.totalGaps||0)),c:C.green},
-                  {l:"Sin Pedidos",v:st?.sinMov||0,c:C.t3},
-                ].map(m=>(
-                  <div key={m.l} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",borderBottom:`1px solid ${C.b0}`}}>
-                    <span style={{color:C.t3,fontSize:11}}>{m.l}</span>
-                    <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:18,fontWeight:800,color:m.c}}>{m.v}</span>
+              {/* KPI pedidos cubiertos */}
+              {(()=>{
+                const peds=data?.pedidosActivos||[];
+                const cubiertos=peds.filter(p=>p.clasificacion==="despachable").length;
+                return(
+                  <div style={{background:C.bg2,border:`1px solid ${C.green}30`,borderLeft:`3px solid ${C.green}`,borderRadius:13,padding:"16px 20px"}}>
+                    <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:34,fontWeight:800,color:C.green,lineHeight:1}}>{cubiertos.toLocaleString()}</div>
+                    <div style={{color:C.t3,fontSize:12,marginTop:4}}>pedidos despachables ahora (piso cubre todo)</div>
                   </div>
-                ))}
-              </div>
+                );
+              })()}
 
-              <div style={{background:C.bg2,border:`1px solid ${C.b0}`,borderRadius:11,overflow:"hidden",flex:1}}>
-                <div style={{padding:"10px 13px",borderBottom:`1px solid ${C.b0}`,fontSize:11,fontWeight:700,color:C.t1}}>Urgencias — Por Prioridad</div>
-                <div style={{maxHeight:400,overflowY:"auto"}}>
-                  {sorted.filter(s=>gap(s)>0).map(s=>{
-                    const e=estado(s),g=gap(s),cs2=cantSug(s,bufH,bufF),v=ventana(s),eM=sem[e],vM=vtCol[v.st];
-                    return(
-                      <div key={s.id} className="row" style={{padding:"10px 13px",borderBottom:`1px solid ${C.bg1}`,borderLeft:`3px solid ${eM.c}`}}>
-                        <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
-                          <div>
-                            <div style={{display:"flex",gap:4,marginBottom:3,flexWrap:"wrap"}}>
-                              <Badge label={eM.l} c={eM.c} dim={eM.dim}/>
-                              {s.ciudad==="MDE"&&<Badge label="MDE" c={C.orange} dim={C.orangeDim}/>}
-                            </div>
-                            <div style={{color:C.t1,fontWeight:700,fontFamily:"'JetBrains Mono',monospace",fontSize:12}}>{s.id}</div>
-                            <div style={{color:C.t3,fontSize:9}}>{s.label.slice(0,25)}</div>
+              {/* GRÁFICO DONA — Estado de Abastecimiento (datos reales) */}
+              {(()=>{
+                const peds=data?.pedidosActivos||[];
+                const desp=peds.filter(p=>p.clasificacion==="despachable").length;
+                const parc=peds.filter(p=>p.clasificacion==="parcial").length;
+                const reab=peds.filter(p=>p.clasificacion==="reabasto").length;
+                const rupt=peds.filter(p=>p.clasificacion==="ruptura").length;
+                const total=desp+parc+reab+rupt||1;
+                const segs=[{l:"Despachable",v:desp,c:C.green},{l:"Parcial",v:parc,c:C.yellow},{l:"Reabasto",v:reab,c:C.orange},{l:"Sin Stock",v:rupt,c:C.red}];
+                const R=70,sw=26,cx=90,cy=90,circ=2*Math.PI*R;
+                let acc=0;
+                return(
+                  <div style={{background:C.bg2,border:`1px solid ${C.b0}`,borderRadius:13,padding:"16px 20px"}}>
+                    <div style={{fontWeight:700,color:C.t1,fontSize:13,marginBottom:14}}>Estado de Abastecimiento</div>
+                    <div style={{display:"flex",alignItems:"center",gap:24,flexWrap:"wrap"}}>
+                      <svg width="180" height="180" viewBox="0 0 180 180">
+                        <circle cx={cx} cy={cy} r={R} fill="none" stroke={C.bg3} strokeWidth={sw}/>
+                        {segs.map((s,i)=>{
+                          if(s.v===0)return null;
+                          const frac=s.v/total;const len=frac*circ;
+                          const off=circ-acc*circ;acc+=frac;
+                          return(<circle key={i} cx={cx} cy={cy} r={R} fill="none" stroke={s.c} strokeWidth={sw}
+                            strokeDasharray={`${len} ${circ-len}`} strokeDashoffset={off}
+                            transform={`rotate(-90 ${cx} ${cy})`} style={{transition:"all .5s"}}/>);
+                        })}
+                        <text x={cx} y={cy-4} textAnchor="middle" fill={C.t1} fontSize="26" fontWeight="800" fontFamily="'JetBrains Mono',monospace">{total}</text>
+                        <text x={cx} y={cy+16} textAnchor="middle" fill={C.t3} fontSize="10">pedidos</text>
+                      </svg>
+                      <div style={{display:"flex",flexDirection:"column",gap:9}}>
+                        {segs.map((s,i)=>(
+                          <div key={i} style={{display:"flex",alignItems:"center",gap:9}}>
+                            <div style={{width:26,height:11,borderRadius:3,background:s.c}}/>
+                            <span style={{color:C.t2,fontSize:12,minWidth:78}}>{s.l}</span>
+                            <span style={{fontFamily:"'JetBrains Mono',monospace",color:s.c,fontWeight:700,fontSize:13}}>{s.v}</span>
+                            <span style={{color:C.t4,fontSize:10}}>{Math.round(s.v/total*100)}%</span>
                           </div>
-                          <div style={{textAlign:"right",flexShrink:0}}>
-                            <div style={{fontSize:8,color:C.t3}}>Llevar</div>
-                            <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:19,fontWeight:800,color:C.orange}}>{cs2}</div>
-                            <div style={{fontSize:8,color:C.t3}}>{Math.ceil(cs2/9)} cajas</div>
-                          </div>
-                        </div>
-                        <div style={{display:"flex",gap:8,fontSize:10,fontFamily:"'JetBrains Mono',monospace"}}>
-                          <span style={{color:C.red}}>P:{s.stock_piso}</span>
-                          <span style={{color:C.yellow}}>C:{s.comp}</span>
-                          <span style={{color:vM.c,fontWeight:700}}>{vM.l}</span>
-                        </div>
+                        ))}
                       </div>
-                    );
-                  })}
-                  {(st?.totalGaps||0)===0&&<div style={{padding:"20px",textAlign:"center",color:C.t3,fontSize:11}}>✅ Todos los SKUs cubiertos</div>}
-                </div>
-              </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* GRÁFICO BARRAS — Solicitado vs Abastecible por Familia (datos reales) */}
+              {(()=>{
+                const fam={};
+                (data?.SKUS||[]).forEach(s=>{
+                  const f=s.familia||"OTRO";
+                  if(!fam[f])fam[f]={solicitado:0,abastecible:0};
+                  fam[f].solicitado+=s.comp||0;
+                  fam[f].abastecible+=Math.min(s.stock_piso||0,s.comp||0);
+                });
+                const top=Object.entries(fam).filter(([k,v])=>v.solicitado>0).sort((a,b)=>b[1].solicitado-a[1].solicitado).slice(0,8);
+                const maxV=Math.max(1,...top.map(([k,v])=>v.solicitado));
+                return(
+                  <div style={{background:C.bg2,border:`1px solid ${C.b0}`,borderRadius:13,padding:"16px 20px"}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,flexWrap:"wrap",gap:8}}>
+                      <span style={{fontWeight:700,color:C.t1,fontSize:13}}>Cumplimiento por Familia</span>
+                      <div style={{display:"flex",gap:14,fontSize:10}}>
+                        <span style={{display:"flex",alignItems:"center",gap:5}}><div style={{width:12,height:12,borderRadius:2,background:C.accent}}/><span style={{color:C.t3}}>Solicitado</span></span>
+                        <span style={{display:"flex",alignItems:"center",gap:5}}><div style={{width:12,height:12,borderRadius:2,background:C.green}}/><span style={{color:C.t3}}>Abastecible (piso)</span></span>
+                      </div>
+                    </div>
+                    <div style={{display:"flex",flexDirection:"column",gap:11}}>
+                      {top.map(([f,v])=>{
+                        const pctCob=v.solicitado>0?Math.round(v.abastecible/v.solicitado*100):0;
+                        return(
+                          <div key={f}>
+                            <div style={{display:"flex",justifyContent:"space-between",fontSize:10,marginBottom:3}}>
+                              <span style={{color:C.t2,fontWeight:600}}>Familia {f}</span>
+                              <span className="mono" style={{color:pctCob>=80?C.green:pctCob>=50?C.yellow:C.red,fontWeight:700,fontFamily:"'JetBrains Mono',monospace"}}>{pctCob}% cubierto</span>
+                            </div>
+                            <div style={{position:"relative",height:18,background:C.bg3,borderRadius:4,overflow:"hidden"}}>
+                              <div style={{position:"absolute",top:0,left:0,height:"100%",width:`${v.solicitado/maxV*100}%`,background:`${C.accent}40`,borderRadius:4}}/>
+                              <div style={{position:"absolute",top:0,left:0,height:"100%",width:`${v.abastecible/maxV*100}%`,background:C.green,borderRadius:4,transition:"width .5s"}}/>
+                              <div style={{position:"absolute",right:7,top:0,height:"100%",display:"flex",alignItems:"center",fontSize:9,color:C.t1,fontFamily:"'JetBrains Mono',monospace",fontWeight:700}}>{v.abastecible}/{v.solicitado}u</div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           </div>
           </div>
