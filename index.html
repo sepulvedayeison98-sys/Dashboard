@@ -627,6 +627,17 @@ const GS=`
   ::-webkit-scrollbar{width:4px;height:4px}
   ::-webkit-scrollbar-track{background:#070f1c}
   ::-webkit-scrollbar-thumb{background:#1c3050;border-radius:4px}
+  .tabs-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;white-space:nowrap;width:100%;padding-bottom:2px}
+  .tabs-scroll::-webkit-scrollbar{display:none}
+  .tabs-scroll>div{display:inline-flex;gap:2px}
+  .hdr-right{display:flex;align-items:center;gap:7px;flex-wrap:wrap;justify-content:flex-end}
+  @media(max-width:767px){
+    .hdr-subtitle{display:none!important}
+    .hdr-marca{display:none!important}
+    .hdr-date{display:none!important}
+    .hdr-reconect{display:none!important}
+    .upload-grid{grid-template-columns:1fr!important}
+  }
 `;
 
 // ── Sec: sección reutilizable para el tab Reporte ────────────────────────────
@@ -1042,6 +1053,8 @@ function CEDIDashboard(){
   const [planCompacto,setPlanCompacto]=useState(false); // reposición: vista compacta
   const [expandPlan,setExpandPlan]=useState(null); // reposición: card desplegada (acordeón)
   const [wbCache,setWbCache]=useState(null); // workbooks crudos para reproceso sin re-subir
+  const [isMobile,setIsMobile]=useState(typeof window!=='undefined'&&window.innerWidth<768);
+  useEffect(()=>{const h=()=>setIsMobile(window.innerWidth<768);window.addEventListener('resize',h);return()=>window.removeEventListener('resize',h);},[]);
 
   // [FIX] activate: leer workbooks y pasar directamente a processFiles
   const activate=useCallback(async()=>{
@@ -1214,7 +1227,7 @@ function CEDIDashboard(){
         <button onClick={()=>cargarAuto(true)} style={{padding:"6px 14px",borderRadius:7,background:C.teal,border:"none",color:C.bg0,fontWeight:700,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>↻ Reintentar conexión</button>
       </div>}
 
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,width:"100%",maxWidth:620,marginBottom:18,animation:"fadeUp .4s .1s ease both"}}>
+      <div className="upload-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,width:"100%",maxWidth:620,marginBottom:18,animation:"fadeUp .4s .1s ease both"}}>
         <div style={{background:C.bg2,border:`1px solid ${C.b0}`,borderRadius:14,padding:16}}>
           <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
             <span style={{fontSize:16}}>📦</span>
@@ -1286,19 +1299,19 @@ function CEDIDashboard(){
       )}
 
       {/* HEADER */}
-      <header style={{background:C.bg1,borderBottom:`1px solid ${C.b0}`,padding:"0 24px",height:52,display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:100}}>
-        <div style={{display:"flex",alignItems:"center",gap:14}}>
+      <header style={{background:C.bg1,borderBottom:`1px solid ${C.b0}`,padding:isMobile?"0 12px":"0 24px",minHeight:52,display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:100,flexWrap:"wrap",gap:isMobile?6:0}}>
+        <div style={{display:"flex",alignItems:"center",gap:isMobile?8:14,flexWrap:"wrap"}}>
           <div style={{display:"flex",alignItems:"center",gap:8}}>
             <div style={{width:26,height:26,borderRadius:7,background:`linear-gradient(135deg,${C.accent},${C.purple})`,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
               <div style={{width:13,height:13,borderRadius:3,border:"2px solid white",borderBottom:"none"}}/>
             </div>
             <span style={{fontSize:13,fontWeight:800,color:C.t1,letterSpacing:"-0.3px"}}>INDUCASOS</span>
-            <div style={{width:1,height:14,background:C.b0}}/>
-            <span style={{color:C.t3,fontSize:11}}>Torre de Control CEDI</span>
+            <div className="hdr-subtitle" style={{width:1,height:14,background:C.b0}}/>
+            <span className="hdr-subtitle" style={{color:C.t3,fontSize:11}}>Torre de Control CEDI</span>
           </div>
           <Badge label="SOLO CASCOS" c={C.teal} dim={C.tealDim}/>
           {/* #1: Toggle de marcas en CEDI */}
-          <div style={{display:"flex",gap:2,background:C.bg3,borderRadius:6,padding:2,alignItems:"center"}}>
+          <div className="hdr-marca" style={{display:"flex",gap:2,background:C.bg3,borderRadius:6,padding:2,alignItems:"center"}}>
             <span style={{fontSize:8,color:C.t4,padding:"0 4px",fontWeight:600}}>MARCA</span>
             {["ICH","TECH"].map(m=>{
               const on=marcas.includes(m);
@@ -1321,15 +1334,15 @@ function CEDIDashboard(){
             })}
           </div>
         </div>
-        <div style={{display:"flex",alignItems:"center",gap:7}}>
+        <div className="hdr-right">
           {(st?.totalRupturas||0)>0&&<div style={{display:"flex",alignItems:"center",gap:5,background:C.redDim,border:`1px solid ${C.red}40`,borderRadius:7,padding:"4px 10px",animation:"pulse 2s infinite"}}>
             <div style={{width:5,height:5,borderRadius:"50%",background:C.red,animation:"blink 1s infinite"}}/>
             <span style={{color:C.red,fontWeight:700,fontSize:11,fontFamily:"'JetBrains Mono',monospace"}}>{(st?.totalRupturas||0)} RUPTURAS</span>
           </div>}
           <button onClick={()=>setCfgOpen(v=>!v)} style={{background:cfgOpen?C.accentDim:C.bg2,border:`1px solid ${cfgOpen?C.accent:C.b0}`,color:cfgOpen?C.accent:C.t3,borderRadius:7,padding:"4px 10px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>⚙ {bufH}h×{bufF}x</button>
           <button onClick={()=>{if(autoConn){cargarAuto(true);}else{setPhase("upload");setData(null);setInvFile(null);setFactFile(null);setLoadErr("");}}} style={{background:C.bg2,border:`1px solid ${C.b0}`,color:C.t3,borderRadius:7,padding:"4px 10px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>↺ Recargar</button>
-          {autoConn&&<span title="Datos cargados automáticamente desde el repositorio" style={{display:"inline-flex",alignItems:"center",gap:4,background:`${C.green}15`,border:`1px solid ${C.green}40`,color:C.green,borderRadius:6,padding:"3px 8px",fontSize:9,fontWeight:700}}>🔗 Conectado</span>}
-          <div title="Fecha de la última actualización de los datos en el repositorio" style={{background:C.bg2,border:`1px solid ${C.b0}`,borderRadius:7,padding:"4px 10px",fontSize:10,color:C.t3,fontFamily:"'JetBrains Mono',monospace",display:"flex",alignItems:"center",gap:5}}><span style={{color:C.t4}}>🕒 Datos:</span><span style={{color:ultActu?C.accent:C.t4,fontWeight:700}}>{ultActu||"—"}</span></div>
+          {autoConn&&<span className="hdr-reconect" title="Datos cargados automáticamente desde el repositorio" style={{display:"inline-flex",alignItems:"center",gap:4,background:`${C.green}15`,border:`1px solid ${C.green}40`,color:C.green,borderRadius:6,padding:"3px 8px",fontSize:9,fontWeight:700}}>🔗 Conectado</span>}
+          <div className="hdr-date" title="Fecha de la última actualización de los datos en el repositorio" style={{background:C.bg2,border:`1px solid ${C.b0}`,borderRadius:7,padding:"4px 10px",fontSize:10,color:C.t3,fontFamily:"'JetBrains Mono',monospace",display:"flex",alignItems:"center",gap:5}}><span style={{color:C.t4}}>🕒 Datos:</span><span style={{color:ultActu?C.accent:C.t4,fontWeight:700}}>{ultActu||"—"}</span></div>
         </div>
       </header>
 
@@ -1344,9 +1357,9 @@ function CEDIDashboard(){
         </div>
       </div>}
 
-      <div style={{padding:"16px 24px"}}>
+      <div style={{padding:isMobile?"10px 10px":"16px 24px"}}>
         {/* KPI STRIP */}
-        <div style={{display:"grid",gridTemplateColumns:"repeat(6,1fr)",gap:9,marginBottom:16}}>
+        <div style={{display:"grid",gridTemplateColumns:isMobile?"repeat(3,1fr)":"repeat(6,1fr)",gap:isMobile?7:9,marginBottom:16}}>
           {[
             {l:"Módulos OK",       v:`${globAbst}/168`,                        c:C.green,  s:`${Math.round(globAbst/168*100)}%`},
             {l:"SKUs Ruptura",     v:st?.totalRupturas||0,                     c:C.red,    s:"referencia piso=0 + demanda"},
@@ -1363,12 +1376,14 @@ function CEDIDashboard(){
         </div>
 
         {/* TABS */}
-        <div style={{display:"flex",gap:2,marginBottom:16,background:C.bg2,border:`1px solid ${C.b0}`,padding:3,borderRadius:9,width:"fit-content"}}>
-          {[{k:"dashboard",l:"🗺 CEDI Live"},{k:"plan",l:"📋 Reposición"},{k:"pipeline",l:"📦 Pipeline"},{k:"stock",l:"📊 Stock"},{k:"slotting",l:"⬆ Slotting"},{k:"reporte",l:"📑 Reporte"}].map(t=>(
-            <button key={t.k} onClick={()=>setTab(t.k)} style={{padding:"6px 14px",borderRadius:7,fontSize:11,fontWeight:600,fontFamily:"'Inter',sans-serif",background:tab===t.k?C.accent:"transparent",color:tab===t.k?C.bg0:C.t3,border:"none",cursor:"pointer",transition:"all .15s"}}>
-              {t.l}
-            </button>
-          ))}
+        <div className="tabs-scroll" style={{marginBottom:16}}>
+          <div style={{display:"inline-flex",gap:2,background:C.bg2,border:`1px solid ${C.b0}`,padding:3,borderRadius:9}}>
+            {[{k:"dashboard",l:"🗺 CEDI Live"},{k:"plan",l:"📋 Reposición"},{k:"pipeline",l:"📦 Pipeline"},{k:"stock",l:"📊 Stock"},{k:"slotting",l:"⬆ Slotting"},{k:"reporte",l:"📑 Reporte"}].map(t=>(
+              <button key={t.k} onClick={()=>setTab(t.k)} style={{padding:"6px 14px",borderRadius:7,fontSize:11,fontWeight:600,fontFamily:"'Inter',sans-serif",background:tab===t.k?C.accent:"transparent",color:tab===t.k?C.bg0:C.t3,border:"none",cursor:"pointer",transition:"all .15s",whiteSpace:"nowrap"}}>
+                {t.l}
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* ═ DASHBOARD ═ */}
@@ -1398,7 +1413,7 @@ function CEDIDashboard(){
               );
             })()}
             {/* RESUMEN EJECUTIVO — panorama operativo en 3 segundos */}
-            <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10}}>
+            <div style={{display:"grid",gridTemplateColumns:isMobile?"repeat(2,1fr)":"repeat(4,1fr)",gap:10}}>
               {[
                 {l:"Despachables ya",v:st?.pedDespachables||0,sub:`${(st?.uniDespachables||0).toLocaleString()} u · 100% piso`,c:C.green,ic:"✓",act:()=>{setTab("pipeline");setPedFiltro("despachable");}},
                 {l:"Requieren reabasto",v:(st?.pedReabasto||0)+(st?.pedParciales||0),sub:"bajar de altura a piso",c:C.orange,ic:"⬇",act:()=>{setTab("pipeline");setPedFiltro("reabasto");}},
@@ -1579,9 +1594,9 @@ function CEDIDashboard(){
                     ))}
                   </div>
                 </div>
-                <div style={{padding:"12px 18px",display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10}}>
+                <div style={{padding:isMobile?"8px 10px":"12px 18px",display:"grid",gridTemplateColumns:isMobile?"repeat(2,1fr)":"repeat(4,1fr)",gap:isMobile?8:10}}>
                   {calles.map(cs=>(
-                    <div key={cs.c} style={{background:C.bg1,borderRadius:10,padding:"12px 10px",border:`1px solid ${cs.cnt.ruptura>0?C.red:cs.cnt.critico>0?C.orange:C.b0}20`}}>
+                    <div key={cs.c} style={{background:C.bg1,borderRadius:10,padding:isMobile?"10px 8px":"12px 10px",border:`1px solid ${cs.cnt.ruptura>0?C.red:cs.cnt.critico>0?C.orange:C.b0}20`}}>
                       <div style={{display:"flex",justifyContent:"space-between",marginBottom:7}}>
                         <div>
                           <div style={{color:calleCol[cs.c],fontSize:10,fontWeight:700}}>Calle {cs.c.slice(1)}</div>
@@ -1595,7 +1610,7 @@ function CEDIDashboard(){
                       <div style={{height:2,background:C.b0,borderRadius:1,overflow:"hidden",marginBottom:8}}>
                         <div style={{width:`${cs.pct}%`,height:"100%",background:cs.pct>80?C.green:cs.pct>60?C.yellow:C.red}}/>
                       </div>
-                      <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:2}}>
+                      <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:isMobile?1:2}}>
                         {cs.mods.map(m=>{
                           // B4: heatmap = color por % cobertura (stock/72 pallet capacity)
                           const heatColor=mapMode==="heatmap"?(()=>{
@@ -1967,7 +1982,7 @@ function CEDIDashboard(){
               );
             })()}
             {/* KPI cards por estado */}
-            <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:14}}>
+            <div style={{display:"grid",gridTemplateColumns:isMobile?"repeat(2,1fr)":"repeat(3,1fr)",gap:10,marginBottom:14}}>
               {(()=>{
                 const todos=data?.pedidosActivos||[];
                 const grupos=[
@@ -2264,7 +2279,7 @@ function CEDIDashboard(){
         {/* ═ STOCK vs COMPROMETIDO ═ */}
         {tab==="stock"&&(
           <div style={{animation:"fadeUp .3s ease"}}>
-            <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:14}}>
+            <div style={{display:"grid",gridTemplateColumns:isMobile?"repeat(2,1fr)":"repeat(4,1fr)",gap:10,marginBottom:14}}>
               {[
                 {l:"Total Stock Piso",v:(st?.totalStock||0).toLocaleString(),c:C.green,s:"unidades en módulos"},
                 {l:"Total Comprometido",v:(st?.totalComp||0).toLocaleString(),c:C.yellow,s:"pedidos típicos activos"},
@@ -2300,7 +2315,7 @@ function CEDIDashboard(){
               const topGap=[...(data?.allItems||[])].filter(it=>it.gap>0).sort((a,b)=>b.gap-a.gap).slice(0,15);
               const maxGap=topGap.length?topGap[0].gap:1;
               return(
-                <div style={{display:"grid",gridTemplateColumns:"360px 1fr",gap:14,marginBottom:14}}>
+                <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"360px 1fr",gap:14,marginBottom:14}}>
                   {/* DONA por familia */}
                   <div style={{background:C.bg2,border:`1px solid ${C.b0}`,borderRadius:13,padding:"16px 18px"}}>
                     <div style={{fontSize:12,fontWeight:700,color:C.t1,marginBottom:4}}>Comprometido por Familia</div>
@@ -2556,7 +2571,7 @@ function CEDIDashboard(){
 
         {tab==="slotting"&&(
           <div style={{animation:"fadeUp .3s ease"}}>
-            <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:14}}>
+            <div style={{display:"grid",gridTemplateColumns:isMobile?"repeat(2,1fr)":"repeat(4,1fr)",gap:10,marginBottom:14}}>
               {[
                 {l:"SKUs con Pedidos Activos",v:(st?.skusPiso||0).toLocaleString(),c:C.green,s:"justifican módulo en piso"},
                 {l:"Cajas a Liberar",v:(st?.totalCajas||0).toLocaleString(),c:C.yellow,s:`${(st?.totalUSubir||0).toLocaleString()} u en ×9`},
@@ -2570,7 +2585,7 @@ function CEDIDashboard(){
                 </div>
               ))}
             </div>
-            <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:14}}>
+            <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"repeat(3,1fr)",gap:8,marginBottom:14}}>
               {[{id:"R1",txt:"stock piso ≥ comprometido → NO abastecer",c:C.green},{id:"R2",txt:"sin pedidos activos → organizar ×9 → subir a altura",c:C.yellow},{id:"R3",txt:"referencias EXPO excluidas del sistema completo",c:C.red}].map(r=>(
                 <div key={r.id} style={{background:C.bg2,border:`1px solid ${C.b0}`,borderRadius:9,padding:"9px 13px",display:"flex",gap:8,alignItems:"center"}}>
                   <Badge label={r.id} c={r.c} dim={`${r.c}18`} sz={10} px={9} py={4}/>
@@ -2734,7 +2749,7 @@ function CEDIDashboard(){
             </div>
 
             {/* KPIs ejecutivos reales */}
-            <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:8,marginBottom:14}}>
+            <div style={{display:"grid",gridTemplateColumns:isMobile?"repeat(4,1fr)":"repeat(7,1fr)",gap:isMobile?6:8,marginBottom:14}}>
               {[
                 {l:"Stock Piso",    v:(st?.totalStock||0).toLocaleString(),    c:C.green,  s:"unidades nivel 1-2"},
                 {l:"Stock Altura",  v:(st?.totalStockAlt||0).toLocaleString(), c:C.purple, s:"unidades nivel 3-5"},
@@ -2768,7 +2783,7 @@ function CEDIDashboard(){
             )}
 
             {/* Rupturas + Gaps en columnas */}
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
+            <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:14}}>
 
               <Sec title={`🔴 Rupturas (${rupturas.length})`} sub="piso=0 con pedidos activos" c={`${rupturas.length} SKUs`}>
                 <div style={{maxHeight:420,overflowY:"auto"}}>
@@ -2836,7 +2851,7 @@ function CEDIDashboard(){
 
             {/* Ciudades */}
             <Sec title="🌎 Comprometido por Ciudad" sub="todas las ciudades · ITAGUÍ WMS" c={`${cityR.length} ciudades`}>
-              <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)"}}>
+              <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"repeat(2,1fr)"}}>
                 {cityR.map((c,i)=>{
                   const pct=Math.round((c.comp/maxCityComp)*100);
                   return(
@@ -2862,7 +2877,7 @@ function CEDIDashboard(){
 
             {/* Estado módulos */}
             <Sec title="🏭 Estado Real de Módulos por Calle" sub="basado en inventario cargado">
-              <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)"}}>
+              <div style={{display:"grid",gridTemplateColumns:isMobile?"repeat(2,1fr)":"repeat(4,1fr)"}}>
                 {modR.map((calle,i)=>{
                   const CLABEL={C1:"Calle 1 (B)",C2:"Calle 2 (C)",C3:"Calle 3 (D)",C4:"Calle 4 (E)"};
                   const ocupados=42-calle.vacios;
