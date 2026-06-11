@@ -664,10 +664,10 @@ function Sec({title,sub,c,children}){
 }
 
 // ── BLOQUE 3: SKUPanel — todas las posiciones de un SKU ──────────────────────
-function SKUPanel({ref,invBySKU,allItems,onClose}){
-  const pos=invBySKU[ref]||[];
-  const item=allItems?.find(it=>it.ref===ref)||{};
-  const CALLE_NOMBRES={B:"Calle 1",C:"Calle 2",D:"Calle 3",E:"Calle 4"};
+function SKUPanel({skuRef,invBySKU,allItems,pedidosActivos,onClose}){
+  const isMob=typeof window!=='undefined'&&window.innerWidth<768;
+  const pos=invBySKU[skuRef]||[];
+  const item=allItems?.find(it=>it.ref===skuRef)||{};  const CALLE_NOMBRES={B:"Calle 1",C:"Calle 2",D:"Calle 3",E:"Calle 4"};
   const piso=pos.filter(p=>p.nivel<=1);
   const altura=pos.filter(p=>p.nivel>=2);
   const stockPiso=piso.reduce((t,p)=>t+p.saldo,0);
@@ -675,8 +675,7 @@ function SKUPanel({ref,invBySKU,allItems,onClose}){
   const eOP={urgente:{c:C.red,l:"URGENTE"},critico:{c:C.orange,l:"CRÍTICO"},preventivo:{c:C.yellow,l:"PREVENTIVO"},normal:{c:C.green,l:"NORMAL"}};
   const op=eOP[item.estado_op||"normal"];
   return(
-    <div style={{position:"fixed",top:0,right:0,bottom:0,width:440,background:C.bg1,borderLeft:`1px solid ${C.b1}`,zIndex:201,display:"flex",flexDirection:"column",animation:"slideIn .2s ease",boxShadow:"-8px 0 40px #000c"}}>
-      <style>{`@keyframes slideIn{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}`}</style>
+<div style={{position:"fixed",top:0,right:0,bottom:0,width:isMob?"100vw":"440px",background:C.bg1,borderLeft:`1px solid ${C.b1}`,zIndex:201,display:"flex",flexDirection:"column",animation:"slideIn .2s ease",boxShadow:"-8px 0 40px #000c"}}>      <style>{`@keyframes slideIn{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}`}</style>
       {/* Header */}
       <div style={{padding:"14px 18px",borderBottom:`1px solid ${C.b0}`,background:C.bg2}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
@@ -691,7 +690,7 @@ function SKUPanel({ref,invBySKU,allItems,onClose}){
         </div>
       </div>
       {/* KPIs SKU */}
-      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:1,borderBottom:`1px solid ${C.b0}`}}>
+      <div style={{display:"grid",gridTemplateColumns:isMob?"repeat(2,1fr)":"repeat(4,1fr)",gap:1,borderBottom:`1px solid ${C.b0}`}}>
         {[
           {l:"Stock Piso",   v:stockPiso,   c:stockPiso===0?C.red:C.green},
           {l:"Stock Altura", v:stockAltura, c:C.purple},
@@ -707,7 +706,7 @@ function SKUPanel({ref,invBySKU,allItems,onClose}){
       {/* Puntos operacionales */}
       <div style={{padding:"10px 16px",borderBottom:`1px solid ${C.b0}`,background:C.bg0}}>
         <div style={{fontSize:9,color:C.t3,fontWeight:600,textTransform:"uppercase",letterSpacing:"0.8px",marginBottom:7}}>Puntos Operacionales</div>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8}}>
+        <div style={{display:"grid",gridTemplateColumns:isMob?"repeat(2,1fr)":"repeat(3,1fr)",gap:8}}>
           {[
             {l:"Punto Mínimo", v:item.pto_min||0, c:C.red,    s:"1d demanda"},
             {l:"Punto Seguridad",v:item.pto_seg||0,c:C.yellow, s:"2× ciclo repos."},
@@ -753,7 +752,7 @@ function SKUPanel({ref,invBySKU,allItems,onClose}){
         return(
           <div style={{padding:"10px 16px",borderBottom:`1px solid ${C.b0}`,background:`${C.orange}06`}}>
             <div style={{fontSize:9,color:C.t3,fontWeight:600,textTransform:"uppercase",letterSpacing:"0.8px",marginBottom:7}}>Acción Recomendada</div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+            <div style={{display:"grid",gridTemplateColumns:isMob?"1fr":"1fr 1fr",gap:8}}>
               {g>0&&<div style={{background:C.bg2,borderRadius:7,padding:"9px 11px",borderLeft:`3px solid ${C.orange}`}}>
                 <div style={{fontSize:8,color:C.t3,marginBottom:3}}>Reponer al piso</div>
                 <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:22,fontWeight:800,color:C.orange}}>{repoSug}u</div>
@@ -801,6 +800,7 @@ function SKUPanel({ref,invBySKU,allItems,onClose}){
 
 // ── [PATCH 5] ModulePanel ─────────────────────────────────────────────────────
 function ModulePanel({modKey,invByModule,compMap,onClose}){
+  const isMob=typeof window!=='undefined'&&window.innerWidth<768;
   const rows=invByModule[modKey]||[];
   const calleLetra=modKey[0];
   const modNum=modKey.slice(1);
@@ -819,7 +819,7 @@ function ModulePanel({modKey,invByModule,compMap,onClose}){
   }
   const skuList=Object.values(byRef).sort((a,b)=>b.stock-a.stock);
   return(
-    <div style={{position:"fixed",top:0,right:0,bottom:0,width:420,background:C.bg1,borderLeft:`1px solid ${C.b1}`,zIndex:200,display:"flex",flexDirection:"column",animation:"slideIn .2s ease",boxShadow:"-8px 0 40px #000a"}}>
+    <div style={{position:"fixed",top:0,right:0,bottom:0,width:isMob?"100vw":"420px",background:C.bg1,borderLeft:`1px solid ${C.b1}`,zIndex:200,display:"flex",flexDirection:"column",animation:"slideIn .2s ease",boxShadow:"-8px 0 40px #000a"}}>
       <style>{`@keyframes slideIn{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}`}</style>
       {/* Header */}
       <div style={{padding:"16px 18px",borderBottom:`1px solid ${C.b0}`,display:"flex",justifyContent:"space-between",alignItems:"center",background:C.bg2}}>
@@ -844,7 +844,7 @@ function ModulePanel({modKey,invByModule,compMap,onClose}){
         <button onClick={onClose} style={{width:30,height:30,borderRadius:"50%",background:C.bg3,border:`1px solid ${C.b0}`,color:C.t2,fontSize:16,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>×</button>
       </div>
       {/* Stats rápidos */}
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:1,borderBottom:`1px solid ${C.b0}`}}>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:1,borderBottom:`1px solid ${C.b0}`}}>
         {[{l:"SKUs",v:skusUnicos,c:mezcla?C.red:C.green},{l:"Stock Total",v:totalStock,c:C.accent},{l:"Comprometido",v:totalComp,c:totalComp>0?C.yellow:C.t4}].map(k=>(
           <div key={k.l} style={{background:C.bg2,padding:"10px 14px",textAlign:"center"}}>
             <div style={{fontSize:8,color:C.t3,fontWeight:600,textTransform:"uppercase",letterSpacing:"0.8px",marginBottom:3}}>{k.l}</div>
@@ -1413,7 +1413,7 @@ function CEDIDashboard(){
               return(
                 <div style={{background:`${C.red}10`,border:`1px solid ${C.red}40`,borderRadius:11,padding:"11px 16px",display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
                   <span style={{fontSize:18}}>⚠</span>
-                  <div style={{flex:1,minWidth:200}}>
+                  <div style={{flex:1,minWidth:isMobile?0:200}}>
                     <div style={{fontSize:12,fontWeight:800,color:C.red}}>Familias descubiertas — cobertura piso &lt; {UMBRAL}%</div>
                     <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:6}}>
                       {desc.map(f=>(
@@ -2037,7 +2037,7 @@ function CEDIDashboard(){
                 <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
                   {/* Búsqueda global */}
                   <input value={pedSearch} onChange={e=>setPedSearch(e.target.value)} placeholder="🔍 cliente, ref, ciudad..."
-                    style={{background:C.bg0,border:`1px solid ${C.b0}`,borderRadius:6,padding:"5px 10px",color:C.t1,fontSize:11,fontFamily:"inherit",width:175,outline:"none"}}/>
+                    style={{background:C.bg0,border:`1px solid ${C.b0}`,borderRadius:6,padding:"5px 10px",color:C.t1,fontSize:11,fontFamily:"inherit",width:isMobile?"100%":175,outline:"none"}}/>
                   {/* Filtros de clasificación */}
                   <div style={{display:"flex",gap:2,background:C.bg3,borderRadius:6,padding:2}}>
                     {[{k:"todos",l:"Todos",c:C.t2},{k:"despachable",l:"Despachables",c:C.green},{k:"reabasto",l:"Reabasto",c:C.orange},{k:"ruptura",l:"Ruptura",c:C.red}].map(f=>(
@@ -2625,7 +2625,7 @@ function CEDIDashboard(){
                   </div>
                 </div>
                 <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
-                  <input value={slotBusca} onChange={e=>setSlotBusca(e.target.value)} placeholder="🔍 Buscar ref o descripción..." style={{flex:1,minWidth:160,background:C.bg3,color:C.t1,border:`1px solid ${C.b0}`,borderRadius:7,padding:"6px 10px",fontSize:11,fontFamily:"inherit"}}/>
+                  <input value={slotBusca} onChange={e=>setSlotBusca(e.target.value)} placeholder="🔍 Buscar ref o descripción..." style={{flex:1,minWidth:isMobile?80:160,background:C.bg3,color:C.t1,border:`1px solid ${C.b0}`,borderRadius:7,padding:"6px 10px",fontSize:11,fontFamily:"inherit"}}/>
                   <select value={slotFam} onChange={e=>setSlotFam(e.target.value)} style={{background:C.bg3,color:C.t1,border:`1px solid ${C.b0}`,borderRadius:7,padding:"6px 9px",fontSize:10,fontWeight:600,fontFamily:"inherit",cursor:"pointer"}}>
                     <option value="todas">Todas familias</option>
                     {[...new Set((data?.alturaItems||[]).map(s=>familia(s.desc)).filter(Boolean))].sort().map(f=><option key={f} value={f}>Familia {f}</option>)}

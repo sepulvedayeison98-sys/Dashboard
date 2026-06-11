@@ -427,16 +427,16 @@ function PickingApp(){
                 const isMulti=pal.skus.length>1;
                 const uCubre=pal.skus.reduce((t,s)=>t+Math.min(s.enPallet,s.pide),0);
                 return(
-                  <div key={pal.cajap} style={{borderBottom:pi<palletPlan.length-1?`1px solid ${C.b0}`:"none",padding:"10px 14px",background:pi%2===0?C.bg1:"transparent"}}>
-                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6}}>
-                      <div style={{display:"flex",alignItems:"center",gap:7}}>
+                  <div key={pal.cajap} style={{borderBottom:pi<palletPlan.length-1?`1px solid ${C.b0}`:"none",padding:"10px 12px",background:pi%2===0?C.bg1:"transparent"}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6,gap:6}}>
+                      <div style={{display:"flex",alignItems:"center",gap:7,minWidth:0,flex:1}}>
                         <div style={{width:22,height:22,borderRadius:"50%",background:`${isMulti?C.yellow:C.purple}20`,color:isMulti?C.yellow:C.purple,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:10,flexShrink:0}}>{pi+1}</div>
-                        <div>
-                          <div style={{display:"flex",alignItems:"center",gap:6}}>
+                        <div style={{minWidth:0}}>
+                          <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
                             <span className="mono" style={{color:C.teal,fontWeight:800,fontSize:14}}>{pal.cajap}</span>
                             {isMulti&&<span style={{background:`${C.yellow}20`,color:C.yellow,border:`1px solid ${C.yellow}40`,borderRadius:4,padding:"1px 5px",fontSize:8,fontWeight:700}}>{pal.skus.length} SKUs</span>}
                           </div>
-                          <div style={{color:C.t3,fontSize:10}}>{CALLE_NOM[pal.calleLetra]} · Mód {pal.modulo} · Niv {pal.nivel} · <span className="mono" style={{color:C.t2}}>{pal.ubi}</span></div>
+                          <div style={{color:C.t3,fontSize:9,marginTop:2}}>{CALLE_NOM[pal.calleLetra]} · Mód {pal.modulo} · Niv {pal.nivel} · <span className="mono" style={{color:C.t2}}>{pal.ubi}</span></div>
                         </div>
                       </div>
                       <div style={{textAlign:"right",flexShrink:0}}>
@@ -445,20 +445,20 @@ function PickingApp(){
                       </div>
                     </div>
                     {/* SKUs que cubre este pallet */}
-                    <div style={{display:"flex",flexDirection:"column",gap:3,paddingLeft:29}}>
+                    <div style={{display:"flex",flexDirection:"column",gap:3,paddingLeft:10}}>
                       {pal.skus.map(s=>{
                         const cubre=Math.min(s.enPallet,s.pide);
                         const falta=Math.max(0,s.pide-s.enPallet);
                         return(
-                          <div key={s.ref} style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:C.bg3,borderRadius:6,padding:"5px 9px"}}>
-                            <div style={{minWidth:0,flex:1}}>
-                              <span className="mono" style={{color:C.accent,fontWeight:700,fontSize:11}}>{s.ref}</span>
-                              <span style={{color:C.t4,fontSize:9,marginLeft:6}}>{s.desc?.slice(0,22)}</span>
+                          <div key={s.ref} style={{background:C.bg3,borderRadius:6,padding:"6px 9px"}}>
+                            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:3}}>
+                              <span className="mono" style={{color:C.accent,fontWeight:700,fontSize:12}}>{s.ref}</span>
+                              <span className="mono" style={{color:C.yellow,fontSize:11,fontWeight:700}}>pide {s.pide}u</span>
                             </div>
-                            <div style={{display:"flex",gap:5,alignItems:"center",flexShrink:0,marginLeft:6}}>
-                              <span style={{background:`${C.yellow}18`,color:C.yellow,borderRadius:4,padding:"1px 6px",fontSize:9}} className="mono">pide {s.pide}u</span>
-                              <span style={{background:`${C.green}18`,color:C.green,borderRadius:4,padding:"1px 6px",fontSize:9}} className="mono">cubre {cubre}u</span>
-                              {falta>0&&<span style={{background:`${C.orange}18`,color:C.orange,borderRadius:4,padding:"1px 6px",fontSize:9}} className="mono">falta {falta}u</span>}
+                            <div style={{color:C.t4,fontSize:9,marginBottom:4}}>{s.desc?.slice(0,32)}</div>
+                            <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                              <span style={{background:`${C.green}18`,color:C.green,borderRadius:4,padding:"2px 7px",fontSize:9}} className="mono">✓ cubre {cubre}u</span>
+                              {falta>0&&<span style={{background:`${C.orange}18`,color:C.orange,borderRadius:4,padding:"2px 7px",fontSize:9}} className="mono">falta {falta}u</span>}
                             </div>
                           </div>
                         );
@@ -631,7 +631,7 @@ function PickingApp(){
                         </div>
                       </div>
                       {/* Métricas: piso / altura / comprometido / libre */}
-                      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:6,marginBottom:8}}>
+                      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6,marginBottom:8}}>
                         <div style={{background:C.bg1,borderRadius:7,padding:"6px 0",textAlign:"center"}}>
                           <div className="mono" style={{color:C.green,fontWeight:800,fontSize:14}}>{s.stockPiso}</div>
                           <div style={{color:C.t4,fontSize:8}}>PISO</div>
