@@ -649,12 +649,14 @@ const GS=`
   .tabs-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;white-space:nowrap;width:100%;padding-bottom:2px}
   .tabs-scroll::-webkit-scrollbar{display:none}
   .hdr-right{display:flex;align-items:center;gap:7px;flex-wrap:wrap;justify-content:flex-end}
+  .hdr-date-mob{display:none}
   @media(max-width:900px){
     .hdr-subtitle{display:none!important}
     .hdr-marca{display:none!important}
     .hdr-date{display:none!important}
     .hdr-reconect{display:none!important}
     .upload-grid{grid-template-columns:1fr!important}
+    .hdr-date-mob{display:inline-flex!important}
   }
 `;
 
@@ -1421,12 +1423,15 @@ function CEDIDashboard(){
               :horas>24?{c:C.red,b:C.red+"55",icon:"⚠️",aviso:` · ${Math.floor(horas/24)}d sin actualizar`}
               :horas>6?{c:C.yellow,b:C.yellow+"45",icon:"🕒",aviso:` · hace ${Math.round(horas)}h`}
               :{c:C.green,b:C.green+"40",icon:"🕒",aviso:""};
-            return(
+            return(<>
               <div className="hdr-date" title={horas!=null?`Datos actualizados hace ${horas<1?Math.round(horas*60)+" min":Math.round(horas)+" horas"}`:"Fecha de la última actualización de los datos en el repositorio"} style={{background:C.bg2,border:`1px solid ${estadoD.b}`,borderRadius:7,padding:"6px 11px",fontSize:10,color:C.t3,fontFamily:"'JetBrains Mono',monospace",display:"flex",alignItems:"center",gap:5}}>
                 <span style={{color:estadoD.c}}>{estadoD.icon} Datos:</span>
                 <span style={{color:ultActu?estadoD.c:C.t4,fontWeight:700}}>{ultActu||"—"}{estadoD.aviso}</span>
               </div>
-            );
+              <div className="hdr-date-mob" title={horas!=null?`Actualizado hace ${horas<1?Math.round(horas*60)+" min":Math.round(horas)+" horas"}`:"Última actualización"} style={{alignItems:"center",gap:4,background:C.bg2,border:`1px solid ${estadoD.b}`,borderRadius:6,padding:"4px 8px",fontSize:10,color:estadoD.c,fontFamily:"'JetBrains Mono',monospace",fontWeight:700}}>
+                {estadoD.icon} {ultActu||"—"}{estadoD.aviso}
+              </div>
+            </>);
           })()}
         </div>
       </header>
