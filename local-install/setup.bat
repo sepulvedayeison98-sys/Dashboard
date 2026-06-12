@@ -1,5 +1,5 @@
 @echo off
 echo.
-echo  Iniciando instalacion del Dashboard CEDI...
+echo  Instalando Dashboard CEDI en este equipo...
 echo.
 powershell -ExecutionPolicy Bypass -File "%~dp0setup.ps1"

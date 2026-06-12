@@ -1,14 +1,15 @@
 # ============================================================
-#  SETUP - Dashboard CEDI Local
-#  Ejecutar UNA SOLA VEZ para instalar el dashboard en el PC
+#  SETUP COMPLETO - Dashboard CEDI Local
+#  Ejecutar UNA SOLA VEZ para instalar todo
 # ============================================================
 
 $destino = "C:\DashboardCEDI"
 $libs    = "$destino\libs"
+$origen  = "C:\Users\cristian.franco\OneDrive - Comercializadora Inducascos S.A.S\VENTAS WEB\Escritorio\PLANEACION"
 
 function OK  { Write-Host "  [OK] $args" -ForegroundColor Green }
 function ERR { Write-Host "  [ERROR] $args" -ForegroundColor Red }
-function INF { Write-Host $args -ForegroundColor Cyan }
+function INF { param([string]$msg,[string]$col="Cyan") Write-Host $msg -ForegroundColor $col }
 
 INF ""
 INF "============================================"
@@ -17,13 +18,14 @@ INF "============================================"
 INF ""
 
 # 1. Crear carpetas
-INF "Creando carpetas..."
-New-Item -ItemType Directory -Force -Path $libs | Out-Null
-OK "Carpetas creadas"
+INF "Creando estructura de carpetas..."
+New-Item -ItemType Directory -Force -Path $destino | Out-Null
+New-Item -ItemType Directory -Force -Path $libs    | Out-Null
+OK "Carpetas listas"
 
-# 2. Descargar librerias JavaScript
+# 2. Descargar librerias JavaScript (una sola vez)
 INF ""
-INF "Descargando librerias JavaScript..."
+INF "Descargando librerias JavaScript (requiere internet una sola vez)..."
 $librerias = @(
     @{ url = "https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js";    file = "react.production.min.js"    },
     @{ url = "https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"; file = "react-dom.production.min.js" },
@@ -38,72 +40,85 @@ foreach ($lib in $librerias) {
         Write-Host " OK" -ForegroundColor Green
     } catch {
         Write-Host " ERROR" -ForegroundColor Red
-        ERR "Fallo: $($_.Exception.Message)"
+        ERR "$($lib.file): $($_.Exception.Message)"
     }
 }
 
-# 3. Descargar index.html desde GitHub
+# 3. Copiar index.html (version local)
 INF ""
-INF "Descargando Dashboard desde GitHub..."
+INF "Copiando archivos del dashboard..."
+$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
 try {
-    Invoke-WebRequest -Uri "https://raw.githubusercontent.com/sepulvedayeison98-sys/Dashboard/main/index.html" -OutFile "$destino\index.html" -UseBasicParsing -ErrorAction Stop
-    OK "index.html descargado"
+    Copy-Item "$scriptDir\index.html"          "$destino\index.html"          -Force
+    Copy-Item "$scriptDir\servidor.ps1"        "$destino\servidor.ps1"        -Force
+    Copy-Item "$scriptDir\abrir-dashboard.bat" "$destino\abrir-dashboard.bat" -Force
+    Copy-Item "$scriptDir\actualizar-datos.bat" "$destino\actualizar-datos.bat" -Force
+    OK "Archivos del dashboard copiados"
 } catch {
-    ERR "No se pudo descargar index.html: $($_.Exception.Message)"
-    Read-Host "Presiona Enter para salir"
-    exit 1
+    ERR "Error copiando archivos: $($_.Exception.Message)"
 }
 
-# 4. Reemplazar rutas CDN por rutas locales
+# 4. Copiar los Excel desde OneDrive
 INF ""
-INF "Configurando rutas locales..."
-$html = Get-Content "$destino\index.html" -Raw -Encoding UTF8
-$html = $html -replace "https://cdnjs\.cloudflare\.com/ajax/libs/react/18\.3\.1/umd/react\.production\.min\.js", "./libs/react.production.min.js"
-$html = $html -replace "https://cdnjs\.cloudflare\.com/ajax/libs/react-dom/18\.3\.1/umd/react-dom\.production\.min\.js", "./libs/react-dom.production.min.js"
-$html = $html -replace "https://cdnjs\.cloudflare\.com/ajax/libs/babel-standalone/7\.23\.5/babel\.min\.js", "./libs/babel.min.js"
-$html = $html -replace "https://cdnjs\.cloudflare\.com/ajax/libs/xlsx/0\.18\.5/xlsx\.full\.min\.js", "./libs/xlsx.full.min.js"
-[System.IO.File]::WriteAllText("$destino\index.html", $html, [System.Text.Encoding]::UTF8)
-OK "Rutas actualizadas"
-
-# 5. Crear abrir-dashboard.bat
-INF ""
-INF "Creando acceso directo..."
-$bat = @'
-@echo off
-if exist "C:\Program Files\Google\Chrome\Application\chrome.exe" (
-    start "" "C:\Program Files\Google\Chrome\Application\chrome.exe" --allow-file-access-from-files "%~dp0index.html"
-) else if exist "C:\Program Files (x86)\Google\Chrome\Application\chrome.exe" (
-    start "" "C:\Program Files (x86)\Google\Chrome\Application\chrome.exe" --allow-file-access-from-files "%~dp0index.html"
-) else (
-    start "" "msedge.exe" --allow-file-access-from-files "%~dp0index.html"
+INF "Copiando archivos Excel..."
+$excels = @(
+    @{ src = "$origen\Bandeja de planeaci$([char]243)n (IDC-IDCWM-INDU2).xlsx"; dst = "$destino\Bandejadeplaneacion.xlsx" },
+    @{ src = "$origen\Inventario x Posici$([char]243)n.xlsx";                   dst = "$destino\Inventario.xlsx" }
 )
-'@
-Set-Content "$destino\abrir-dashboard.bat" $bat -Encoding ASCII
-OK "abrir-dashboard.bat creado"
+foreach ($e in $excels) {
+    if (Test-Path $e.src) {
+        Copy-Item $e.src $e.dst -Force
+        OK ([System.IO.Path]::GetFileName($e.dst))
+    } else {
+        ERR "No encontrado: $($e.src)"
+        INF "  Verifica que la ruta del archivo sea correcta" "Yellow"
+    }
+}
 
-# 6. Crear actualizar-dashboard.bat (para futuras actualizaciones del HTML)
-$actualizar = @'
-@echo off
-echo Actualizando Dashboard desde GitHub...
-powershell -ExecutionPolicy Bypass -Command "& { Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/sepulvedayeison98-sys/Dashboard/main/index.html' -OutFile 'C:\DashboardCEDI\index_nuevo.html' -UseBasicParsing; $h = Get-Content 'C:\DashboardCEDI\index_nuevo.html' -Raw; $h = $h -replace 'https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js','./libs/react.production.min.js'; $h = $h -replace 'https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js','./libs/react-dom.production.min.js'; $h = $h -replace 'https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js','./libs/babel.min.js'; $h = $h -replace 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js','./libs/xlsx.full.min.js'; [System.IO.File]::WriteAllText('C:\DashboardCEDI\index.html', $h, [System.Text.Encoding]::UTF8); Remove-Item 'C:\DashboardCEDI\index_nuevo.html' }"
-echo Listo!
-pause
-'@
-Set-Content "$destino\actualizar-dashboard.bat" $actualizar -Encoding ASCII
-OK "actualizar-dashboard.bat creado"
+# 5. Crear acceso directo en el Escritorio
+INF ""
+INF "Creando acceso directo en el Escritorio..."
+try {
+    $escritorio = [System.Environment]::GetFolderPath("Desktop")
+    $wsh  = New-Object -ComObject WScript.Shell
+    $link = $wsh.CreateShortcut("$escritorio\Dashboard CEDI.lnk")
+    $link.TargetPath       = "$destino\abrir-dashboard.bat"
+    $link.WorkingDirectory = $destino
+    $link.Description      = "Abrir Dashboard CEDI"
+    $link.Save()
+    OK "Acceso directo creado en el Escritorio"
+} catch {
+    ERR "No se pudo crear el acceso directo: $($_.Exception.Message)"
+}
 
-# ── Resumen final ──────────────────────────────────────────
+# 6. Configurar Task Scheduler para actualizar datos cada 20 min
 INF ""
-INF "============================================"
-INF "  INSTALACION COMPLETADA"
+INF "Configurando actualizacion automatica cada 20 minutos..."
+try {
+    $trigger = New-ScheduledTaskTrigger -RepetitionInterval (New-TimeSpan -Minutes 20) -Once -At (Get-Date)
+    $action  = New-ScheduledTaskAction -Execute "$destino\actualizar-datos.bat"
+    $settings = New-ScheduledTaskSettingsSet -RunOnlyIfNetworkAvailable:$false -StartWhenAvailable
+    Register-ScheduledTask -TaskName "Dashboard CEDI - Actualizar datos" `
+        -Trigger $trigger -Action $action -Settings $settings `
+        -Description "Copia los Excel de OneDrive al dashboard cada 20 minutos" `
+        -Force | Out-Null
+    OK "Tarea programada creada (cada 20 min)"
+} catch {
+    ERR "No se pudo crear la tarea programada: $($_.Exception.Message)"
+    INF "  Puedes crearla manualmente en el Programador de tareas" "Yellow"
+}
+
+# ── Resumen ───────────────────────────────────────────────
 INF ""
-INF "  Carpeta: $destino"
+INF "============================================" "Green"
+INF "  INSTALACION COMPLETADA" "Green"
+INF "" "Green"
+INF "  Para abrir el dashboard:" "White"
+INF "  -> Doble click en 'Dashboard CEDI' del Escritorio" "White"
+INF "  -> O en C:\DashboardCEDI\abrir-dashboard.bat" "White"
 INF ""
-INF "  Para abrir el dashboard:"
-INF "  -> Doble click en abrir-dashboard.bat"
-INF ""
-INF "  Para actualizar cuando haya cambios:"
-INF "  -> Doble click en actualizar-dashboard.bat"
-INF "============================================"
+INF "  Los datos se actualizan automaticamente" "White"
+INF "  cada 20 minutos desde OneDrive." "White"
+INF "============================================" "Green"
 INF ""
 Read-Host "Presiona Enter para cerrar"
