@@ -693,8 +693,8 @@ function SKUPanel({skuRef,invBySKU,allItems,pedidosActivos,onClose}){
   const totalComprometidoPedidos=pedidosDelSKU.reduce((t,p)=>{const r=p.refs.find(r=>r.ref===skuRef);return t+(r?.cant||0);},0);
   return(
 <div style={{position:"fixed",top:0,right:0,bottom:0,width:isMob?"100vw":"440px",background:C.bg1,borderLeft:`1px solid ${C.b1}`,zIndex:201,display:"flex",flexDirection:"column",animation:"slideIn .2s ease",boxShadow:"-8px 0 40px #000c"}}>      <style>{`@keyframes slideIn{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}`}</style>
-      {/* Header */}
-      <div style={{padding:"14px 18px",borderBottom:`1px solid ${C.b0}`,background:C.bg2}}>
+      {/* Header fijo */}
+      <div style={{flexShrink:0,padding:"14px 18px",borderBottom:`1px solid ${C.b0}`,background:C.bg2}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
           <div style={{flex:1,minWidth:0,marginRight:8}}>
             <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:5}}>
@@ -706,6 +706,8 @@ function SKUPanel({skuRef,invBySKU,allItems,pedidosActivos,onClose}){
           <button onClick={onClose} style={{width:28,height:28,borderRadius:"50%",background:C.bg3,border:`1px solid ${C.b0}`,color:C.t2,fontSize:15,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>×</button>
         </div>
       </div>
+      {/* Todo el contenido en un solo scroll */}
+      <div style={{flex:1,overflowY:"auto",WebkitOverflowScrolling:"touch"}}>
       {/* KPIs SKU */}
       <div style={{display:"grid",gridTemplateColumns:isMob?"repeat(2,1fr)":"repeat(4,1fr)",gap:1,borderBottom:`1px solid ${C.b0}`}}>
         {[
@@ -796,7 +798,7 @@ function SKUPanel({skuRef,invBySKU,allItems,pedidosActivos,onClose}){
         {pedidosDelSKU.length===0?(
           <div style={{padding:"14px 16px",textAlign:"center",color:C.t3,fontSize:11}}>Sin pedidos activos para este SKU</div>
         ):(
-          <div style={{maxHeight:220,overflowY:"auto"}}>
+          <div>
             {pedidosDelSKU.map((ped,i)=>{
               const row=ped.refs.find(r=>r.ref===skuRef);
               const cant=row?.cant||0;
@@ -828,7 +830,7 @@ function SKUPanel({skuRef,invBySKU,allItems,pedidosActivos,onClose}){
         )}
       </div>
       {/* Posiciones */}
-      <div style={{flex:1,overflowY:"auto"}}>
+      <div>
         {pos.length===0?(
           <div style={{padding:20,textAlign:"center",color:C.t3,fontSize:12}}>Sin posiciones registradas en el inventario</div>
         ):(
@@ -854,6 +856,7 @@ function SKUPanel({skuRef,invBySKU,allItems,pedidosActivos,onClose}){
           </>
         )}
       </div>
+      </div>{/* cierre scroll único */}
     </div>
   );
 }
