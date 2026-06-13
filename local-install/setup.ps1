@@ -49,11 +49,15 @@ INF ""
 INF "Copiando archivos del dashboard..."
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
 try {
-    Copy-Item "$scriptDir\index.html"          "$destino\index.html"          -Force
-    Copy-Item "$scriptDir\servidor.ps1"        "$destino\servidor.ps1"        -Force
-    Copy-Item "$scriptDir\abrir-dashboard.bat" "$destino\abrir-dashboard.bat" -Force
-    Copy-Item "$scriptDir\actualizar-datos.bat" "$destino\actualizar-datos.bat" -Force
-    OK "Archivos del dashboard copiados"
+    Copy-Item "$scriptDir\index.html"            "$destino\index.html"            -Force
+    Copy-Item "$scriptDir\servidor.ps1"          "$destino\servidor.ps1"          -Force
+    Copy-Item "$scriptDir\abrir-dashboard.bat"   "$destino\abrir-dashboard.bat"   -Force
+    Copy-Item "$scriptDir\actualizar-datos.bat"  "$destino\actualizar-datos.bat"  -Force
+    Copy-Item "$scriptDir\actualizar-datos.ps1"  "$destino\actualizar-datos.ps1"  -Force
+    # Desbloquear todos los scripts descargados de internet
+    Unblock-File "$destino\servidor.ps1"
+    Unblock-File "$destino\actualizar-datos.ps1"
+    OK "Archivos del dashboard copiados y desbloqueados"
 } catch {
     ERR "Error copiando archivos: $($_.Exception.Message)"
 }
