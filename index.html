@@ -865,6 +865,7 @@ function SKUPanel({skuRef,invBySKU,allItems,pedidosActivos,onClose}){
 function ModulePanel({modKey,invByModule,compMap,onClose}){
   const isMob=typeof window!=='undefined'&&window.matchMedia('(max-width: 900px)').matches;
   const rows=invByModule[modKey]||[];
+  const [openCajap,setOpenCajap]=React.useState(null);
   const calleLetra=modKey[0];
   const modNum=modKey.slice(1);
   const CALLE_NOMBRES={B:"Calle 1",C:"Calle 2",D:"Calle 3",E:"Calle 4"};
@@ -953,6 +954,7 @@ function ModulePanel({modKey,invByModule,compMap,onClose}){
                   labelFull:`M${mod} · Niv ${niv} · ${posStr}`,
                   stock:ps.reduce((t,p)=>t+p.saldo,0),
                   esPiso:Number(niv)<=PISO_MAX,
+                  posiciones:ps.sort((a,b)=>a.pos-b.pos).map(p=>({pos:p.pos,saldo:p.saldo,cajap:p.cajap,ubi:p.ubi})),
                 };
               });
             };
@@ -992,19 +994,49 @@ function ModulePanel({modKey,invByModule,compMap,onClose}){
                         </div>
                         <div style={{color:C.t2,fontSize:10,lineHeight:1.3}}>{s.desc.slice(0,55)}</div>
                       </div>
-                      <div style={{textAlign:"right",flexShrink:0}}>
-                        <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:20,fontWeight:800,color:esPiso?C.green:C.purple,lineHeight:1}}>{s.stock}</div>
-                        <div style={{fontSize:8,color:C.t3}}>u · Comp:{s.comp} {g>0&&<span style={{color:C.red}}>Gap:-{g}</span>}</div>
+                      <div style={{textAlign:"right",flexShrink:0,minWidth:72}}>
+                        <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:20,fontWeight:800,color:g>0?C.red:esPiso?C.green:C.purple,lineHeight:1}}>{s.stock}<span style={{fontSize:9,fontWeight:400,color:C.t3,marginLeft:2}}>u</span></div>
+                        {s.comp>0?(
+                          <div>
+                            <div style={{height:5,borderRadius:3,background:C.bg3,width:"100%",overflow:"hidden",marginTop:4}}>
+                              <div style={{height:"100%",borderRadius:3,background:g>0?C.red:C.green,width:`${Math.min(100,Math.round(s.stock/s.comp*100))}%`,transition:"width .3s"}}/>
+                            </div>
+                            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:2}}>
+                              <span style={{fontSize:8,color:C.t3}}>/{s.comp}u</span>
+                              {g>0?<span style={{fontSize:8,color:C.red,fontWeight:700}}>−{g}</span>
+                                  :<span style={{fontSize:8,color:C.green,fontWeight:700}}>✓</span>}
+                            </div>
+                          </div>
+                        ):(
+                          <div style={{fontSize:8,color:C.t4,marginTop:2}}>sin pedidos</div>
+                        )}
                       </div>
                     </div>
                     {/* Fila 2: ubicaciones formato M25-2-1 */}
                     <div style={{display:"flex",flexDirection:"column",gap:3}}>
-                      {ubisPiso.map(u=>(
-                        <div key={u.label} style={{display:"flex",alignItems:"center",gap:8}}>
-                          <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:11,fontWeight:700,color:C.green,background:`${C.green}15`,border:`1px solid ${C.green}30`,borderRadius:5,padding:"2px 8px",letterSpacing:"0.5px"}}>{u.label}</span>
-                          <span style={{fontSize:10,color:C.green,fontWeight:600}}>{u.stock}u</span>
-                        </div>
-                      ))}
+                      {ubisPiso.map(u=>{
+                        const cajKey=`${s.ref}-${u.label}`;
+                        const open=openCajap===cajKey;
+                        return(
+                          <div key={u.label}>
+                            <div style={{display:"flex",alignItems:"center",gap:8}}>
+                              <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:11,fontWeight:700,color:C.green,background:`${C.green}15`,border:`1px solid ${C.green}30`,borderRadius:5,padding:"2px 8px",letterSpacing:"0.5px"}}>{u.label}</span>
+                              <span onClick={()=>setOpenCajap(open?null:cajKey)} style={{fontSize:10,color:C.green,fontWeight:600,cursor:"pointer",textDecoration:"underline dotted",userSelect:"none"}}>{u.stock}u</span>
+                              {u.posiciones&&u.posiciones.some(p=>p.cajap)&&<span style={{fontSize:8,color:C.t4,cursor:"pointer"}} onClick={()=>setOpenCajap(open?null:cajKey)}>{open?"▲":"▼"}</span>}
+                            </div>
+                            {open&&u.posiciones&&(
+                              <div style={{marginTop:3,marginLeft:4,paddingLeft:8,borderLeft:`2px solid ${C.green}40`,display:"flex",flexDirection:"column",gap:2}}>
+                                {u.posiciones.map((p,pi)=>(
+                                  <div key={pi} style={{display:"flex",gap:6,alignItems:"center"}}>
+                                    <span style={{fontSize:8,color:C.t3}}>Pos{p.pos}·{p.saldo}u</span>
+                                    {p.cajap?<span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:9,color:C.teal,fontWeight:700,background:`${C.teal}15`,borderRadius:3,padding:"1px 5px"}}>📦 {p.cajap}</span>:<span style={{fontSize:8,color:C.t4}}>sin caja</span>}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
                       {ubisAltura.map(u=>(
                         <div key={u.label} style={{display:"flex",alignItems:"center",gap:8}}>
                           <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:11,fontWeight:700,color:C.purple,background:`${C.purple}15`,border:`1px solid ${C.purple}30`,borderRadius:5,padding:"2px 8px",letterSpacing:"0.5px"}}>{u.label}</span>
@@ -1225,9 +1257,9 @@ function CEDIDashboard(){
   const invByModule=data?.invByModule||{};
 
   const calles=useMemo(()=>{
-    // Lookup rápido ref → comp (comprometido en pedidos activos)
-    const compRef={};
-    SKUS.forEach(s=>{if(s.comp>0)compRef[s.ref]=s.comp;});
+    // Lookup global ref → SKU data (compara stock global vs comprometido global)
+    const skuLookup={};
+    SKUS.forEach(s=>{skuLookup[s.ref]=s;});
     return ["C1","C2","C3","C4"].map(c=>{
     const letra=DASH_TO_LETRA[c];
     const mods=Array.from({length:42},(_,i)=>{
@@ -1235,15 +1267,13 @@ function CEDIDashboard(){
       const modKey=`${letra}${String(n).padStart(2,"0")}`;
       const rows=invByModule[modKey]||[];
       const totalStock=rows.reduce((t,r)=>t+r.saldo,0);
-      // % SKUs del módulo donde stock_piso < comprometido (Opción B)
+      // % SKUs presentes en piso del módulo con stock_global < comprometido_global
       const pisoRows=rows.filter(r=>r.nivel<=1);
       const skuRefs=[...new Set(pisoRows.map(r=>r.ref))];
       const skusTotal=skuRefs.length;
       const skusNecesitan=skuRefs.filter(ref=>{
-        const comp=compRef[ref]||0;
-        if(comp===0)return false;
-        const stockRef=pisoRows.filter(r=>r.ref===ref).reduce((t,r)=>t+r.saldo,0);
-        return stockRef<comp;
+        const s=skuLookup[ref];
+        return s&&s.comp>0&&s.stock<s.comp;
       }).length;
       const pctRestock=skusTotal>0?Math.round((skusNecesitan/skusTotal)*100):0;
       // Color según % de SKUs que necesitan abasto
