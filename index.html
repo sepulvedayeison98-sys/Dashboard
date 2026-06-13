@@ -1257,9 +1257,9 @@ function CEDIDashboard(){
   const invByModule=data?.invByModule||{};
 
   const calles=useMemo(()=>{
-    // Lookup global ref → SKU data (compara stock global vs comprometido global)
+    // Lookup global ref → SKU data (SKUS usa s.id y s.stock_piso)
     const skuLookup={};
-    SKUS.forEach(s=>{skuLookup[s.ref]=s;});
+    SKUS.forEach(s=>{skuLookup[s.id]=s;});
     return ["C1","C2","C3","C4"].map(c=>{
     const letra=DASH_TO_LETRA[c];
     const mods=Array.from({length:42},(_,i)=>{
@@ -1267,13 +1267,13 @@ function CEDIDashboard(){
       const modKey=`${letra}${String(n).padStart(2,"0")}`;
       const rows=invByModule[modKey]||[];
       const totalStock=rows.reduce((t,r)=>t+r.saldo,0);
-      // % SKUs presentes en piso del módulo con stock_global < comprometido_global
+      // % SKUs presentes en piso del módulo con stock_piso_global < comprometido_global
       const pisoRows=rows.filter(r=>r.nivel<=1);
       const skuRefs=[...new Set(pisoRows.map(r=>r.ref))];
       const skusTotal=skuRefs.length;
       const skusNecesitan=skuRefs.filter(ref=>{
         const s=skuLookup[ref];
-        return s&&s.comp>0&&s.stock<s.comp;
+        return s&&s.comp>0&&s.stock_piso<s.comp;
       }).length;
       const pctRestock=skusTotal>0?Math.round((skusNecesitan/skusTotal)*100):0;
       // Color según % de SKUs que necesitan abasto
