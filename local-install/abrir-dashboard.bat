@@ -8,8 +8,8 @@
 echo Copiando datos actualizados...
 call "C:\DashboardCEDI\actualizar-datos.bat"
 
-:: 2. Verificar si el servidor ya esta corriendo en puerto 8080
-netstat -an | find "8080" | find "LISTENING" >nul 2>&1
+:: 2. Verificar si el servidor ya esta corriendo en puerto 9090
+netstat -an | find "9090" | find "LISTENING" >nul 2>&1
 if %errorlevel%==0 (
     echo Servidor ya en ejecucion.
 ) else (
@@ -20,4 +20,4 @@ if %errorlevel%==0 (
 
 :: 3. Abrir el dashboard en el navegador
 echo Abriendo Dashboard...
-start "" "http://localhost:8080/index.html"
+start "" "http://localhost:9090/index.html"

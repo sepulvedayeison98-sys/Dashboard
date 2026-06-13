@@ -2,7 +2,7 @@
 # Se ejecuta en segundo plano — no cerrar la ventana mientras usas el dashboard
 
 $raiz  = "C:\DashboardCEDI"
-$puerto = 8080
+$puerto = 9090
 
 $servidor = New-Object System.Net.HttpListener
 $servidor.Prefixes.Add("http://localhost:$puerto/")
