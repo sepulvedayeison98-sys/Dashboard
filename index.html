@@ -1224,29 +1224,44 @@ function CEDIDashboard(){
   const DASH_TO_LETRA={C1:"B",C2:"C",C3:"D",C4:"E"};
   const invByModule=data?.invByModule||{};
 
-  const calles=useMemo(()=>["C1","C2","C3","C4"].map(c=>{
+  const calles=useMemo(()=>{
+    // Lookup rápido ref → comp (comprometido en pedidos activos)
+    const compRef={};
+    SKUS.forEach(s=>{if(s.comp>0)compRef[s.ref]=s.comp;});
+    return ["C1","C2","C3","C4"].map(c=>{
     const letra=DASH_TO_LETRA[c];
     const mods=Array.from({length:42},(_,i)=>{
       const n=i+1;
       const modKey=`${letra}${String(n).padStart(2,"0")}`;
       const rows=invByModule[modKey]||[];
       const totalStock=rows.reduce((t,r)=>t+r.saldo,0);
-      const totalComp=rows.reduce((t,r)=>t+(r.comp||0),0);
-      const g=Math.max(0,totalComp-totalStock);
-      // Estado real desde datos
+      // % SKUs del módulo donde stock_piso < comprometido (Opción B)
+      const pisoRows=rows.filter(r=>r.nivel<=1);
+      const skuRefs=[...new Set(pisoRows.map(r=>r.ref))];
+      const skusTotal=skuRefs.length;
+      const skusNecesitan=skuRefs.filter(ref=>{
+        const comp=compRef[ref]||0;
+        if(comp===0)return false;
+        const stockRef=pisoRows.filter(r=>r.ref===ref).reduce((t,r)=>t+r.saldo,0);
+        return stockRef<comp;
+      }).length;
+      const pctRestock=skusTotal>0?Math.round((skusNecesitan/skusTotal)*100):0;
+      // Color según % de SKUs que necesitan abasto
       let est="ok";
-      if(rows.length===0){const h=(n*7+c.charCodeAt(1)*3)%20;est=h<1?"ruptura":h<3?"critico":h<5?"preventivo":h<6?"proceso":"ok";}
-      else if(totalStock===0&&totalComp>0)est="ruptura";
-      else if(g>0&&totalStock>0)est=totalComp>totalStock*0.9?"critico":"preventivo";
+      if(rows.length===0)est="ok";
+      else if(pctRestock>=60)est="ruptura";
+      else if(pctRestock>=40)est="critico";
+      else if(pctRestock>=20)est="preventivo";
       else est="ok";
-      const skus=[...new Set(rows.map(r=>r.ref))].length;
-      return{n,est,modKey,totalStock,totalComp,gap:g,skus,letra};
+      const skus=skusTotal;
+      return{n,est,modKey,totalStock,skus,pctRestock,skusNecesitan,letra};
     });
     const cnt={ok:0,preventivo:0,critico:0,ruptura:0,proceso:0};
     mods.forEach(m=>cnt[m.est]++);
     const abst=cnt.ok+cnt.proceso;
     return{c,mods,cnt,abst,pct:Math.round(abst/42*100)};
-  }),[SKUS,invByModule]);
+  });
+  },[SKUS,invByModule]);
   const globAbst=calles.reduce((t,c)=>t+c.abst,0);
   const st=data?.stats;
   const altFilt=useMemo(()=>{
@@ -1680,7 +1695,7 @@ function CEDIDashboard(){
                         <button key={m.k} onClick={()=>setMapMode(m.k)} style={{padding:"3px 9px",borderRadius:5,background:mapMode===m.k?C.accent:C.bg3,color:mapMode===m.k?C.bg0:C.t3,border:"none",fontSize:9,fontWeight:700,cursor:"pointer",fontFamily:"inherit",transition:"all .15s"}}>{m.l}</button>
                       ))}
                     </div>
-                    {[{c:C.green,l:"OK"},{c:C.yellow,l:"Prev"},{c:C.orange,l:"Crít"},{c:C.red,l:"Rupt"},{c:C.accent,l:"Proc"}].map(({c,l})=>(
+                    {[{c:C.green,l:"<20%"},{c:C.yellow,l:"20-39%"},{c:C.orange,l:"40-59%"},{c:C.red,l:"≥60%"}].map(({c,l})=>(
                       <div key={l} style={{display:"flex",alignItems:"center",gap:3,fontSize:10,color:C.t3}}>
                         <div style={{width:7,height:7,borderRadius:2,background:c}}/>{l}
                       </div>
@@ -1718,7 +1733,7 @@ function CEDIDashboard(){
                           const tipExtra=mapMode==="heatmap"&&m.totalStock?` · ${Math.round((m.totalStock/72)*100)}% cap.`:"";
                           return(
                             <div key={m.n}
-                              title={`M${String(m.n).padStart(2,"0")} ${m.est.toUpperCase()}${m.totalStock?` · ${m.totalStock}u`:""}${tipExtra}`}
+                              title={`M${String(m.n).padStart(2,"0")} · ${m.pctRestock}% SKUs necesitan abasto (${m.skusNecesitan}/${m.skus}) · ${m.est.toUpperCase()}${tipExtra}`}
                               onClick={()=>setSelMod(m.modKey)}
                               style={{aspectRatio:"1",borderRadius:2,background:heatColor,opacity:heatOp,cursor:"pointer",transition:"all .1s",position:"relative",display:"flex",alignItems:"center",justifyContent:"center"}}
                               onMouseEnter={e=>{e.currentTarget.style.transform="scale(1.8)";e.currentTarget.style.zIndex="10";e.currentTarget.style.opacity="1";}}
