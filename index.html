@@ -686,6 +686,26 @@ function HistoricoTab({hist,data,onClear}){
   const [skuQ,setSkuQ]=useState('');
   const [expandCli,setExpandCli]=useState(null);
 
+  // ── Todos los hooks ANTES de cualquier return condicional (Rules of Hooks) ──
+  const DIAS=['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
+  const colFq=pct=>pct>=70?C.red:pct>=40?C.orange:pct>=20?C.yellow:C.green;
+  const topRup=useMemo(()=>hTopRup(snaps),[snaps]);
+  const semana=useMemo(()=>hSemana(snaps),[snaps]);
+  const mesual=useMemo(()=>hMes(snaps),[snaps]);
+  const clientes=useMemo(()=>hClientes(snaps),[snaps]);
+  const descMap=useMemo(()=>{const m={};(data?.allItems||[]).forEach(it=>m[String(it.ref)]=it.desc);return m;},[data]);
+  const totalSKUsT=useMemo(()=>new Set(snaps.flatMap(s=>s.skus.map(sk=>sk.r))).size,[snaps]);
+  const totalPedsT=snaps.reduce((t,s)=>t+(s.peds?.length||0),0);
+  const avgGap=snaps.length>0?Math.round(snaps.reduce((t,s)=>t+(s.st?.nG||0),0)/snaps.length):0;
+  const firstDate=snaps[0]?.date||'';
+  const lastDate=snaps[snaps.length-1]?.date||'';
+  const Spark=({vals,w=80,h=26,stroke})=>{
+    if(!vals||vals.length<2)return<span style={{color:C.t4,fontSize:9}}>—</span>;
+    const mx=Math.max(...vals,1);
+    const pts=vals.map((v,i)=>`${(i/(vals.length-1))*w},${h-Math.max(1,(v/mx)*(h-2))}`).join(' ');
+    return<svg width={w} height={h} style={{display:'block'}}><polyline points={pts} fill="none" stroke={stroke} strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round"/></svg>;
+  };
+
   function tryUnlock(){
     if(histCheckPass(passInput)){
       sessionStorage.setItem('hist_ok','1');
@@ -694,6 +714,7 @@ function HistoricoTab({hist,data,onClear}){
   }
   function doLock(){sessionStorage.removeItem('hist_ok');setLocked(true);setPassInput('');}
 
+  // ── Returns condicionales DESPUÉS de todos los hooks ──
   if(locked)return(
     <div style={{display:'flex',alignItems:'center',justifyContent:'center',minHeight:320,animation:'fadeUp .3s ease'}}>
       <div style={{background:C.bg2,border:`1px solid ${C.b1}`,borderRadius:16,padding:'36px 32px',textAlign:'center',maxWidth:340,width:'100%',boxShadow:'0 20px 60px #000a'}}>
@@ -715,21 +736,6 @@ function HistoricoTab({hist,data,onClear}){
       </div>
     </div>
   );
-  const DIAS=['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
-  const colFq=pct=>pct>=70?C.red:pct>=40?C.orange:pct>=20?C.yellow:C.green;
-
-  const topRup=useMemo(()=>hTopRup(snaps),[snaps]);
-  const semana=useMemo(()=>hSemana(snaps),[snaps]);
-  const mesual=useMemo(()=>hMes(snaps),[snaps]);
-  const clientes=useMemo(()=>hClientes(snaps),[snaps]);
-  const descMap=useMemo(()=>{const m={};(data?.allItems||[]).forEach(it=>m[String(it.ref)]=it.desc);return m;},[data]);
-
-  const Spark=({vals,w=80,h=26,stroke})=>{
-    if(!vals||vals.length<2)return<span style={{color:C.t4,fontSize:9}}>—</span>;
-    const mx=Math.max(...vals,1);
-    const pts=vals.map((v,i)=>`${(i/(vals.length-1))*w},${h-Math.max(1,(v/mx)*(h-2))}`).join(' ');
-    return<svg width={w} height={h} style={{display:'block'}}><polyline points={pts} fill="none" stroke={stroke} strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round"/></svg>;
-  };
 
   if(snaps.length===0)return(
     <div style={{background:C.bg2,border:`1px solid ${C.b0}`,borderRadius:13,padding:'40px 24px',textAlign:'center'}}>
@@ -740,12 +746,6 @@ function HistoricoTab({hist,data,onClear}){
       </div>
     </div>
   );
-
-  const firstDate=snaps[0]?.date||'';
-  const lastDate=snaps[snaps.length-1]?.date||'';
-  const totalSKUsT=useMemo(()=>new Set(snaps.flatMap(s=>s.skus.map(sk=>sk.r))).size,[snaps]);
-  const totalPedsT=snaps.reduce((t,s)=>t+(s.peds?.length||0),0);
-  const avgGap=snaps.length>0?Math.round(snaps.reduce((t,s)=>t+(s.st?.nG||0),0)/snaps.length):0;
 
   return(
     <div style={{display:'flex',flexDirection:'column',gap:14,animation:'fadeUp .3s ease'}}>
