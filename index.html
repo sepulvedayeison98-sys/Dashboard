@@ -601,6 +601,10 @@ async function processFiles(wbInv, wbFact, onStep, marcasActivas){
 
 // ── HISTÓRICO LOCAL ─────────────────────────────────────────────────────────
 const HIST_KEY='cedi_hist_v1', HIST_MAX=120;
+// Clave de acceso al tab Histórico (cambiar HIST_PASS_B64 para cambiar la clave)
+// Valor actual → btoa('CEDI2025') — para cambiar: ejecuta btoa('TuNuevaClave') en consola
+const HIST_PASS_B64='Q0VESTIwMjU=';
+function histCheckPass(input){try{return btoa(input)===HIST_PASS_B64;}catch(e){return false;}}
 
 function histSave(data){
   try{
@@ -675,9 +679,42 @@ function hEvo(snaps,ref){
 // ── HistoricoTab ─────────────────────────────────────────────────────────────
 function HistoricoTab({hist,data,onClear}){
   const snaps=hist?.snaps||[];
+  const [locked,setLocked]=useState(()=>sessionStorage.getItem('hist_ok')!=='1');
+  const [passInput,setPassInput]=useState('');
+  const [passErr,setPassErr]=useState(false);
   const [vista,setVista]=useState('rup');
   const [skuQ,setSkuQ]=useState('');
   const [expandCli,setExpandCli]=useState(null);
+
+  function tryUnlock(){
+    if(histCheckPass(passInput)){
+      sessionStorage.setItem('hist_ok','1');
+      setLocked(false);setPassErr(false);
+    }else{setPassErr(true);setPassInput('');}
+  }
+  function doLock(){sessionStorage.removeItem('hist_ok');setLocked(true);setPassInput('');}
+
+  if(locked)return(
+    <div style={{display:'flex',alignItems:'center',justifyContent:'center',minHeight:320,animation:'fadeUp .3s ease'}}>
+      <div style={{background:C.bg2,border:`1px solid ${C.b1}`,borderRadius:16,padding:'36px 32px',textAlign:'center',maxWidth:340,width:'100%',boxShadow:'0 20px 60px #000a'}}>
+        <div style={{fontSize:40,marginBottom:14}}>🔒</div>
+        <div style={{color:C.t1,fontWeight:800,fontSize:15,marginBottom:6}}>Histórico restringido</div>
+        <div style={{color:C.t3,fontSize:11,marginBottom:24,lineHeight:1.6}}>Ingresa la clave de acceso para ver el historial acumulado.</div>
+        <input
+          type="password" value={passInput} placeholder="••••••••"
+          onChange={e=>{setPassInput(e.target.value);setPassErr(false);}}
+          onKeyDown={e=>e.key==='Enter'&&tryUnlock()}
+          autoFocus
+          style={{width:'100%',boxSizing:'border-box',background:C.bg1,border:`1px solid ${passErr?C.red:C.b1}`,borderRadius:9,padding:'11px 14px',color:C.t1,fontSize:14,outline:'none',fontFamily:"'JetBrains Mono',monospace",marginBottom:passErr?8:16,textAlign:'center',letterSpacing:'0.15em'}}
+        />
+        {passErr&&<div style={{color:C.red,fontSize:10,fontWeight:700,marginBottom:12}}>Clave incorrecta. Inténtalo de nuevo.</div>}
+        <button onClick={tryUnlock}
+          style={{width:'100%',padding:'11px 0',background:C.accent,border:'none',borderRadius:9,color:C.bg0,fontWeight:800,fontSize:13,cursor:'pointer',fontFamily:'inherit',letterSpacing:'0.3px'}}>
+          Desbloquear
+        </button>
+      </div>
+    </div>
+  );
   const DIAS=['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
   const colFq=pct=>pct>=70?C.red:pct>=40?C.orange:pct>=20?C.yellow:C.green;
 
@@ -719,10 +756,16 @@ function HistoricoTab({hist,data,onClear}){
             <div style={{color:C.t1,fontWeight:800,fontSize:14}}>📈 Histórico CEDI</div>
             <div style={{color:C.t3,fontSize:10,marginTop:3}}>{firstDate} → {lastDate} · {snaps.length} snapshots · guardado local en este navegador</div>
           </div>
-          <button onClick={()=>{if(window.confirm('¿Borrar todo el historial guardado? No se puede deshacer.'))onClear();}}
-            style={{background:'transparent',border:`1px solid ${C.b0}`,color:C.t4,borderRadius:6,padding:'5px 10px',fontSize:9,cursor:'pointer'}}>
-            🗑 Limpiar
-          </button>
+          <div style={{display:'flex',gap:6}}>
+            <button onClick={doLock}
+              style={{background:'transparent',border:`1px solid ${C.b0}`,color:C.t4,borderRadius:6,padding:'5px 10px',fontSize:9,cursor:'pointer'}}>
+              🔒 Bloquear
+            </button>
+            <button onClick={()=>{if(window.confirm('¿Borrar todo el historial guardado? No se puede deshacer.'))onClear();}}
+              style={{background:'transparent',border:`1px solid ${C.b0}`,color:C.t4,borderRadius:6,padding:'5px 10px',fontSize:9,cursor:'pointer'}}>
+              🗑 Limpiar
+            </button>
+          </div>
         </div>
         <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:8}}>
           {[{l:'Días de datos',v:snaps.length,c:C.accent},{l:'SKUs rastreados',v:totalSKUsT,c:C.teal},
