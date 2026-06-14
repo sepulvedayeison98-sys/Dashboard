@@ -599,6 +599,365 @@ async function processFiles(wbInv, wbFact, onStep, marcasActivas){
   return{SKUS:skusMotor,pisoItems,alturaItems,allItems:items,stats,pedidosActivos,invByModule,invBySKU,palletsSugeridos,rupturas,gapsReport,cityReport,modReport};
 }
 
+// ── HISTÓRICO LOCAL ─────────────────────────────────────────────────────────
+const HIST_KEY='cedi_hist_v1', HIST_MAX=120;
+
+function histSave(data){
+  try{
+    const d=new Date();
+    const date=d.toISOString().slice(0,10);
+    const raw=localStorage.getItem(HIST_KEY);
+    const h=raw?JSON.parse(raw):{snaps:[]};
+    const snap={
+      ts:d.getTime(),date,dow:d.getDay(),dom:d.getDate(),
+      skus:(data.allItems||[]).filter(it=>it.comp>0||it.gap>0)
+           .map(it=>({r:String(it.ref),s:it.stock,c:it.comp,g:Math.max(0,it.comp-it.stock),e:it.estado_op||''})),
+      peds:(data.pedidosActivos||[]).slice(0,120).map(p=>({
+        cl:p.cliente||'',ciu:p.ciudad||'',f:p.fecha||'',u:p.uni||0,cls:p.clasificacion||'',
+        rows:(p.rows||[]).map(r=>[r.ref,r.cant]),
+      })),
+      st:{nG:(data.allItems||[]).filter(it=>it.gap>0).length,
+          tC:data.stats?.totalComp||0,tS:data.stats?.totalStock||0,
+          nP:data.pedidosActivos?.length||0,nR:data.stats?.totalRupturas||0},
+    };
+    const idx=h.snaps.findIndex(s=>s.date===date);
+    if(idx>=0)h.snaps[idx]=snap; else h.snaps.push(snap);
+    if(h.snaps.length>HIST_MAX)h.snaps=h.snaps.slice(-HIST_MAX);
+    localStorage.setItem(HIST_KEY,JSON.stringify(h));
+    return h;
+  }catch(e){console.warn('histSave:',e);return null;}
+}
+function histLoad(){
+  try{const r=localStorage.getItem(HIST_KEY);return r?JSON.parse(r):{snaps:[]};}
+  catch(e){return{snaps:[]};}
+}
+function histClear(){localStorage.removeItem(HIST_KEY);}
+
+// ── Funciones de análisis histórico ─────────────────────────────────────────
+function hTopRup(snaps,n=30){
+  const f={};
+  for(const s of snaps)for(const sk of s.skus)if(sk.g>0){
+    if(!f[sk.r])f[sk.r]={r:sk.r,v:0,gT:0,cT:0};
+    f[sk.r].v++;f[sk.r].gT+=sk.g;f[sk.r].cT+=sk.c;
+  }
+  return Object.values(f).sort((a,b)=>b.v-a.v).slice(0,n);
+}
+function hSemana(snaps){
+  const by=Array.from({length:7},(_,i)=>({d:i,sn:0,sg:0}));
+  for(const s of snaps){by[s.dow].sn++;by[s.dow].sg+=s.skus.filter(sk=>sk.g>0).length;}
+  return by;
+}
+function hMes(snaps){
+  const by={};
+  for(const s of snaps){if(!by[s.dom])by[s.dom]={dom:s.dom,sn:0,sg:0};by[s.dom].sn++;by[s.dom].sg+=s.skus.filter(sk=>sk.g>0).length;}
+  return Object.values(by).sort((a,b)=>a.dom-b.dom);
+}
+function hClientes(snaps,n=20){
+  const cl={};
+  for(const s of snaps)for(const p of s.peds){
+    const k=p.cl||'SIN NOMBRE';
+    if(!cl[k])cl[k]={cl:k,peds:0,unis:0,skuF:{}};
+    cl[k].peds++;cl[k].unis+=p.u||0;
+    for(const[ref,cant]of(p.rows||[]))cl[k].skuF[ref]=(cl[k].skuF[ref]||0)+(cant||0);
+  }
+  return Object.values(cl)
+    .map(c=>({...c,topS:Object.entries(c.skuF).sort((a,b)=>b[1]-a[1]).slice(0,4).map(([r,u])=>({r,u}))}))
+    .sort((a,b)=>b.peds-a.peds).slice(0,n);
+}
+function hEvo(snaps,ref){
+  const r=String(ref);
+  return snaps.map(s=>{
+    const sk=s.skus.find(x=>x.r===r);
+    return{date:s.date,s:sk?.s||0,c:sk?.c||0,g:sk?.g||0,e:sk?.e||''};
+  });
+}
+
+// ── HistoricoTab ─────────────────────────────────────────────────────────────
+function HistoricoTab({hist,data,onClear}){
+  const snaps=hist?.snaps||[];
+  const [vista,setVista]=useState('rup');
+  const [skuQ,setSkuQ]=useState('');
+  const DIAS=['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
+  const colFq=pct=>pct>=70?C.red:pct>=40?C.orange:pct>=20?C.yellow:C.green;
+
+  const topRup=useMemo(()=>hTopRup(snaps),[snaps]);
+  const semana=useMemo(()=>hSemana(snaps),[snaps]);
+  const mesual=useMemo(()=>hMes(snaps),[snaps]);
+  const clientes=useMemo(()=>hClientes(snaps),[snaps]);
+  const descMap=useMemo(()=>{const m={};(data?.allItems||[]).forEach(it=>m[String(it.ref)]=it.desc);return m;},[data]);
+
+  const Spark=({vals,w=80,h=26,stroke})=>{
+    if(!vals||vals.length<2)return<span style={{color:C.t4,fontSize:9}}>—</span>;
+    const mx=Math.max(...vals,1);
+    const pts=vals.map((v,i)=>`${(i/(vals.length-1))*w},${h-Math.max(1,(v/mx)*(h-2))}`).join(' ');
+    return<svg width={w} height={h} style={{display:'block'}}><polyline points={pts} fill="none" stroke={stroke} strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round"/></svg>;
+  };
+
+  if(snaps.length===0)return(
+    <div style={{background:C.bg2,border:`1px solid ${C.b0}`,borderRadius:13,padding:'40px 24px',textAlign:'center'}}>
+      <div style={{fontSize:40,marginBottom:14}}>📈</div>
+      <div style={{color:C.t1,fontWeight:800,fontSize:15,marginBottom:8}}>Sin datos históricos todavía</div>
+      <div style={{color:C.t3,fontSize:12,lineHeight:1.7,maxWidth:360,margin:'0 auto'}}>
+        El historial se acumula automáticamente cada vez que se carga el dashboard. Mañana ya tendrás el primer punto de comparación y con el tiempo podrás ver patrones, tendencias y comportamiento de clientes.
+      </div>
+    </div>
+  );
+
+  const firstDate=snaps[0]?.date||'';
+  const lastDate=snaps[snaps.length-1]?.date||'';
+  const totalSKUsT=useMemo(()=>new Set(snaps.flatMap(s=>s.skus.map(sk=>sk.r))).size,[snaps]);
+  const totalPedsT=snaps.reduce((t,s)=>t+(s.peds?.length||0),0);
+  const avgGap=snaps.length>0?Math.round(snaps.reduce((t,s)=>t+(s.st?.nG||0),0)/snaps.length):0;
+
+  return(
+    <div style={{display:'flex',flexDirection:'column',gap:14,animation:'fadeUp .3s ease'}}>
+      {/* Header */}
+      <div style={{background:C.bg2,border:`1px solid ${C.b1}`,borderRadius:12,padding:'14px 18px'}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',flexWrap:'wrap',gap:10,marginBottom:12}}>
+          <div>
+            <div style={{color:C.t1,fontWeight:800,fontSize:14}}>📈 Histórico CEDI</div>
+            <div style={{color:C.t3,fontSize:10,marginTop:3}}>{firstDate} → {lastDate} · {snaps.length} snapshots · guardado local en este navegador</div>
+          </div>
+          <button onClick={()=>{if(window.confirm('¿Borrar todo el historial guardado? No se puede deshacer.'))onClear();}}
+            style={{background:'transparent',border:`1px solid ${C.b0}`,color:C.t4,borderRadius:6,padding:'5px 10px',fontSize:9,cursor:'pointer'}}>
+            🗑 Limpiar
+          </button>
+        </div>
+        <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:8}}>
+          {[{l:'Días de datos',v:snaps.length,c:C.accent},{l:'SKUs rastreados',v:totalSKUsT,c:C.teal},
+            {l:'Registros pedidos',v:totalPedsT.toLocaleString(),c:C.purple},{l:'Gap prom./día',v:avgGap+' SKUs',c:C.orange}]
+          .map(k=>(
+            <div key={k.l} style={{background:C.bg1,borderRadius:8,padding:'10px 12px',textAlign:'center',border:`1px solid ${C.b0}`}}>
+              <div style={{fontSize:8,color:C.t3,fontWeight:600,textTransform:'uppercase',letterSpacing:'.7px',marginBottom:4}}>{k.l}</div>
+              <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:15,fontWeight:800,color:k.c}}>{k.v}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Sub-tabs */}
+      <div style={{display:'inline-flex',gap:2,background:C.bg2,border:`1px solid ${C.b0}`,padding:3,borderRadius:9,flexWrap:'wrap'}}>
+        {[{k:'rup',l:'🔴 Críticos'},{k:'sem',l:'📅 Día semana'},{k:'mes',l:'📆 Día mes'},{k:'cli',l:'👥 Clientes'},{k:'evo',l:'📉 SKU'}].map(t=>(
+          <button key={t.k} onClick={()=>setVista(t.k)} style={{padding:'5px 12px',borderRadius:6,fontSize:10,fontWeight:600,background:vista===t.k?C.accent:'transparent',color:vista===t.k?C.bg0:C.t3,border:'none',cursor:'pointer',transition:'all .15s',whiteSpace:'nowrap'}}>
+            {t.l}
+          </button>
+        ))}
+      </div>
+
+      {/* ── SKUs más críticos ── */}
+      {vista==='rup'&&(
+        <div style={{background:C.bg2,border:`1px solid ${C.b1}`,borderRadius:12,overflow:'hidden'}}>
+          <div style={{padding:'12px 18px',borderBottom:`1px solid ${C.b0}`,background:C.bg1}}>
+            <div style={{color:C.t1,fontWeight:700,fontSize:13}}>SKUs con más días en gap o ruptura</div>
+            <div style={{color:C.t3,fontSize:10,marginTop:2}}>De {snaps.length} días capturados, cuántos apareció cada SKU con demanda sin cubrir</div>
+          </div>
+          <div style={{overflowX:'auto'}}>
+            <table style={{width:'100%',borderCollapse:'collapse'}}>
+              <thead><tr><TH>#</TH><TH>Ref</TH><TH>Descripción</TH><TH right>Días</TH><TH>Frecuencia</TH><TH right>Gap prom.</TH><TH right>Comp. prom.</TH><TH>Tendencia stock</TH></tr></thead>
+              <tbody>
+                {topRup.map((sk,i)=>{
+                  const pct=Math.round(sk.v/snaps.length*100);
+                  const col=colFq(pct);
+                  const evo=hEvo(snaps,sk.r);
+                  return(
+                    <tr key={sk.r} style={{background:i%2===0?C.bg2:C.bg1,borderBottom:`1px solid ${C.bg3}`}}>
+                      <TD mono c={C.t4} fs={10}>{i+1}</TD>
+                      <TD mono c={C.teal} fw={800}>{sk.r}</TD>
+                      <TD c={C.t2} fs={10}>{(descMap[sk.r]||'').slice(0,38)}</TD>
+                      <TD right mono c={col}>{sk.v}d</TD>
+                      <TD>
+                        <div style={{display:'flex',alignItems:'center',gap:6}}>
+                          <div style={{height:5,borderRadius:3,background:C.bg3,width:50,flexShrink:0}}>
+                            <div style={{height:'100%',borderRadius:3,background:col,width:`${pct}%`}}/>
+                          </div>
+                          <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:9,color:col}}>{pct}%</span>
+                        </div>
+                      </TD>
+                      <TD right mono c={C.red}>{Math.round(sk.gT/sk.v)}</TD>
+                      <TD right mono c={C.t2}>{Math.round(sk.cT/sk.v)}</TD>
+                      <TD><Spark vals={evo.map(e=>e.s)} w={70} h={24} stroke={col}/></TD>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* ── Patrón semanal ── */}
+      {vista==='sem'&&(
+        <div style={{background:C.bg2,border:`1px solid ${C.b1}`,borderRadius:12,overflow:'hidden'}}>
+          <div style={{padding:'12px 18px',borderBottom:`1px solid ${C.b0}`,background:C.bg1}}>
+            <div style={{color:C.t1,fontWeight:700,fontSize:13}}>Patrón por día de semana</div>
+            <div style={{color:C.t3,fontSize:10,marginTop:2}}>Promedio de SKUs con demanda sin cubrir según el día en que se cargó el dashboard</div>
+          </div>
+          <div style={{padding:'18px 16px',display:'flex',gap:10,flexWrap:'wrap'}}>
+            {semana.map(d=>{
+              const avg=d.sn>0?Math.round(d.sg/d.sn):0;
+              const maxAvg=Math.max(...semana.map(x=>x.sn>0?x.sg/x.sn:0),1);
+              const pct=maxAvg>0?Math.round(avg/maxAvg*100):0;
+              const col=colFq(pct);
+              return(
+                <div key={d.d} style={{flex:'1 1 75px',minWidth:75,background:C.bg1,borderRadius:9,padding:'12px 10px',textAlign:'center',border:`1px solid ${C.b0}`}}>
+                  <div style={{fontWeight:700,fontSize:11,color:d.sn>0?C.t1:C.t4,marginBottom:8}}>{DIAS[d.d]}</div>
+                  <div style={{height:60,display:'flex',alignItems:'flex-end',justifyContent:'center',marginBottom:6}}>
+                    <div style={{width:28,background:d.sn>0?col:C.bg3,borderRadius:'3px 3px 0 0',height:`${Math.max(3,Math.round(pct*0.58))}px`,transition:'height .5s'}}/>
+                  </div>
+                  <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:17,fontWeight:800,color:d.sn>0?col:C.t4}}>{avg}</div>
+                  <div style={{fontSize:8,color:C.t4,marginTop:3}}>{d.sn} muestras</div>
+                </div>
+              );
+            })}
+          </div>
+          <div style={{padding:'0 16px 14px',fontSize:9,color:C.t3}}>
+            ℹ Los días sin muestras no tienen barra. El patrón se irá definiendo con más días de datos.
+          </div>
+        </div>
+      )}
+
+      {/* ── Patrón mensual ── */}
+      {vista==='mes'&&(
+        <div style={{background:C.bg2,border:`1px solid ${C.b1}`,borderRadius:12,overflow:'hidden'}}>
+          <div style={{padding:'12px 18px',borderBottom:`1px solid ${C.b0}`,background:C.bg1}}>
+            <div style={{color:C.t1,fontWeight:700,fontSize:13}}>Patrón por día del mes</div>
+            <div style={{color:C.t3,fontSize:10,marginTop:2}}>Días del mes donde históricamente hay más presión de demanda (promedio SKUs en gap)</div>
+          </div>
+          {mesual.length<3?(
+            <div style={{padding:'20px 18px',fontSize:11,color:C.t3}}>
+              Necesitas datos de al menos 3 días distintos del mes. Actualmente: {mesual.length} día(s) con datos.
+            </div>
+          ):(
+            <div style={{padding:'14px 16px',display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(56px,1fr))',gap:6}}>
+              {Array.from({length:31},(_,i)=>i+1).map(dom=>{
+                const d=mesual.find(x=>x.dom===dom);
+                if(!d)return<div key={dom} style={{borderRadius:7,padding:'10px 4px',textAlign:'center',background:C.bg3,opacity:.35}}><div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:12,fontWeight:700,color:C.t4}}>{dom}</div></div>;
+                const avg=d.sn>0?Math.round(d.sg/d.sn):0;
+                const maxAvg=Math.max(...mesual.map(x=>x.sn>0?x.sg/x.sn:0),1);
+                const pct=Math.round(avg/maxAvg*100);
+                const col=colFq(pct);
+                return(
+                  <div key={dom} title={`Día ${dom}: ${avg} SKUs en gap (${d.sn} muestras)`} style={{borderRadius:7,padding:'10px 4px',textAlign:'center',background:`${col}20`,border:`1px solid ${col}50`,cursor:'default'}}>
+                    <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:13,fontWeight:800,color:col}}>{dom}</div>
+                    <div style={{fontSize:8,color:col,opacity:.9,marginTop:3}}>{avg}g</div>
+                    <div style={{fontSize:7,color:C.t4,marginTop:1}}>{d.sn}m</div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Clientes frecuentes ── */}
+      {vista==='cli'&&(
+        <div style={{background:C.bg2,border:`1px solid ${C.b1}`,borderRadius:12,overflow:'hidden'}}>
+          <div style={{padding:'12px 18px',borderBottom:`1px solid ${C.b0}`,background:C.bg1}}>
+            <div style={{color:C.t1,fontWeight:700,fontSize:13}}>Clientes frecuentes</div>
+            <div style={{color:C.t3,fontSize:10,marginTop:2}}>Basado en apariciones en pedidos activos de cada snapshot · SKUs que piden con más frecuencia</div>
+          </div>
+          <div style={{overflowX:'auto'}}>
+            <table style={{width:'100%',borderCollapse:'collapse'}}>
+              <thead><tr><TH>#</TH><TH>Cliente</TH><TH right>Apariciones</TH><TH right>Unidades total</TH><TH>SKUs más pedidos</TH></tr></thead>
+              <tbody>
+                {clientes.map((cl,i)=>(
+                  <tr key={cl.cl} style={{background:i%2===0?C.bg2:C.bg1,borderBottom:`1px solid ${C.bg3}`}}>
+                    <TD mono c={C.t4} fs={10}>{i+1}</TD>
+                    <TD c={C.t1} fw={600} fs={11}>{cl.cl}</TD>
+                    <TD right mono c={C.accent}>{cl.peds}</TD>
+                    <TD right mono c={C.t2}>{cl.unis.toLocaleString()}</TD>
+                    <TD>
+                      <div style={{display:'flex',gap:4,flexWrap:'wrap'}}>
+                        {cl.topS.map(s=>(
+                          <span key={s.r} style={{background:C.accentDim,color:C.accent,borderRadius:4,padding:'1px 6px',fontSize:8,fontWeight:700}}>
+                            {s.r}·{s.u}u
+                          </span>
+                        ))}
+                      </div>
+                    </TD>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* ── Evolución SKU ── */}
+      {vista==='evo'&&(
+        <div style={{background:C.bg2,border:`1px solid ${C.b1}`,borderRadius:12,overflow:'hidden'}}>
+          <div style={{padding:'12px 18px',borderBottom:`1px solid ${C.b0}`,background:C.bg1}}>
+            <div style={{color:C.t1,fontWeight:700,fontSize:13}}>Evolución de un SKU en el tiempo</div>
+            <div style={{color:C.t3,fontSize:10,marginTop:2}}>Stock piso, comprometido y gap día a día por referencia</div>
+          </div>
+          <div style={{padding:'14px 16px'}}>
+            <input type="text" placeholder="Escribe la referencia del SKU..." value={skuQ}
+              onChange={e=>setSkuQ(e.target.value.trim())}
+              style={{width:'100%',boxSizing:'border-box',background:C.bg1,border:`1px solid ${C.b1}`,borderRadius:8,padding:'10px 14px',color:C.t1,fontSize:12,outline:'none',fontFamily:"'JetBrains Mono',monospace"}}/>
+            {skuQ&&(()=>{
+              const evo=hEvo(snaps,skuQ);
+              const hasData=evo.some(e=>e.c>0||e.s>0);
+              if(!hasData)return<div style={{marginTop:14,color:C.t3,fontSize:11,textAlign:'center'}}>Sin datos para la referencia "{skuQ}".</div>;
+              const maxY=Math.max(...evo.map(e=>Math.max(e.s,e.c)),1);
+              const W=300,H=80;
+              const px=i=>(i/(Math.max(evo.length-1,1)))*W;
+              const py=v=>H-Math.max(2,(v/maxY)*(H-4));
+              const line=arr=>arr.map((v,i)=>`${i===0?'M':'L'}${px(i)},${py(v)}`).join('');
+              const lastDay=evo[evo.length-1];
+              return(
+                <div style={{marginTop:16}}>
+                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',flexWrap:'wrap',gap:8,marginBottom:12}}>
+                    <div>
+                      <div style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:800,fontSize:13,color:C.teal}}>Ref {skuQ}</div>
+                      <div style={{color:C.t3,fontSize:10,marginTop:2}}>{(descMap[skuQ]||'SKU no en datos actuales').slice(0,60)}</div>
+                    </div>
+                    <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+                      {[{l:'Último stock',v:lastDay?.s||0,c:C.green},{l:'Último comp.',v:lastDay?.c||0,c:C.yellow},{l:'Último gap',v:lastDay?.g||0,c:C.red}].map(k=>(
+                        <div key={k.l} style={{background:C.bg1,borderRadius:7,padding:'7px 10px',textAlign:'center',border:`1px solid ${C.b0}`}}>
+                          <div style={{fontSize:8,color:C.t3,marginBottom:2}}>{k.l}</div>
+                          <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:14,fontWeight:800,color:k.c}}>{k.v}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <svg width="100%" viewBox={`-4 -4 ${W+8} ${H+8}`} style={{display:'block',marginBottom:8,overflow:'visible',borderRadius:6,background:`${C.bg1}90`}}>
+                    <path d={line(evo.map(e=>e.c))} fill="none" stroke={C.yellow} strokeWidth={1.5} strokeDasharray="5 2"/>
+                    <path d={line(evo.map(e=>e.s))} fill="none" stroke={C.green} strokeWidth={2} strokeLinejoin="round"/>
+                    <path d={line(evo.map(e=>e.g))} fill="none" stroke={C.red} strokeWidth={1.5} strokeLinejoin="round"/>
+                  </svg>
+                  <div style={{display:'flex',gap:16,fontSize:9,flexWrap:'wrap',marginBottom:14,color:C.t2}}>
+                    <span><span style={{color:C.green,fontWeight:700}}>━</span> Stock piso</span>
+                    <span><span style={{color:C.yellow,fontWeight:700}}>╌</span> Comprometido</span>
+                    <span><span style={{color:C.red,fontWeight:700}}>━</span> Gap</span>
+                  </div>
+                  <div style={{overflowX:'auto'}}>
+                    <table style={{width:'100%',borderCollapse:'collapse'}}>
+                      <thead><tr style={{background:C.bg1}}><TH>Fecha</TH><TH right>Stock</TH><TH right>Comp.</TH><TH right>Gap</TH><TH>Estado</TH></tr></thead>
+                      <tbody>
+                        {[...evo].reverse().slice(0,20).map(e=>(
+                          <tr key={e.date} style={{borderBottom:`1px solid ${C.bg3}`}}>
+                            <TD mono c={C.t3} fs={10}>{e.date}</TD>
+                            <TD right mono c={C.green} fs={10}>{e.s}</TD>
+                            <TD right mono c={C.yellow} fs={10}>{e.c}</TD>
+                            <TD right mono c={e.g>0?C.red:C.t4} fs={10}>{e.g>0?`−${e.g}`:0}</TD>
+                            <TD fs={9}>
+                              {e.e&&<span style={{background:e.e==='urgente'?C.redDim:e.e==='critico'?`${C.orange}22`:e.e==='preventivo'?C.yellowDim:C.greenDim,color:e.e==='urgente'?C.red:e.e==='critico'?C.orange:e.e==='preventivo'?C.yellow:C.green,borderRadius:3,padding:'1px 5px',fontSize:8,fontWeight:700}}>{e.e}</span>}
+                            </TD>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── UI primitives ─────────────────────────────────────────────────────────────
 const Badge=({label,c,dim,sz=9,px=7,py=2})=>(
   <span style={{background:dim,color:c,border:`1px solid ${c}35`,borderRadius:5,padding:`${py}px ${px}px`,fontSize:sz,fontWeight:700,letterSpacing:"0.3px",whiteSpace:"nowrap"}}>{label}</span>
@@ -1144,6 +1503,7 @@ function CEDIDashboard(){
   const [posCajasOpen,setPosCajasOpen]=useState({}); // buscador: posiciones expandidas para ver cajas
   const [stockTbl,setStockTbl]=useState(false); // tab stock: mostrar tabla detalle
   const [historico,setHistorico]=useState([]); // #2: snapshots en memoria de sesión
+  const [histData,setHistData]=useState(()=>histLoad()); // histórico persistente en localStorage
   const [trendGran,setTrendGran]=useState("dia"); // tendencias: dia|semana|mes
   const [trendFam,setTrendFam]=useState("total"); // tendencias: total|familia
   const [trendDesde,setTrendDesde]=useState(""); // rango fecha desde
@@ -1245,6 +1605,11 @@ function CEDIDashboard(){
       cargarAuto(false);
     }
   },[autoIntentado,cargarAuto]);
+
+  // Auto-guardar snapshot histórico cada vez que lleguen datos nuevos
+  useEffect(()=>{
+    if(data){const saved=histSave(data);if(saved)setHistData(saved);}
+  },[data]);
 
   const SKUS=data?.SKUS||[];
   const sorted=useMemo(()=>[...SKUS].sort((a,b)=>score(b)-score(a)),[SKUS]);
@@ -1516,7 +1881,7 @@ function CEDIDashboard(){
         {/* TABS */}
         <div className="tabs-scroll" style={{marginBottom:16}}>
           <div style={{display:"inline-flex",gap:2,background:C.bg2,border:`1px solid ${C.b0}`,padding:3,borderRadius:9}}>
-            {[{k:"dashboard",l:"🗺 CEDI Live"},{k:"plan",l:"📋 Reposición"},{k:"pipeline",l:"📦 Pipeline"},{k:"stock",l:"📊 Stock"},{k:"slotting",l:"⬆ Slotting"},{k:"reporte",l:"📑 Reporte"}].map(t=>(
+            {[{k:"dashboard",l:"🗺 CEDI Live"},{k:"plan",l:"📋 Reposición"},{k:"pipeline",l:"📦 Pipeline"},{k:"stock",l:"📊 Stock"},{k:"slotting",l:"⬆ Slotting"},{k:"reporte",l:"📑 Reporte"},{k:"historico",l:"📈 Histórico"}].map(t=>(
               <button key={t.k} onClick={()=>setTab(t.k)} style={{padding:"6px 14px",borderRadius:7,fontSize:11,fontWeight:600,fontFamily:"'Inter',sans-serif",background:tab===t.k?C.accent:"transparent",color:tab===t.k?C.bg0:C.t3,border:"none",cursor:"pointer",transition:"all .15s",whiteSpace:"nowrap"}}>
                 {t.l}
               </button>
@@ -3052,6 +3417,18 @@ function CEDIDashboard(){
 
           </div>
         )}
+
+        {/* ═ HISTÓRICO ═ */}
+        {tab==="historico"&&(
+          <div style={{animation:"fadeUp .3s ease"}}>
+            <HistoricoTab
+              hist={histData}
+              data={data}
+              onClear={()=>{histClear();setHistData({snaps:[]});}}
+            />
+          </div>
+        )}
+
       </div>
     </div>
   );
