@@ -652,7 +652,7 @@ function hMes(snaps){
   for(const s of snaps){if(!by[s.dom])by[s.dom]={dom:s.dom,sn:0,sg:0};by[s.dom].sn++;by[s.dom].sg+=s.skus.filter(sk=>sk.g>0).length;}
   return Object.values(by).sort((a,b)=>a.dom-b.dom);
 }
-function hClientes(snaps,n=20){
+function hClientes(snaps){
   const cl={};
   for(const s of snaps)for(const p of s.peds){
     const k=p.cl||'SIN NOMBRE';
@@ -661,8 +661,8 @@ function hClientes(snaps,n=20){
     for(const[ref,cant]of(p.rows||[]))cl[k].skuF[ref]=(cl[k].skuF[ref]||0)+(cant||0);
   }
   return Object.values(cl)
-    .map(c=>({...c,topS:Object.entries(c.skuF).sort((a,b)=>b[1]-a[1]).slice(0,4).map(([r,u])=>({r,u}))}))
-    .sort((a,b)=>b.peds-a.peds).slice(0,n);
+    .map(c=>({...c,allS:Object.entries(c.skuF).sort((a,b)=>b[1]-a[1]).map(([r,u])=>({r,u}))}))
+    .sort((a,b)=>b.peds-a.peds);
 }
 function hEvo(snaps,ref){
   const r=String(ref);
@@ -677,6 +677,7 @@ function HistoricoTab({hist,data,onClear}){
   const snaps=hist?.snaps||[];
   const [vista,setVista]=useState('rup');
   const [skuQ,setSkuQ]=useState('');
+  const [expandCli,setExpandCli]=useState(null);
   const DIAS=['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
   const colFq=pct=>pct>=70?C.red:pct>=40?C.orange:pct>=20?C.yellow:C.green;
 
@@ -849,34 +850,68 @@ function HistoricoTab({hist,data,onClear}){
         </div>
       )}
 
-      {/* ── Clientes frecuentes ── */}
+      {/* ── Clientes frecuentes (acordeón) ── */}
       {vista==='cli'&&(
         <div style={{background:C.bg2,border:`1px solid ${C.b1}`,borderRadius:12,overflow:'hidden'}}>
-          <div style={{padding:'12px 18px',borderBottom:`1px solid ${C.b0}`,background:C.bg1}}>
-            <div style={{color:C.t1,fontWeight:700,fontSize:13}}>Clientes frecuentes</div>
-            <div style={{color:C.t3,fontSize:10,marginTop:2}}>Basado en apariciones en pedidos activos de cada snapshot · SKUs que piden con más frecuencia</div>
+          <div style={{padding:'12px 18px',borderBottom:`1px solid ${C.b0}`,background:C.bg1,display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:8}}>
+            <div>
+              <div style={{color:C.t1,fontWeight:700,fontSize:13}}>Clientes frecuentes</div>
+              <div style={{color:C.t3,fontSize:10,marginTop:2}}>{clientes.length} clientes · clic para ver sus SKUs</div>
+            </div>
+            <span style={{background:C.accentDim,color:C.accent,borderRadius:6,padding:'3px 10px',fontSize:9,fontWeight:700}}>{clientes.length} total</span>
           </div>
           <div style={{overflowX:'auto'}}>
             <table style={{width:'100%',borderCollapse:'collapse'}}>
-              <thead><tr><TH>#</TH><TH>Cliente</TH><TH right>Apariciones</TH><TH right>Unidades total</TH><TH>SKUs más pedidos</TH></tr></thead>
+              <thead>
+                <tr><TH>#</TH><TH>Cliente</TH><TH right>Apariciones</TH><TH right>Unidades total</TH><TH right>SKUs distintos</TH><TH></TH></tr>
+              </thead>
               <tbody>
-                {clientes.map((cl,i)=>(
-                  <tr key={cl.cl} style={{background:i%2===0?C.bg2:C.bg1,borderBottom:`1px solid ${C.bg3}`}}>
-                    <TD mono c={C.t4} fs={10}>{i+1}</TD>
-                    <TD c={C.t1} fw={600} fs={11}>{cl.cl}</TD>
-                    <TD right mono c={C.accent}>{cl.peds}</TD>
-                    <TD right mono c={C.t2}>{cl.unis.toLocaleString()}</TD>
-                    <TD>
-                      <div style={{display:'flex',gap:4,flexWrap:'wrap'}}>
-                        {cl.topS.map(s=>(
-                          <span key={s.r} style={{background:C.accentDim,color:C.accent,borderRadius:4,padding:'1px 6px',fontSize:8,fontWeight:700}}>
-                            {s.r}·{s.u}u
-                          </span>
-                        ))}
-                      </div>
-                    </TD>
-                  </tr>
-                ))}
+                {clientes.map((cl,i)=>{
+                  const isExp=expandCli===cl.cl;
+                  return(
+                    <React.Fragment key={cl.cl}>
+                      <tr onClick={()=>setExpandCli(isExp?null:cl.cl)}
+                        style={{background:isExp?C.b0:i%2===0?C.bg2:C.bg1,borderBottom:`1px solid ${C.bg3}`,cursor:'pointer'}}>
+                        <TD mono c={C.t4} fs={10}>{i+1}</TD>
+                        <TD c={C.t1} fw={700} fs={11}>{cl.cl}</TD>
+                        <TD right mono c={C.accent} fw={700}>{cl.peds}</TD>
+                        <TD right mono c={C.t2}>{cl.unis.toLocaleString()}</TD>
+                        <TD right mono c={C.teal}>{cl.allS.length}</TD>
+                        <TD><span style={{color:C.t3,fontSize:11}}>{isExp?'▲':'▼'}</span></TD>
+                      </tr>
+                      {isExp&&(
+                        <tr style={{background:C.bg1}}>
+                          <td colSpan={6} style={{padding:0}}>
+                            <div style={{padding:'10px 20px 16px'}}>
+                              <div style={{fontSize:9,color:C.t3,fontWeight:600,textTransform:'uppercase',letterSpacing:'0.8px',marginBottom:8}}>
+                                {cl.allS.length} SKUs distintos · {cl.unis.toLocaleString()} u acumuladas en {cl.peds} apariciones
+                              </div>
+                              <table style={{width:'100%',borderCollapse:'collapse'}}>
+                                <thead>
+                                  <tr style={{borderBottom:`1px solid ${C.b0}`}}>
+                                    {['#','Ref','Descripción','U acumuladas'].map(h=>(
+                                      <th key={h} style={{padding:'5px 10px',textAlign:h==='U acumuladas'?'right':'left',fontSize:9,fontWeight:600,color:C.t3,textTransform:'uppercase',letterSpacing:'0.5px'}}>{h}</th>
+                                    ))}
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {cl.allS.map((s,j)=>(
+                                    <tr key={s.r} style={{borderBottom:`1px solid ${C.bg3}`,background:j%2===0?`${C.bg2}cc`:C.bg1}}>
+                                      <td style={{padding:'5px 10px',fontSize:9,color:C.t4,fontFamily:"'JetBrains Mono',monospace"}}>{j+1}</td>
+                                      <td style={{padding:'5px 10px',fontSize:10,color:C.teal,fontWeight:800,fontFamily:"'JetBrains Mono',monospace"}}>{s.r}</td>
+                                      <td style={{padding:'5px 10px',fontSize:10,color:C.t2}}>{(descMap[s.r]||'').slice(0,48)}</td>
+                                      <td style={{padding:'5px 10px',textAlign:'right',fontSize:11,color:C.accent,fontWeight:700,fontFamily:"'JetBrains Mono',monospace"}}>{s.u.toLocaleString()}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
               </tbody>
             </table>
           </div>
