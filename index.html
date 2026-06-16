@@ -262,7 +262,13 @@ async function processFiles(wbInv, wbFact, onStep, marcasActivas){
     const picking=String(r["Picking"]||r["PedidoSiesa"]||"").trim();
     const cliente=String(r["NOMBRECLIENTE"]||"").trim();
     const pedidoSiesa=String(r["PedidoSiesa"]||"").trim();
-    const fecha=r["F_pedido"]?String(r["F_pedido"]).slice(0,10):"";
+    // F_pedido llega como objeto Date (cellDates:true al leer el archivo).
+    // String(date).slice(0,10) daba "Wed May 20" en vez de "2026-05-20"
+    // (rompía el orden cronológico, la tabla Pipeline y los patrones del Histórico).
+    const fpRaw=r["F_pedido"];
+    const fecha=(fpRaw instanceof Date&&!isNaN(fpRaw))
+      ?`${fpRaw.getFullYear()}-${String(fpRaw.getMonth()+1).padStart(2,'0')}-${String(fpRaw.getDate()).padStart(2,'0')}`
+      :(fpRaw?String(fpRaw).slice(0,10):"");
     const desc=String(r["descripcion"]||"").trim();
     const tipoDocto=String(r["TipoDocto"]||"").trim().toUpperCase();
     if(!ref||cant===0||!cascoRefs.has(ref))continue;
