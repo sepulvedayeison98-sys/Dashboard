@@ -615,20 +615,32 @@ function histSave(data){
     const date=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
     const raw=localStorage.getItem(HIST_KEY);
     const h=raw?JSON.parse(raw):{snaps:[]};
-    const snap={
-      ts:d.getTime(),date,dow:d.getDay(),dom:d.getDate(),
-      skus:(data.allItems||[]).filter(it=>it.comp>0||it.gap>0)
-           .map(it=>({r:String(it.ref),s:it.stock,c:it.comp,g:Math.max(0,it.comp-it.stock),e:it.estado_op||''})),
-      peds:(data.pedidosActivos||[]).slice(0,120).map(p=>({
-        cl:p.cliente||'',ciu:p.ciudad||'',f:p.fecha||'',u:p.uni||0,cls:p.clasificacion||'',
-        rows:(p.rows||[]).map(r=>[r.ref,r.cant]),
-      })),
-      st:{nG:(data.allItems||[]).filter(it=>it.gap>0).length,
-          tC:data.stats?.totalComp||0,tS:data.stats?.totalStock||0,
-          nP:data.pedidosActivos?.length||0,nR:data.stats?.totalRupturas||0},
-    };
+
+    const skus=(data.allItems||[]).filter(it=>it.comp>0||it.gap>0)
+         .map(it=>({r:String(it.ref),s:it.stock,c:it.comp,g:Math.max(0,it.comp-it.stock),e:it.estado_op||''}));
+    // pedidoSiesa/id identifica el pedido entre actualizaciones del mismo día,
+    // así una actualización de las 10am no duplica lo ya visto a las 8am.
+    const pedsNow=(data.pedidosActivos||[]).slice(0,500).map(p=>({
+      id:String(p.pedidoSiesa||p.id||''),
+      cl:p.cliente||'',ciu:p.ciudad||'',f:p.fecha||'',u:p.uni||0,cls:p.clasificacion||'',
+      rows:(p.rows||[]).map(r=>[r.ref,r.cant]),
+    }));
+
     const idx=h.snaps.findIndex(s=>s.date===date);
-    if(idx>=0)h.snaps[idx]=snap; else h.snaps.push(snap);
+    const stats={nG:(data.allItems||[]).filter(it=>it.gap>0).length,
+        tC:data.stats?.totalComp||0,tS:data.stats?.totalStock||0,
+        nP:data.pedidosActivos?.length||0,nR:data.stats?.totalRupturas||0};
+    if(idx>=0){
+      // Mismo día: upsert por id. Lo que ya estaba (incluso si ya se despachó
+      // y desapareció de pedidosActivos) se conserva; lo que sigue activo se
+      // actualiza en su lugar; solo lo realmente nuevo se agrega.
+      const pedMap={};
+      (h.snaps[idx].peds||[]).forEach(p=>{pedMap[p.id||`${p.cl}|${p.f}`]=p;});
+      pedsNow.forEach(p=>{pedMap[p.id||`${p.cl}|${p.f}`]=p;});
+      h.snaps[idx]={...h.snaps[idx],ts:d.getTime(),dow:d.getDay(),dom:d.getDate(),skus,peds:Object.values(pedMap),st:stats};
+    }else{
+      h.snaps.push({ts:d.getTime(),date,dow:d.getDay(),dom:d.getDate(),skus,peds:pedsNow,st:stats});
+    }
     if(h.snaps.length>HIST_MAX)h.snaps=h.snaps.slice(-HIST_MAX);
     localStorage.setItem(HIST_KEY,JSON.stringify(h));
     return h;
@@ -660,9 +672,20 @@ function hMes(snaps){
   return Object.values(by).sort((a,b)=>a.dom-b.dom);
 }
 function hClientes(snaps){
-  const cl={};
+  // Primero deduplicar por id de pedido en TODO el histórico: si el mismo
+  // pedido sigue activo varios días seguidos, debe contar una sola vez (se
+  // queda con la versión más reciente vista), no una vez por cada día.
+  const pedUnicos={};
   for(const s of snaps)for(const p of s.peds){
-    const k=p.cl||'SIN NOMBRE';
+    const key=p.id||`${p.cl}|${p.f}|${s.date}`; // snapshots viejos sin id: 1 por día
+    if(!pedUnicos[key])pedUnicos[key]={cl:p.cl||'SIN NOMBRE',u:0,rows:[]};
+    pedUnicos[key].cl=p.cl||pedUnicos[key].cl;
+    pedUnicos[key].u=p.u||pedUnicos[key].u;
+    if(p.rows&&p.rows.length)pedUnicos[key].rows=p.rows;
+  }
+  const cl={};
+  for(const p of Object.values(pedUnicos)){
+    const k=p.cl;
     if(!cl[k])cl[k]={cl:k,peds:0,unis:0,skuF:{}};
     cl[k].peds++;cl[k].unis+=p.u||0;
     for(const[ref,cant]of(p.rows||[]))cl[k].skuF[ref]=(cl[k].skuF[ref]||0)+(cant||0);
@@ -909,7 +932,7 @@ function HistoricoTab({hist,data,onClear}){
           <div style={{overflowX:'auto'}}>
             <table style={{width:'100%',borderCollapse:'collapse'}}>
               <thead>
-                <tr><TH>#</TH><TH>Cliente</TH><TH right>Apariciones</TH><TH right>Unidades total</TH><TH right>SKUs distintos</TH><TH></TH></tr>
+                <tr><TH>#</TH><TH>Cliente</TH><TH right>Pedidos únicos</TH><TH right>Unidades total</TH><TH right>SKUs distintos</TH><TH></TH></tr>
               </thead>
               <tbody>
                 {clientes.map((cl,i)=>{
@@ -930,7 +953,7 @@ function HistoricoTab({hist,data,onClear}){
                           <td colSpan={6} style={{padding:0}}>
                             <div style={{padding:'10px 20px 16px'}}>
                               <div style={{fontSize:9,color:C.t3,fontWeight:600,textTransform:'uppercase',letterSpacing:'0.8px',marginBottom:8}}>
-                                {cl.allS.length} SKUs distintos · {cl.unis.toLocaleString()} u acumuladas en {cl.peds} apariciones
+                                {cl.allS.length} SKUs distintos · {cl.unis.toLocaleString()} u acumuladas en {cl.peds} pedidos únicos
                               </div>
                               <table style={{width:'100%',borderCollapse:'collapse'}}>
                                 <thead>
