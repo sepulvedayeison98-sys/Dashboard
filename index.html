@@ -609,7 +609,10 @@ function histCheckPass(input){try{return btoa(input)===HIST_PASS_B64;}catch(e){r
 function histSave(data){
   try{
     const d=new Date();
-    const date=d.toISOString().slice(0,10);
+    // Fecha LOCAL (no UTC): toISOString() usa UTC y en Colombia (UTC-5) una
+    // actualización después de las 7pm caía en el día UTC siguiente, chocando
+    // con la actualización del día siguiente y borrando el snapshot anterior.
+    const date=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
     const raw=localStorage.getItem(HIST_KEY);
     const h=raw?JSON.parse(raw):{snaps:[]};
     const snap={
