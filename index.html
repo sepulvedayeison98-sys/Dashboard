@@ -671,20 +671,24 @@ function hMes(snaps){
   for(const s of snaps){if(!by[s.dom])by[s.dom]={dom:s.dom,sn:0,sg:0};by[s.dom].sn++;by[s.dom].sg+=s.skus.filter(sk=>sk.g>0).length;}
   return Object.values(by).sort((a,b)=>a.dom-b.dom);
 }
-function hClientes(snaps){
-  // Primero deduplicar por id de pedido en TODO el histórico: si el mismo
-  // pedido sigue activo varios días seguidos, debe contar una sola vez (se
-  // queda con la versión más reciente vista), no una vez por cada día.
-  const pedUnicos={};
+function hPedidosUnicos(snaps){
+  // Deduplica por id de pedido en TODO el histórico: si el mismo pedido
+  // sigue activo varios días seguidos, debe contar una sola vez (se queda
+  // con la versión más reciente vista), no una vez por cada día capturado.
+  const map={};
   for(const s of snaps)for(const p of s.peds){
     const key=p.id||`${p.cl}|${p.f}|${s.date}`; // snapshots viejos sin id: 1 por día
-    if(!pedUnicos[key])pedUnicos[key]={cl:p.cl||'SIN NOMBRE',u:0,rows:[]};
-    pedUnicos[key].cl=p.cl||pedUnicos[key].cl;
-    pedUnicos[key].u=p.u||pedUnicos[key].u;
-    if(p.rows&&p.rows.length)pedUnicos[key].rows=p.rows;
+    if(!map[key])map[key]={cl:p.cl||'SIN NOMBRE',f:p.f||s.date,u:0,rows:[]};
+    map[key].cl=p.cl||map[key].cl;
+    map[key].f=p.f||map[key].f;
+    map[key].u=p.u||map[key].u;
+    if(p.rows&&p.rows.length)map[key].rows=p.rows;
   }
+  return Object.values(map);
+}
+function hClientes(snaps){
   const cl={};
-  for(const p of Object.values(pedUnicos)){
+  for(const p of hPedidosUnicos(snaps)){
     const k=p.cl;
     if(!cl[k])cl[k]={cl:k,peds:0,unis:0,skuF:{}};
     cl[k].peds++;cl[k].unis+=p.u||0;
@@ -693,6 +697,44 @@ function hClientes(snaps){
   return Object.values(cl)
     .map(c=>({...c,allS:Object.entries(c.skuF).sort((a,b)=>b[1]-a[1]).map(([r,u])=>({r,u}))}))
     .sort((a,b)=>b.peds-a.peds);
+}
+function hPatrones(snaps,minVeces=2){
+  // Agrupa por (cliente, SKU, cantidad exacta) para detectar pedidos que se
+  // repiten igualitos cada cierto tiempo, y ubica en qué día de semana/mes
+  // suelen caer y cada cuántos días se repiten en promedio.
+  const grupos={};
+  for(const p of hPedidosUnicos(snaps)){
+    if(!p.f)continue; // sin fecha de pedido no se puede ubicar en el calendario
+    const ms=new Date(p.f+'T00:00:00').getTime();
+    if(isNaN(ms))continue;
+    for(const[ref,cant]of(p.rows||[])){
+      if(!cant)continue;
+      const key=`${p.cl}|${ref}|${cant}`;
+      if(!grupos[key])grupos[key]={cl:p.cl,ref:String(ref),cant,fechas:[]};
+      grupos[key].fechas.push(ms);
+    }
+  }
+  const freqTop=arr=>{
+    const c={};arr.forEach(v=>c[v]=(c[v]||0)+1);
+    const top=Object.entries(c).sort((a,b)=>b[1]-a[1])[0];
+    return{v:Number(top[0]),pct:Math.round(top[1]/arr.length*100)};
+  };
+  return Object.values(grupos)
+    .filter(g=>g.fechas.length>=minVeces)
+    .map(g=>{
+      const fechas=g.fechas.slice().sort((a,b)=>a-b);
+      const dowTop=freqTop(fechas.map(ms=>new Date(ms).getDay()));
+      const domTop=freqTop(fechas.map(ms=>new Date(ms).getDate()));
+      const intervalos=[];
+      for(let i=1;i<fechas.length;i++)intervalos.push(Math.round((fechas[i]-fechas[i-1])/86400000));
+      const intervaloProm=intervalos.length?Math.round(intervalos.reduce((a,b)=>a+b,0)/intervalos.length):0;
+      return{
+        cl:g.cl,ref:g.ref,cant:g.cant,veces:fechas.length,
+        dowTop:dowTop.v,dowPct:dowTop.pct,domTop:domTop.v,domPct:domTop.pct,
+        intervaloProm,ultima:new Date(fechas[fechas.length-1]).toISOString().slice(0,10),
+      };
+    })
+    .sort((a,b)=>b.veces-a.veces||a.intervaloProm-b.intervaloProm);
 }
 function hEvo(snaps,ref){
   const r=String(ref);
@@ -719,6 +761,7 @@ function HistoricoTab({hist,data,onClear}){
   const semana=useMemo(()=>hSemana(snaps),[snaps]);
   const mesual=useMemo(()=>hMes(snaps),[snaps]);
   const clientes=useMemo(()=>hClientes(snaps),[snaps]);
+  const patrones=useMemo(()=>hPatrones(snaps),[snaps]);
   const descMap=useMemo(()=>{const m={};(data?.allItems||[]).forEach(it=>m[String(it.ref)]=it.desc);return m;},[data]);
   const totalSKUsT=useMemo(()=>new Set(snaps.flatMap(s=>s.skus.map(sk=>sk.r))).size,[snaps]);
   const totalPedsT=snaps.reduce((t,s)=>t+(s.peds?.length||0),0);
@@ -807,7 +850,7 @@ function HistoricoTab({hist,data,onClear}){
 
       {/* Sub-tabs */}
       <div style={{display:'inline-flex',gap:2,background:C.bg2,border:`1px solid ${C.b0}`,padding:3,borderRadius:9,flexWrap:'wrap'}}>
-        {[{k:'rup',l:'🔴 Críticos'},{k:'sem',l:'📅 Día semana'},{k:'mes',l:'📆 Día mes'},{k:'cli',l:'👥 Clientes'},{k:'evo',l:'📉 SKU'}].map(t=>(
+        {[{k:'rup',l:'🔴 Críticos'},{k:'sem',l:'📅 Día semana'},{k:'mes',l:'📆 Día mes'},{k:'cli',l:'👥 Clientes'},{k:'pat',l:'🔁 Patrones'},{k:'evo',l:'📉 SKU'}].map(t=>(
           <button key={t.k} onClick={()=>setVista(t.k)} style={{padding:'5px 12px',borderRadius:6,fontSize:10,fontWeight:600,background:vista===t.k?C.accent:'transparent',color:vista===t.k?C.bg0:C.t3,border:'none',cursor:'pointer',transition:'all .15s',whiteSpace:'nowrap'}}>
             {t.l}
           </button>
@@ -984,6 +1027,47 @@ function HistoricoTab({hist,data,onClear}){
               </tbody>
             </table>
           </div>
+        </div>
+      )}
+
+      {/* ── Patrones de repetición (cliente + SKU + cantidad) ── */}
+      {vista==='pat'&&(
+        <div style={{background:C.bg2,border:`1px solid ${C.b1}`,borderRadius:12,overflow:'hidden'}}>
+          <div style={{padding:'12px 18px',borderBottom:`1px solid ${C.b0}`,background:C.bg1}}>
+            <div style={{color:C.t1,fontWeight:700,fontSize:13}}>Patrones de repetición</div>
+            <div style={{color:C.t3,fontSize:10,marginTop:2}}>Mismo cliente pidiendo el mismo SKU en la misma cantidad — día típico y cada cuántos días se repite</div>
+          </div>
+          {patrones.length===0?(
+            <div style={{padding:'30px 20px',textAlign:'center',color:C.t3,fontSize:11,lineHeight:1.7}}>
+              Todavía no hay pedidos repetidos exactamente igual (mismo cliente, SKU y cantidad). Con más días acumulados van a empezar a aparecer patrones aquí.
+            </div>
+          ):(
+            <div style={{overflowX:'auto'}}>
+              <table style={{width:'100%',borderCollapse:'collapse'}}>
+                <thead>
+                  <tr><TH>#</TH><TH>Cliente</TH><TH>Ref</TH><TH>Descripción</TH><TH right>Cant.</TH><TH right>Veces</TH><TH>Día típico</TH><TH right>Cada</TH><TH right>Última vez</TH></tr>
+                </thead>
+                <tbody>
+                  {patrones.map((p,i)=>(
+                    <tr key={p.cl+p.ref+p.cant} style={{background:i%2===0?C.bg2:C.bg1,borderBottom:`1px solid ${C.bg3}`}}>
+                      <TD mono c={C.t4} fs={10}>{i+1}</TD>
+                      <TD c={C.t1} fw={700} fs={11}>{p.cl}</TD>
+                      <TD mono c={C.teal} fw={700}>{p.ref}</TD>
+                      <TD c={C.t2} fs={10}>{(descMap[p.ref]||'').slice(0,40)}</TD>
+                      <TD right mono c={C.yellow} fw={700}>{p.cant}</TD>
+                      <TD right mono c={C.accent} fw={700}>{p.veces}</TD>
+                      <TD fs={10} c={C.t2}>
+                        {DIAS[p.dowTop]} <span style={{color:C.t4}}>({p.dowPct}%)</span>
+                        <div style={{color:C.t4,fontSize:8,marginTop:1}}>día {p.domTop} del mes ({p.domPct}%)</div>
+                      </TD>
+                      <TD right mono c={C.purple} fw={700}>{p.intervaloProm>0?`${p.intervaloProm}d`:'—'}</TD>
+                      <TD right mono c={C.t3} fs={10}>{p.ultima}</TD>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
 
