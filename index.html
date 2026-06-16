@@ -751,7 +751,7 @@ function hEvo(snaps,ref){
 }
 
 // ── HistoricoTab ─────────────────────────────────────────────────────────────
-function HistoricoTab({hist,data,onClear}){
+function HistoricoTab({hist,data,onClear,isMobile}){
   const snaps=hist?.snaps||[];
   const [locked,setLocked]=useState(()=>sessionStorage.getItem('hist_ok')!=='1');
   const [passInput,setPassInput]=useState('');
@@ -852,6 +852,51 @@ function HistoricoTab({hist,data,onClear}){
             </div>
           ))}
         </div>
+      </div>
+
+      {/* Resumen clicable de la pestaña — reemplaza el KPI strip global cuando se entra a Histórico */}
+      <div style={{display:'grid',gridTemplateColumns:isMobile?'repeat(2,1fr)':'repeat(4,1fr) 1.3fr',gap:isMobile?7:9}}>
+        {[
+          {l:'SKUs analizados',v:totalSKUsT,c:C.teal,s:`${snaps.length} días capturados`,go:'evo'},
+          {l:'Clientes',v:clientes.length,c:C.purple,s:`${totalPedsT.toLocaleString()} pedidos únicos`,go:'cli'},
+          {l:'Patrones',v:patrones.length,c:C.accent,s:'cliente + SKU + cant. repetida',go:'pat'},
+          {l:'SKUs críticos',v:topRup.length,c:C.red,s:`${avgGap} gap prom./día`,go:'rup'},
+        ].map((k,i)=>(
+          <button key={k.l} onClick={()=>{if(k.go==='evo'&&!skuQ&&topRup[0])setSkuQ(topRup[0].r);setVista(k.go);}}
+            style={{textAlign:'left',background:C.bg2,border:`1px solid ${C.b0}`,borderRadius:11,padding:'13px 14px',borderTop:`2px solid ${k.c}`,cursor:'pointer',fontFamily:'inherit',animation:'fadeUp .4s ease both',animationDelay:`${i*0.05}s`,transition:'background .15s'}}
+            onMouseEnter={e=>e.currentTarget.style.background=C.bg3}
+            onMouseLeave={e=>e.currentTarget.style.background=C.bg2}>
+            <div style={{fontSize:9,fontWeight:600,color:C.t3,textTransform:'uppercase',letterSpacing:'0.8px',marginBottom:5}}>{k.l}</div>
+            <div style={{fontSize:24,fontWeight:800,color:k.c,lineHeight:1,fontFamily:"'JetBrains Mono',monospace",marginBottom:3}}>{k.v}</div>
+            <div style={{fontSize:10,color:C.t4}}>{k.s}</div>
+          </button>
+        ))}
+        {(()=>{
+          const last=snaps[snaps.length-1];
+          const skusUltDia=last?.skus||[];
+          const crit=skusUltDia.filter(sk=>sk.g>0).length;
+          const cubierto=skusUltDia.filter(sk=>sk.c>0&&sk.g<=0).length;
+          const totalDonut=crit+cubierto;
+          const pctCrit=totalDonut>0?Math.round(crit/totalDonut*100):0;
+          const R=24,CIRC=2*Math.PI*R;
+          const critLen=CIRC*(pctCrit/100);
+          return(
+            <button onClick={()=>setVista('rup')}
+              style={{display:'flex',alignItems:'center',gap:12,background:C.bg2,border:`1px solid ${C.b0}`,borderRadius:11,padding:'13px 14px',borderTop:`2px solid ${C.red}`,cursor:'pointer',fontFamily:'inherit',textAlign:'left'}}
+              onMouseEnter={e=>e.currentTarget.style.background=C.bg3}
+              onMouseLeave={e=>e.currentTarget.style.background=C.bg2}>
+              <svg width="56" height="56" viewBox="0 0 56 56" style={{flexShrink:0,transform:'rotate(-90deg)'}}>
+                <circle cx="28" cy="28" r={R} fill="none" stroke={C.bg3} strokeWidth="7"/>
+                {totalDonut>0&&<circle cx="28" cy="28" r={R} fill="none" stroke={C.red} strokeWidth="7" strokeDasharray={`${critLen} ${CIRC-critLen}`} strokeLinecap="round"/>}
+              </svg>
+              <div>
+                <div style={{fontSize:9,fontWeight:600,color:C.t3,textTransform:'uppercase',letterSpacing:'0.8px',marginBottom:3}}>Resumen último día</div>
+                <div style={{fontSize:16,fontWeight:800,color:C.red,fontFamily:"'JetBrains Mono',monospace"}}>{totalDonut>0?`${pctCrit}% en gap`:'sin datos'}</div>
+                <div style={{fontSize:10,color:C.t4}}>{crit} críticos / {cubierto} cubiertos</div>
+              </div>
+            </button>
+          );
+        })()}
       </div>
 
       {/* Sub-tabs */}
@@ -1088,6 +1133,21 @@ function HistoricoTab({hist,data,onClear}){
             <input type="text" placeholder="Escribe la referencia del SKU..." value={skuQ}
               onChange={e=>setSkuQ(e.target.value.trim())}
               style={{width:'100%',boxSizing:'border-box',background:C.bg1,border:`1px solid ${C.b1}`,borderRadius:8,padding:'10px 14px',color:C.t1,fontSize:12,outline:'none',fontFamily:"'JetBrains Mono',monospace"}}/>
+            {!skuQ&&(
+              <div style={{marginTop:12}}>
+                <div style={{color:C.t3,fontSize:10,marginBottom:8}}>
+                  {topRup.length>0?'Esta vista no muestra nada hasta que escribas o elijas una referencia. Prueba con uno de los SKUs más críticos:':'Todavía no hay SKUs con gap registrados. Escribe una referencia para buscarla igual.'}
+                </div>
+                <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+                  {topRup.slice(0,10).map(r=>(
+                    <button key={r.r} onClick={()=>setSkuQ(r.r)}
+                      style={{background:C.bg1,border:`1px solid ${C.b1}`,borderRadius:20,padding:'5px 11px',fontSize:10,fontFamily:"'JetBrains Mono',monospace",fontWeight:700,color:C.teal,cursor:'pointer'}}>
+                      {r.r} <span style={{color:C.t4,fontWeight:600}}>({r.v}d)</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             {skuQ&&(()=>{
               const evo=hEvo(snaps,skuQ);
               const hasData=evo.some(e=>e.c>0||e.s>0);
@@ -2055,7 +2115,8 @@ function CEDIDashboard(){
       </div>}
 
       <div style={{padding:isMobile?"10px 10px":"16px 24px"}}>
-        {/* KPI STRIP */}
+        {/* KPI STRIP — se oculta en Histórico, que tiene su propio resumen */}
+        {tab!=="historico"&&(
         <div style={{display:"grid",gridTemplateColumns:isMobile?"repeat(2,1fr)":"repeat(6,1fr)",gap:isMobile?7:9,marginBottom:16}}>
           {[
             {l:"Módulos OK",       v:`${globAbst}/168`,                        c:C.green,  s:`${Math.round(globAbst/168*100)}%`},
@@ -2071,6 +2132,7 @@ function CEDIDashboard(){
             </div>
           ))}
         </div>
+        )}
 
         {/* TABS */}
         <div className="tabs-scroll" style={{marginBottom:16}}>
@@ -3618,6 +3680,7 @@ function CEDIDashboard(){
             <HistoricoTab
               hist={histData}
               data={data}
+              isMobile={isMobile}
               onClear={()=>{histClear();setHistData({snaps:[]});}}
             />
           </div>
