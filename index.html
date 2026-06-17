@@ -786,6 +786,7 @@ function HistoricoTab({hist,data,onClear,isMobile}){
   const [passErr,setPassErr]=useState(false);
   const [vista,setVista]=useState('rup');
   const [skuQ,setSkuQ]=useState('');
+  const [skuQs,setSkuQs]=useState([]); // H3: multi-SKU comparación
   const [expandCli,setExpandCli]=useState(null);
   const [tipoHist,setTipoHist]=useState('todos');
   const [rangoMode,setRangoMode]=useState(false);
@@ -937,7 +938,7 @@ function HistoricoTab({hist,data,onClear,isMobile}){
 
       {/* Sub-tabs */}
       <div style={{display:'inline-flex',gap:2,background:C.bg2,border:`1px solid ${C.b0}`,padding:3,borderRadius:9,flexWrap:'wrap'}}>
-        {[{k:'rup',l:'🔴 Críticos'},{k:'sem',l:'📅 Día semana'},{k:'mes',l:'📆 Día mes'},{k:'cli',l:'👥 Clientes'},{k:'pat',l:'🔁 Patrones'},{k:'evo',l:'📉 SKU'}].map(t=>(
+        {[{k:'rup',l:'🔴 Críticos'},{k:'sem',l:'📅 Semana'},{k:'mes',l:'📆 Mes'},{k:'cal',l:'🗓 Calendario'},{k:'cli',l:'👥 Clientes'},{k:'pat',l:'🔁 Patrones'},{k:'evo',l:'📉 SKU'}].map(t=>(
           <button key={t.k} onClick={()=>setVista(t.k)} style={{padding:'5px 12px',borderRadius:6,fontSize:10,fontWeight:600,background:vista===t.k?C.accent:'transparent',color:vista===t.k?C.bg0:C.t3,border:'none',cursor:'pointer',transition:'all .15s',whiteSpace:'nowrap'}}>
             {t.l}
           </button>
@@ -1048,6 +1049,72 @@ function HistoricoTab({hist,data,onClear,isMobile}){
           )}
         </div>
       )}
+
+      {/* ── H2: Calendario de actividad ── */}
+      {vista==='cal'&&(()=>{
+        // Construir mapa fecha → {pedidos, skusGap}
+        const actMap={};
+        snaps.forEach(s=>{
+          if(!actMap[s.date])actMap[s.date]={peds:0,gap:s.st?.nG||0};
+          actMap[s.date].peds=(s.peds||[]).length;
+        });
+        todosPeds.forEach(p=>{if(p.f&&actMap[p.f])actMap[p.f].peds++;});
+        // Determinar rango de meses para mostrar
+        const allDates=Object.keys(actMap).sort();
+        if(!allDates.length)return<div style={{background:C.bg2,border:`1px solid ${C.b1}`,borderRadius:12,padding:'24px',textAlign:'center',color:C.t3,fontSize:11}}>Sin datos de calendario aún. Acumula más snapshots.</div>;
+        const dMin=new Date(allDates[0]),dMax=new Date(allDates[allDates.length-1]);
+        const maxPeds=Math.max(1,...Object.values(actMap).map(v=>v.peds));
+        const calHeat=v=>{if(!v)return C.bg3;const p=v.peds/maxPeds;if(p>0.7)return C.accent;if(p>0.4)return C.purple;if(p>0.1)return `${C.purple}80`;return `${C.purple}30`;};
+        // Generar calendario mes a mes
+        const meses=[];
+        let cur=new Date(dMin.getFullYear(),dMin.getMonth(),1);
+        const end=new Date(dMax.getFullYear(),dMax.getMonth(),1);
+        while(cur<=end){meses.push(new Date(cur));cur=new Date(cur.getFullYear(),cur.getMonth()+1,1);}
+        const MESES_N=['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+        return(
+          <div style={{background:C.bg2,border:`1px solid ${C.b1}`,borderRadius:12,overflow:'hidden'}}>
+            <div style={{padding:'12px 18px',borderBottom:`1px solid ${C.b0}`,background:C.bg1}}>
+              <div style={{color:C.t1,fontWeight:700,fontSize:13}}>Calendario de actividad</div>
+              <div style={{color:C.t3,fontSize:10,marginTop:2}}>Pedidos registrados por día — intensidad del color = más pedidos</div>
+            </div>
+            <div style={{padding:'14px 16px',display:'flex',flexDirection:'column',gap:16}}>
+              {meses.map(mes=>{
+                const y=mes.getFullYear(),m=mes.getMonth();
+                const primerDia=new Date(y,m,1).getDay(); // 0=Dom
+                const diasMes=new Date(y,m+1,0).getDate();
+                return(
+                  <div key={`${y}-${m}`}>
+                    <div style={{fontSize:11,fontWeight:700,color:C.t2,marginBottom:8}}>{MESES_N[m]} {y}</div>
+                    <div style={{display:'grid',gridTemplateColumns:'repeat(7,1fr)',gap:3}}>
+                      {['D','L','M','X','J','V','S'].map(d=><div key={d} style={{textAlign:'center',fontSize:8,color:C.t4,fontWeight:700,padding:'2px 0'}}>{d}</div>)}
+                      {Array.from({length:primerDia},(_,i)=><div key={`e${i}`}/>)}
+                      {Array.from({length:diasMes},(_,i)=>{
+                        const dom=i+1;
+                        const fecha=`${y}-${String(m+1).padStart(2,'0')}-${String(dom).padStart(2,'0')}`;
+                        const v=actMap[fecha];
+                        return(
+                          <div key={dom} title={v?`${fecha}: ${v.peds} pedidos · ${v.gap} SKUs en gap`:`${fecha}: sin datos`}
+                            style={{aspectRatio:'1',borderRadius:4,background:calHeat(v),display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',cursor:v?'pointer':'default',transition:'transform .1s'}}
+                            onMouseEnter={e=>{if(v)e.currentTarget.style.transform='scale(1.2)';}}
+                            onMouseLeave={e=>{e.currentTarget.style.transform='scale(1)';}}>
+                            <span style={{fontSize:8,fontWeight:700,color:v?'rgba(255,255,255,.9)':C.t4,fontFamily:"'JetBrains Mono',monospace"}}>{dom}</span>
+                            {v&&v.peds>0&&<span style={{fontSize:6,color:'rgba(255,255,255,.7)',lineHeight:1}}>{v.peds}</span>}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+              <div style={{display:'flex',gap:10,flexWrap:'wrap',fontSize:9,color:C.t3,marginTop:4}}>
+                {[{c:`${C.purple}30`,l:'1–10%'},{c:`${C.purple}80`,l:'10–40%'},{c:C.purple,l:'40–70%'},{c:C.accent,l:'>70%'},{c:C.bg3,l:'Sin datos'}].map(({c,l})=>(
+                  <span key={l} style={{display:'flex',alignItems:'center',gap:4}}><span style={{width:10,height:10,borderRadius:2,background:c,display:'inline-block'}}/>{l}</span>
+                ))}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ── Clientes frecuentes (acordeón) ── */}
       {vista==='cli'&&(
@@ -1161,12 +1228,17 @@ function HistoricoTab({hist,data,onClear,isMobile}){
                     <TH>#</TH><TH>Cliente</TH><TH>Tipo</TH><TH>Ref</TH><TH>Descripción</TH>
                     <TH right>{rangoMode?'Rango':'Cant.'}</TH>
                     {rangoMode&&<TH right>Prom.</TH>}
-                    <TH right>Veces</TH><TH>Día típico</TH><TH right>Cada</TH><TH right>Última vez</TH>
+                    <TH right>Veces</TH><TH>Día típico</TH><TH right>Cada</TH><TH right>Última vez</TH><TH>Alerta</TH>
                   </tr>
                 </thead>
                 <tbody>
-                  {patrones.map((p,i)=>(
-                    <tr key={p.cl+p.ref+(rangoMode?p.bucket:p.cant)} style={{background:i%2===0?C.bg2:C.bg1,borderBottom:`1px solid ${C.bg3}`}}>
+                  {patrones.map((p,i)=>{
+                    // H1: alerta si el intervalo fue superado
+                    const diasDesdeUltima=p.ultima?Math.floor((Date.now()-new Date(p.ultima))/(864e5)):0;
+                    const vencido=p.intervaloProm>0&&diasDesdeUltima>p.intervaloProm+1;
+                    const muyVencido=p.intervaloProm>0&&diasDesdeUltima>p.intervaloProm*1.5+1;
+                    return(
+                    <tr key={p.cl+p.ref+(rangoMode?p.bucket:p.cant)} style={{background:vencido?`${C.orange}08`:i%2===0?C.bg2:C.bg1,borderBottom:`1px solid ${C.bg3}`}}>
                       <TD mono c={C.t4} fs={10}>{i+1}</TD>
                       <TD c={C.t1} fw={700} fs={11}>{p.cl}</TD>
                       <TD>{p.tp?<span style={{background:TIPO_DIM[p.tp]||C.bg3,color:TIPO_C[p.tp]||C.t3,border:`1px solid ${TIPO_C[p.tp]||C.b0}35`,borderRadius:4,padding:'2px 7px',fontSize:8,fontWeight:700}}>{p.tp}</span>:<span style={{color:C.t4,fontSize:9}}>—</span>}</TD>
@@ -1180,9 +1252,11 @@ function HistoricoTab({hist,data,onClear,isMobile}){
                         <div style={{color:C.t4,fontSize:8,marginTop:1}}>día {p.domTop} del mes ({p.domPct}%)</div>
                       </TD>
                       <TD right mono c={C.purple} fw={700}>{p.intervaloProm>0?`${p.intervaloProm}d`:'—'}</TD>
-                      <TD right mono c={C.t3} fs={10}>{p.ultima}</TD>
+                      <TD right mono c={vencido?C.orange:C.t3} fs={10}>{p.ultima}{vencido&&<div style={{fontSize:8,color:C.orange,fontWeight:700}}>{diasDesdeUltima}d atrás</div>}</TD>
+                      <TD>{vencido?<span style={{background:muyVencido?C.redDim:C.orangeDim,color:muyVencido?C.red:C.orange,border:`1px solid ${muyVencido?C.red:C.orange}35`,borderRadius:4,padding:'2px 6px',fontSize:8,fontWeight:700,whiteSpace:'nowrap'}}>{muyVencido?'⚠ MUY VEN.':'⏰ VENCIDO'}</span>:<span style={{color:C.t4,fontSize:9}}>—</span>}</TD>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -1198,13 +1272,34 @@ function HistoricoTab({hist,data,onClear,isMobile}){
             <div style={{color:C.t3,fontSize:10,marginTop:2}}>Stock piso, comprometido y gap día a día por referencia</div>
           </div>
           <div style={{padding:'14px 16px'}}>
-            <input type="text" placeholder="Escribe la referencia del SKU..." value={skuQ}
-              onChange={e=>setSkuQ(e.target.value.trim())}
-              style={{width:'100%',boxSizing:'border-box',background:C.bg1,border:`1px solid ${C.b1}`,borderRadius:8,padding:'10px 14px',color:C.t1,fontSize:12,outline:'none',fontFamily:"'JetBrains Mono',monospace"}}/>
+            {/* H3: input + botón + chips de comparación */}
+            <div style={{display:'flex',gap:6,marginBottom:8}}>
+              <input type="text" placeholder="Escribe la referencia del SKU..." value={skuQ}
+                onChange={e=>setSkuQ(e.target.value.trim())}
+                style={{flex:1,background:C.bg1,border:`1px solid ${C.b1}`,borderRadius:8,padding:'10px 14px',color:C.t1,fontSize:12,outline:'none',fontFamily:"'JetBrains Mono',monospace"}}/>
+              {skuQ&&!skuQs.includes(skuQ)&&(
+                <button onClick={()=>{if(skuQs.length<3)setSkuQs(q=>[...q,skuQ]);}}
+                  style={{background:C.purple,border:'none',color:C.bg0,borderRadius:8,padding:'8px 14px',fontSize:11,fontWeight:700,cursor:'pointer',fontFamily:'inherit',whiteSpace:'nowrap'}}>
+                  + Comparar
+                </button>
+              )}
+              {skuQs.length>0&&<button onClick={()=>setSkuQs([])} style={{background:'transparent',border:`1px solid ${C.b0}`,color:C.t4,borderRadius:8,padding:'8px 12px',fontSize:10,cursor:'pointer',fontFamily:'inherit'}}>✕ Limpiar</button>}
+            </div>
+            {skuQs.length>0&&(
+              <div style={{display:'flex',gap:5,flexWrap:'wrap',marginBottom:8}}>
+                {skuQs.map((r,i)=>{
+                  const mc=[C.purple,C.orange,'#06b6d4'];
+                  return<span key={r} style={{background:`${mc[i%3]}20`,color:mc[i%3],border:`1px solid ${mc[i%3]}40`,borderRadius:20,padding:'3px 9px',fontSize:9,fontWeight:700,fontFamily:"'JetBrains Mono',monospace",display:'flex',alignItems:'center',gap:4}}>
+                    {r}<button onClick={()=>setSkuQs(q=>q.filter(x=>x!==r))} style={{background:'none',border:'none',color:'inherit',cursor:'pointer',padding:0,fontSize:10,lineHeight:1}}>✕</button>
+                  </span>;
+                })}
+                <span style={{fontSize:9,color:C.t4,alignSelf:'center'}}>{skuQs.length}/3 SKUs — comparando contra "{skuQ||'...'}"</span>
+              </div>
+            )}
             {!skuQ&&(
               <div style={{marginTop:12}}>
                 <div style={{color:C.t3,fontSize:10,marginBottom:8}}>
-                  {topRup.length>0?'Esta vista no muestra nada hasta que escribas o elijas una referencia. Prueba con uno de los SKUs más críticos:':'Todavía no hay SKUs con gap registrados. Escribe una referencia para buscarla igual.'}
+                  {topRup.length>0?'Escribe o elige una referencia. Usa "+ Comparar" para superponer hasta 3 SKUs en el mismo gráfico:':'Todavía no hay SKUs con gap registrados. Escribe una referencia para buscarla igual.'}
                 </div>
                 <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
                   {topRup.slice(0,10).map(r=>(
@@ -1246,11 +1341,21 @@ function HistoricoTab({hist,data,onClear,isMobile}){
                     <path d={line(evo.map(e=>e.c))} fill="none" stroke={C.yellow} strokeWidth={1.5} strokeDasharray="5 2"/>
                     <path d={line(evo.map(e=>e.s))} fill="none" stroke={C.green} strokeWidth={2} strokeLinejoin="round"/>
                     <path d={line(evo.map(e=>e.g))} fill="none" stroke={C.red} strokeWidth={1.5} strokeLinejoin="round"/>
+                    {/* H3: líneas de SKUs adicionales (stock piso únicamente) */}
+                    {skuQs.map((r2,qi)=>{
+                      const mc=[C.purple,C.orange,'#06b6d4'];
+                      const evo2=hEvo(snaps,r2);
+                      const maxY2=Math.max(...evo2.map(e=>e.s),maxY,1);
+                      const py2=v=>H-Math.max(2,(v/maxY2)*(H-4));
+                      const line2=arr=>arr.map((v,i)=>`${i===0?'M':'L'}${px(i)},${py2(v)}`).join('');
+                      return<path key={r2} d={line2(evo2.map(e=>e.s))} fill="none" stroke={mc[qi%3]} strokeWidth={1.5} strokeDasharray="3 2" strokeLinejoin="round"/>;
+                    })}
                   </svg>
                   <div style={{display:'flex',gap:16,fontSize:9,flexWrap:'wrap',marginBottom:14,color:C.t2}}>
-                    <span><span style={{color:C.green,fontWeight:700}}>━</span> Stock piso</span>
+                    <span><span style={{color:C.green,fontWeight:700}}>━</span> Stock {skuQ}</span>
                     <span><span style={{color:C.yellow,fontWeight:700}}>╌</span> Comprometido</span>
                     <span><span style={{color:C.red,fontWeight:700}}>━</span> Gap</span>
+                    {skuQs.map((r2,qi)=>{const mc=[C.purple,C.orange,'#06b6d4'];return<span key={r2}><span style={{color:mc[qi%3],fontWeight:700}}>╌</span> Stock {r2}</span>;})}
                   </div>
                   <div style={{overflowX:'auto'}}>
                     <table style={{width:'100%',borderCollapse:'collapse'}}>
@@ -1840,6 +1945,10 @@ function CEDIDashboard(){
   const [planCompacto,setPlanCompacto]=useState(false); // reposición: vista compacta
   const [expandPlan,setExpandPlan]=useState(null); // reposición: card desplegada (acordeón)
   const [wbCache,setWbCache]=useState(null); // workbooks crudos para reproceso sin re-subir
+  const [stockInclAlt,setStockInclAlt]=useState(false); // S1: incluir stock altura en totales
+  const [stockFamFiltro,setStockFamFiltro]=useState(null); // S3: familia activa en dona stock
+  const [planCalle,setPlanCalle]=useState("todas"); // P2: filtro calle en reposición
+  const [callePanel,setCallePanel]=useState(null); // D3: panel lateral de calle
   const [isMobile,setIsMobile]=useState(typeof window!=='undefined'&&window.matchMedia('(max-width: 900px)').matches);
   useEffect(()=>{
     const mq=window.matchMedia('(max-width: 900px)');
@@ -2409,26 +2518,34 @@ function CEDIDashboard(){
               <div style={{background:C.bg2,border:`1px solid ${C.b0}`,borderRadius:13}}>
                 <div style={{padding:"11px 18px",borderBottom:`1px solid ${C.b0}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                   <span style={{fontWeight:700,color:C.t1,fontSize:12}}>Mapa CEDI — Estado Módulos</span>
-                  <div style={{display:"flex",gap:8,alignItems:"center"}}>
-                    {/* B4: toggle heatmap */}
+                  <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+                    {/* D1/B4: toggle modo mapa */}
                     <div style={{display:"flex",gap:2,background:C.bg3,borderRadius:6,padding:2}}>
-                      {[{k:"estado",l:"Estado"},{k:"heatmap",l:"Cobertura"}].map(m=>(
+                      {[{k:"estado",l:"Estado"},{k:"heatmap",l:"🔥 Urgencia %"}].map(m=>(
                         <button key={m.k} onClick={()=>setMapMode(m.k)} style={{padding:"3px 9px",borderRadius:5,background:mapMode===m.k?C.accent:C.bg3,color:mapMode===m.k?C.bg0:C.t3,border:"none",fontSize:9,fontWeight:700,cursor:"pointer",fontFamily:"inherit",transition:"all .15s"}}>{m.l}</button>
                       ))}
                     </div>
-                    {[{c:C.green,l:"<20%"},{c:C.yellow,l:"20-39%"},{c:C.orange,l:"40-59%"},{c:C.red,l:"≥60%"}].map(({c,l})=>(
-                      <div key={l} style={{display:"flex",alignItems:"center",gap:3,fontSize:10,color:C.t3}}>
-                        <div style={{width:7,height:7,borderRadius:2,background:c}}/>{l}
-                      </div>
-                    ))}
+                    {mapMode==="heatmap"?(
+                      [{c:C.green,l:"0-19%"},{c:C.yellow,l:"20-39%"},{c:C.orange,l:"40-59%"},{c:C.red,l:"≥60%"}].map(({c,l})=>(
+                        <div key={l} style={{display:"flex",alignItems:"center",gap:3,fontSize:10,color:C.t3}}>
+                          <div style={{width:7,height:7,borderRadius:2,background:c}}/>{l}
+                        </div>
+                      ))
+                    ):(
+                      [{c:C.green,l:"<20%"},{c:C.yellow,l:"20-39%"},{c:C.orange,l:"40-59%"},{c:C.red,l:"≥60%"}].map(({c,l})=>(
+                        <div key={l} style={{display:"flex",alignItems:"center",gap:3,fontSize:10,color:C.t3}}>
+                          <div style={{width:7,height:7,borderRadius:2,background:c}}/>{l}
+                        </div>
+                      ))
+                    )}
                   </div>
                 </div>
                 <div style={{padding:isMobile?"8px 10px":"12px 18px",display:"grid",gridTemplateColumns:isMobile?"repeat(2,1fr)":"repeat(4,1fr)",gap:isMobile?8:10}}>
                   {calles.map(cs=>(
-                    <div key={cs.c} style={{background:C.bg1,borderRadius:10,padding:"12px 10px",border:`1px solid ${cs.cnt.ruptura>0?C.red:cs.cnt.critico>0?C.orange:C.b0}20`}}>
-                      <div style={{display:"flex",justifyContent:"space-between",marginBottom:7}}>
+                    <div key={cs.c} style={{background:C.bg1,borderRadius:10,padding:"12px 10px",border:`1px solid ${callePanel===cs.c?calleCol[cs.c]:cs.cnt.ruptura>0?C.red:cs.cnt.critico>0?C.orange:C.b0}${callePanel===cs.c?"":"20"}`}}>
+                      <div style={{display:"flex",justifyContent:"space-between",marginBottom:7,cursor:"pointer"}} onClick={()=>setCallePanel(callePanel===cs.c?null:cs.c)}>
                         <div>
-                          <div style={{color:calleCol[cs.c],fontSize:10,fontWeight:700}}>Calle {cs.c.slice(1)}</div>
+                          <div style={{color:calleCol[cs.c],fontSize:10,fontWeight:700}}>Calle {cs.c.slice(1)} <span style={{fontSize:8,opacity:.6}}>▼</span></div>
                           <div style={{color:C.t3,fontSize:9}}>{calleSub[cs.c]}</div>
                         </div>
                         <div style={{textAlign:"right"}}>
@@ -2441,17 +2558,17 @@ function CEDIDashboard(){
                       </div>
                       <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:2}}>
                         {cs.mods.map(m=>{
-                          // B4: heatmap = color por % cobertura (stock/72 pallet capacity)
+                          // D1: heatmap = color por % SKUs que necesitan abasto (urgencia)
                           const heatColor=mapMode==="heatmap"?(()=>{
-                            if(!m.totalStock)return C.bg3;
-                            const pct=Math.min(100,(m.totalStock/72)*100);
-                            if(pct>=80)return C.green;
-                            if(pct>=40)return C.yellow;
-                            if(pct>0) return C.orange;
-                            return C.red;
+                            if(m.skus===0)return C.bg3;
+                            const p=m.pctRestock;
+                            if(p>=60)return C.red;
+                            if(p>=40)return C.orange;
+                            if(p>=20)return C.yellow;
+                            return C.green;
                           })():semCol[m.est];
-                          const heatOp=mapMode==="heatmap"?0.85:(m.est==="ok"?0.45:1);
-                          const tipExtra=mapMode==="heatmap"&&m.totalStock?` · ${Math.round((m.totalStock/72)*100)}% cap.`:"";
+                          const heatOp=mapMode==="heatmap"?0.9:(m.est==="ok"?0.45:1);
+                          const tipExtra=mapMode==="heatmap"?` · ${m.pctRestock}% SKUs urgentes`:`  · cap. ${Math.round((m.totalStock/72)*100)}%`;
                           return(
                             <div key={m.n}
                               title={`M${String(m.n).padStart(2,"0")} · ${m.pctRestock}% SKUs necesitan abasto (${m.skusNecesitan}/${m.skus}) · ${m.est.toUpperCase()}${tipExtra}`}
@@ -2467,6 +2584,47 @@ function CEDIDashboard(){
                   ))}
                 </div>
               </div>
+
+              {/* D3: Panel lateral de calle */}
+              {callePanel&&(()=>{
+                const cs=calles.find(x=>x.c===callePanel);
+                if(!cs)return null;
+                const letraCalle=DASH_TO_LETRA[callePanel];
+                const skusEnCalle=[...new Set(Object.entries(invByModule).flatMap(([mod,rows])=>mod[0]===letraCalle?rows.map(r=>r.ref):[]))];
+                const skusGap=skusEnCalle.filter(ref=>{const s=SKUS.find(x=>x.id===ref);return s&&s.comp>0&&s.stock_piso<s.comp;}).slice(0,10);
+                const estCols={ok:C.green,preventivo:C.yellow,critico:C.orange,ruptura:C.red};
+                return(
+                  <div style={{background:C.bg2,border:`2px solid ${calleCol[callePanel]}40`,borderRadius:13,padding:"16px 18px",animation:"fadeUp .2s ease"}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                      <div>
+                        <div style={{fontWeight:800,color:calleCol[callePanel],fontSize:13}}>Calle {callePanel.slice(1)} — {calleSub[callePanel]}</div>
+                        <div style={{color:C.t3,fontSize:10,marginTop:2}}>{cs.abst}/42 módulos abastecidos · {cs.pct}% cobertura</div>
+                      </div>
+                      <button onClick={()=>setCallePanel(null)} style={{background:"transparent",border:`1px solid ${C.b0}`,color:C.t3,borderRadius:6,padding:"4px 9px",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>✕ Cerrar</button>
+                    </div>
+                    <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:14}}>
+                      {[["ok","OK",C.green],["preventivo","Prev.",C.yellow],["critico","Crít.",C.orange],["ruptura","Rupt.",C.red]].map(([k,l,c])=>(
+                        <div key={k} style={{background:`${c}12`,border:`1px solid ${c}30`,borderRadius:8,padding:"8px 10px",textAlign:"center"}}>
+                          <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:20,fontWeight:800,color:c}}>{cs.cnt[k]||0}</div>
+                          <div style={{fontSize:9,color:c,fontWeight:700}}>{l}</div>
+                        </div>
+                      ))}
+                    </div>
+                    {skusGap.length>0&&(
+                      <div>
+                        <div style={{fontSize:9,fontWeight:700,color:C.t3,textTransform:"uppercase",letterSpacing:"0.7px",marginBottom:8}}>SKUs con gap en esta calle ({skusGap.length})</div>
+                        <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
+                          {skusGap.map(ref=>{
+                            const s=SKUS.find(x=>x.id===ref);
+                            return<span key={ref} onClick={()=>setSelSKU(ref)} style={{fontFamily:"'JetBrains Mono',monospace",fontSize:10,fontWeight:700,color:C.teal,background:C.bg1,border:`1px solid ${C.b0}`,borderRadius:5,padding:"3px 7px",cursor:"pointer"}}>{ref}<span style={{color:C.red,marginLeft:3}}>{s?`-${Math.max(0,s.comp-s.stock_piso)}`:""}</span></span>;
+                          })}
+                        </div>
+                      </div>
+                    )}
+                    {skusGap.length===0&&<div style={{color:C.green,fontSize:11,fontWeight:700}}>✓ Sin gaps en esta calle</div>}
+                  </div>
+                );
+              })()}
 
               {/* KPI pedidos cubiertos */}
               {(()=>{
@@ -2621,6 +2779,12 @@ function CEDIDashboard(){
                         <option value="todas">Todas familias</option>
                         {[...new Set((data?.SKUS||[]).map(s=>s.familia).filter(Boolean))].sort().map(f=><option key={f} value={f}>Familia {f}</option>)}
                       </select>
+                      {/* P2: filtro calle */}
+                      <div style={{display:"flex",gap:2,background:C.bg3,borderRadius:6,padding:2}}>
+                        {[["todas","Todas"],["C1","C1"],["C2","C2"],["C3","C3"],["C4","C4"]].map(([k,l])=>(
+                          <button key={k} onClick={()=>setPlanCalle(k)} style={{padding:"4px 8px",borderRadius:5,background:planCalle===k?C.purple:"transparent",color:planCalle===k?C.bg0:C.t3,border:"none",fontSize:9,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>{l}</button>
+                        ))}
+                      </div>
                       <button onClick={()=>exportarPlanTurno(accs,data,bufH,bufF)} style={{padding:"6px 12px",borderRadius:8,background:C.green,border:"none",color:C.bg0,fontWeight:700,fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>📥 Excel</button>
                     </div>
                   </div>
@@ -2651,6 +2815,9 @@ function CEDIDashboard(){
                 const calleLet=(piso[0]||alt[0]||{}).calleKey?(piso[0]||alt[0]).ubi?.[0]:null;
                 return{calleLet,mejorAlt:alt[0]?alt[0].ubi:null};
               };
+              // P2: filtro por calle
+              const CALLE_DASH_TO_LETRA={C1:"B",C2:"C",C3:"D",C4:"E"};
+              if(planCalle!=="todas"){const letraFilt=CALLE_DASH_TO_LETRA[planCalle];lista=lista.filter(s=>infoUbi(s).calleLet===letraFilt);}
               // #5: detectar posiciones de altura compartidas (varios SKUs bajan de la misma ubi)
               const altCount={};
               lista.forEach(s=>{const u=infoUbi(s).mejorAlt;if(u)altCount[u]=(altCount[u]||0)+1;});
@@ -3086,7 +3253,7 @@ function CEDIDashboard(){
                             <div style={{color:C.t1,fontSize:11,fontWeight:500,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{(p.cliente||"").slice(0,38)}</div>
                           </TD>
                           <TD c={C.t2} fs={11}>{p.ciudad}</TD>
-                          <TD c={C.t3} fs={10}>{p.fecha}</TD>
+                          <TD fs={10}>{(()=>{const dias=p.fecha?Math.floor((Date.now()-new Date(p.fecha))/(864e5)):0;const fc=dias>7?C.red:dias>3?C.orange:C.green;return<span style={{fontFamily:"'JetBrains Mono',monospace",color:fc,fontWeight:700}}>{p.fecha||'—'}{dias>3&&<span style={{fontSize:8,display:'block',opacity:.8}}>{dias}d</span>}</span>;})()}</TD>
                           <TD right mono c={C.accent} fw={700} fs={13}>{p.lineas||0}</TD>
                           <TD right mono c={C.yellow} fw={700} fs={13}>{p.uni||0}</TD>
                           <TD><Badge label={p.nota?"CON NOTA":"SIN NOTA"} c={p.nota?C.yellow:C.green} dim={p.nota?C.yellowDim:C.greenDim} sz={8}/></TD>
@@ -3232,19 +3399,31 @@ function CEDIDashboard(){
         {/* ═ STOCK vs COMPROMETIDO ═ */}
         {tab==="stock"&&(
           <div style={{animation:"fadeUp .3s ease"}}>
+            {/* S1: toggle piso vs piso+altura */}
+            <div style={{display:"flex",justifyContent:"flex-end",marginBottom:8}}>
+              <div style={{display:"flex",gap:2,background:C.bg3,borderRadius:7,padding:2}}>
+                {[{k:false,l:"Solo piso"},{k:true,l:"Piso + altura"}].map(o=>(
+                  <button key={String(o.k)} onClick={()=>setStockInclAlt(o.k)} style={{padding:"4px 11px",borderRadius:5,background:stockInclAlt===o.k?C.green:"transparent",color:stockInclAlt===o.k?C.bg0:C.t3,border:"none",fontSize:9,fontWeight:700,cursor:"pointer",fontFamily:"inherit",transition:"all .15s"}}>{o.l}</button>
+                ))}
+              </div>
+            </div>
             <div style={{display:"grid",gridTemplateColumns:isMobile?"repeat(2,1fr)":"repeat(4,1fr)",gap:10,marginBottom:14}}>
-              {[
-                {l:"Total Stock Piso",v:(st?.totalStock||0).toLocaleString(),c:C.green,s:"unidades en módulos"},
-                {l:"Total Comprometido",v:(st?.totalComp||0).toLocaleString(),c:C.yellow,s:"pedidos típicos activos"},
-                {l:"Gap Total",v:(st?.totalGap||0).toLocaleString(),c:C.red,s:"unidades a reponer"},
-                {l:"SKUs Sin Pedidos",v:(st?.sinMov||0).toLocaleString(),c:C.t3,s:"candidatos a altura"},
-              ].map((k,i)=>(
-                <div key={i} style={{background:C.bg2,border:`1px solid ${C.b0}`,borderRadius:11,padding:"13px 14px",borderTop:`2px solid ${k.c}`}}>
-                  <div style={{fontSize:9,fontWeight:600,color:C.t3,textTransform:"uppercase",letterSpacing:"0.8px",marginBottom:5}}>{k.l}</div>
-                  <div style={{fontSize:24,fontWeight:800,color:k.c,lineHeight:1,fontFamily:"'JetBrains Mono',monospace",marginBottom:3}}>{k.v}</div>
-                  <div style={{fontSize:10,color:C.t4}}>{k.s}</div>
-                </div>
-              ))}
+              {(()=>{
+                const stockV=stockInclAlt?(st?.totalStock||0)+(st?.totalStockAlt||0):(st?.totalStock||0);
+                const gapV=stockInclAlt?Math.max(0,(st?.totalComp||0)-stockV):(st?.totalGap||0);
+                return[
+                  {l:stockInclAlt?"Stock Piso + Altura":"Total Stock Piso",v:stockV.toLocaleString(),c:C.green,s:stockInclAlt?`${(st?.totalStock||0).toLocaleString()} piso + ${(st?.totalStockAlt||0).toLocaleString()} altura`:"unidades en módulos"},
+                  {l:"Total Comprometido",v:(st?.totalComp||0).toLocaleString(),c:C.yellow,s:"pedidos típicos activos"},
+                  {l:"Gap Total",v:gapV.toLocaleString(),c:C.red,s:stockInclAlt?"considerando stock altura":"unidades a reponer"},
+                  {l:"SKUs Sin Pedidos",v:(st?.sinMov||0).toLocaleString(),c:C.t3,s:"candidatos a altura"},
+                ].map((k,i)=>(
+                  <div key={i} style={{background:C.bg2,border:`1px solid ${C.b0}`,borderRadius:11,padding:"13px 14px",borderTop:`2px solid ${k.c}`}}>
+                    <div style={{fontSize:9,fontWeight:600,color:C.t3,textTransform:"uppercase",letterSpacing:"0.8px",marginBottom:5}}>{k.l}</div>
+                    <div style={{fontSize:24,fontWeight:800,color:k.c,lineHeight:1,fontFamily:"'JetBrains Mono',monospace",marginBottom:3}}>{k.v}</div>
+                    <div style={{fontSize:10,color:C.t4}}>{k.s}</div>
+                  </div>
+                ));
+              })()}
             </div>
 
             {/* ═ GRÁFICOS ═ */}
@@ -3267,46 +3446,72 @@ function CEDIDashboard(){
               // Top 15 gap real
               const topGap=[...(data?.allItems||[])].filter(it=>it.gap>0).sort((a,b)=>b.gap-a.gap).slice(0,15);
               const maxGap=topGap.length?topGap[0].gap:1;
+              // S3: filtrar topGap por familia seleccionada
+              const topGapFilt=stockFamFiltro?topGap.filter(it=>{const fam=(data?.allItems||[]).find(x=>String(x.ref)===String(it.ref));return fam&&fam.familia===stockFamFiltro;}):topGap;
+              // S2: overstock (stock piso > 3× comprometido, comprometido > 0)
+              const overstockItems=(data?.allItems||[]).filter(it=>it.comp>0&&it.stock>3*it.comp).sort((a,b)=>(b.stock/b.comp)-(a.stock/a.comp)).slice(0,5);
               return(
                 <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"360px 1fr",gap:14,marginBottom:14}}>
-                  {/* DONA por familia */}
+                  {/* DONA por familia — S3: clickable */}
                   <div style={{background:C.bg2,border:`1px solid ${C.b0}`,borderRadius:13,padding:"16px 18px"}}>
-                    <div style={{fontSize:12,fontWeight:700,color:C.t1,marginBottom:4}}>Comprometido por Familia</div>
-                    <div style={{fontSize:10,color:C.t3,marginBottom:12}}>Demanda real distribuida por línea de producto</div>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+                      <div style={{fontSize:12,fontWeight:700,color:C.t1}}>Comprometido por Familia</div>
+                      {stockFamFiltro&&<button onClick={()=>setStockFamFiltro(null)} style={{background:C.accentDim,border:`1px solid ${C.accent}40`,color:C.accent,borderRadius:20,padding:"2px 8px",fontSize:9,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>✕ {stockFamFiltro}</button>}
+                    </div>
+                    <div style={{fontSize:10,color:C.t3,marginBottom:12}}>Clic en un segmento para filtrar el gap</div>
                     <div style={{display:"flex",alignItems:"center",gap:16}}>
-                      <svg width="180" height="180" viewBox="0 0 180 180" style={{flexShrink:0}}>
-                        {arcs.map((a,i)=>(<path key={i} d={a.d} fill="none" stroke={a.c} strokeWidth={SW} strokeLinecap="butt"/>))}
+                      <svg width="180" height="180" viewBox="0 0 180 180" style={{flexShrink:0,cursor:"pointer"}}>
+                        {arcs.map((a,i)=>(
+                          <path key={i} d={a.d} fill="none" stroke={a.c} strokeWidth={stockFamFiltro===a.f.familia?SW+6:SW} strokeLinecap="butt" style={{cursor:"pointer",transition:"stroke-width .15s"}} onClick={()=>setStockFamFiltro(stockFamFiltro===a.f.familia?null:a.f.familia)} title={a.f.familia}/>
+                        ))}
                         <text x={Cx} y={Cy-8} textAnchor="middle" fill={C.t1} fontSize="20" fontWeight="800" fontFamily="'JetBrains Mono',monospace">{(st?.totalComp||0).toLocaleString()}</text>
                         <text x={Cx} y={Cy+6} textAnchor="middle" fill={C.t3} fontSize="8">u comprometidas</text>
-                        <text x={Cx} y={Cy+18} textAnchor="middle" fill={C.teal} fontSize="8" fontWeight="700">TOTAL</text>
+                        <text x={Cx} y={Cy+18} textAnchor="middle" fill={stockFamFiltro?C.accent:C.teal} fontSize="8" fontWeight="700">{stockFamFiltro||"TOTAL"}</text>
                       </svg>
                       <div style={{flex:1,display:"flex",flexDirection:"column",gap:6}}>
                         {arcs.map((a,i)=>(
-                          <div key={i} style={{display:"flex",alignItems:"center",gap:8}}>
+                          <div key={i} onClick={()=>setStockFamFiltro(stockFamFiltro===a.f.familia?null:a.f.familia)} style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",padding:"3px 5px",borderRadius:5,background:stockFamFiltro===a.f.familia?`${a.c}15`:"transparent",transition:"background .15s"}}>
                             <span style={{width:10,height:10,borderRadius:3,background:a.c,flexShrink:0}}/>
-                            <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:11,fontWeight:700,color:C.t1,minWidth:42}}>{a.f.familia}</span>
+                            <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:11,fontWeight:700,color:stockFamFiltro===a.f.familia?a.c:C.t1,minWidth:42}}>{a.f.familia}</span>
                             <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:11,color:C.yellow,fontWeight:700}}>{a.f.comp.toLocaleString()}u</span>
                             <span style={{fontSize:9,color:C.t3,marginLeft:"auto"}}>{Math.round(a.f.comp/totalComp*100)}%</span>
                           </div>
                         ))}
                       </div>
                     </div>
+                    {/* S2: overstock alert */}
+                    {overstockItems.length>0&&(
+                      <div style={{marginTop:12,borderTop:`1px solid ${C.b0}`,paddingTop:10}}>
+                        <div style={{fontSize:9,fontWeight:700,color:C.orange,textTransform:"uppercase",letterSpacing:"0.7px",marginBottom:6}}>⚠ Sobrestock (stock&gt;3× comprometido)</div>
+                        {overstockItems.map(it=>(
+                          <div key={it.ref} style={{display:"flex",alignItems:"center",gap:6,marginBottom:4}}>
+                            <span onClick={()=>setSelSKU(it.ref)} style={{fontFamily:"'JetBrains Mono',monospace",fontSize:10,fontWeight:800,color:C.teal,cursor:"pointer",minWidth:52}}>{it.ref}</span>
+                            <span style={{fontSize:9,color:C.orange,fontWeight:700}}>×{Math.round(it.stock/it.comp)}</span>
+                            <span style={{fontSize:9,color:C.t4}}>P:{it.stock} C:{it.comp}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                  {/* BARRAS Top 15 Gap */}
+                  {/* BARRAS Top 15 Gap — filtradas por S3 */}
                   <div style={{background:C.bg2,border:`1px solid ${C.b0}`,borderRadius:13,padding:"16px 18px"}}>
-                    <div style={{fontSize:12,fontWeight:700,color:C.t1,marginBottom:4}}>Top 15 — Mayor Gap (Stock vs Comprometido)</div>
+                    <div style={{fontSize:12,fontWeight:700,color:C.t1,marginBottom:4}}>Top 15 — Mayor Gap{stockFamFiltro?` (${stockFamFiltro})`:""}</div>
                     <div style={{fontSize:10,color:C.t3,marginBottom:12}}>Referencias que requieren reposición urgente</div>
                     <div style={{display:"flex",flexDirection:"column",gap:5}}>
-                      {topGap.map((it,i)=>(
+                      {(topGapFilt.length?topGapFilt:topGap).slice(0,15).map((it,i)=>{
+                        const effGap=stockInclAlt?Math.max(0,it.comp-(it.stock+(it.stock_alt||0))):it.gap;
+                        return(
                         <div key={it.ref} style={{display:"flex",alignItems:"center",gap:8}}>
                           <span onClick={()=>setSelSKU(it.ref)} style={{fontFamily:"'JetBrains Mono',monospace",fontSize:10,fontWeight:700,color:C.teal,minWidth:54,cursor:"pointer"}}>{it.ref}</span>
                           <div style={{flex:1,height:16,background:C.bg1,borderRadius:4,overflow:"hidden",position:"relative"}}>
-                            <div style={{width:`${(it.gap/maxGap)*100}%`,height:"100%",background:`linear-gradient(90deg,${C.orange},${C.red})`,borderRadius:4}}/>
-                            <span style={{position:"absolute",right:6,top:1,fontFamily:"'JetBrains Mono',monospace",fontSize:10,fontWeight:700,color:C.t1}}>-{it.gap}</span>
+                            <div style={{width:`${(effGap/maxGap)*100}%`,height:"100%",background:`linear-gradient(90deg,${C.orange},${C.red})`,borderRadius:4}}/>
+                            <span style={{position:"absolute",right:6,top:1,fontFamily:"'JetBrains Mono',monospace",fontSize:10,fontWeight:700,color:C.t1}}>-{effGap}</span>
                           </div>
-                          <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:9,color:C.t3,minWidth:60}}>P:{it.stock} C:{it.comp}</span>
+                          <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:9,color:C.t3,minWidth:60}}>P:{it.stock}{stockInclAlt&&it.stock_alt>0?` A:${it.stock_alt}`:""} C:{it.comp}</span>
                         </div>
-                      ))}
+                        );
+                      })}
+                      {!topGapFilt.length&&stockFamFiltro&&<div style={{color:C.t3,fontSize:11,textAlign:"center",padding:14}}>Sin gap para la familia {stockFamFiltro}</div>}
                     </div>
                   </div>
                 </div>
