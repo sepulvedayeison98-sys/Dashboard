@@ -2185,8 +2185,8 @@ function CEDIDashboard(){
       </div>}
 
       <div style={{padding:isMobile?"10px 10px":"16px 24px"}}>
-        {/* KPI STRIP — se oculta en Histórico y Pipeline, que tienen su propio resumen */}
-        {tab!=="historico"&&tab!=="pipeline"&&(
+        {/* KPI STRIP — solo en Dashboard y cuando no hay strip propio por tab */}
+        {tab==="dashboard"&&(
         <div style={{display:"grid",gridTemplateColumns:isMobile?"repeat(2,1fr)":"repeat(6,1fr)",gap:isMobile?7:9,marginBottom:16}}>
           {[
             {l:"Módulos OK",       v:`${globAbst}/168`,                        c:C.green,  s:`${Math.round(globAbst/168*100)}%`},
@@ -2572,6 +2572,29 @@ function CEDIDashboard(){
         {/* ═ PLAN REPOSICIÓN ═ */}
         {tab==="plan"&&(
           <div style={{animation:"fadeUp .3s ease"}}>
+            {/* KPI strip propio de Reposición */}
+            {(()=>{
+              const totalAcc=st?.totalGaps||0;
+              const doneAcc=Object.keys(hechos).length;
+              const pendAcc=Math.max(0,totalAcc-doneAcc);
+              const pct=totalAcc>0?Math.round(doneAcc/totalAcc*100):0;
+              return(
+                <div style={{display:"grid",gridTemplateColumns:isMobile?"repeat(2,1fr)":"repeat(4,1fr)",gap:isMobile?7:9,marginBottom:16}}>
+                  {[
+                    {l:"Acciones totales",v:totalAcc,c:C.teal,s:"SKUs con gap en piso"},
+                    {l:"Pendientes",v:pendAcc,c:pendAcc>0?C.orange:C.green,s:pendAcc>0?"por reponer":"todo repuesto ✓"},
+                    {l:"Completadas",v:`${doneAcc} (${pct}%)`,c:C.green,s:"marcadas como hechas"},
+                    {l:"Buffer activo",v:`${bufH}h × ${bufF}x`,c:C.purple,s:`${st?.totalRupturas||0} SKUs en ruptura`},
+                  ].map((k,i)=>(
+                    <div key={i} style={{background:C.bg2,border:`1px solid ${C.b0}`,borderRadius:11,padding:"13px 14px",borderTop:`2px solid ${k.c}`,animation:"fadeUp .4s ease both",animationDelay:`${i*0.05}s`}}>
+                      <div style={{fontSize:9,fontWeight:600,color:C.t3,textTransform:"uppercase",letterSpacing:"0.8px",marginBottom:5}}>{k.l}</div>
+                      <div style={{fontSize:22,fontWeight:800,color:k.c,lineHeight:1,fontFamily:"'JetBrains Mono',monospace",marginBottom:3}}>{k.v}</div>
+                      <div style={{fontSize:10,color:C.t4}}>{k.s}</div>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
             {(()=>{
               // Acciones visibles (con gap, filtradas por familia)
               const accs=sorted.filter(s=>gap(s)>0&&(planFam==="todas"||s.familia===planFam));
@@ -3638,6 +3661,27 @@ function CEDIDashboard(){
         {/* ═ REPORTE COMPLETO ═ */}
         {tab==="reporte"&&(
           <div style={{animation:"fadeUp .3s ease"}}>
+            {/* KPI strip propio de Reporte */}
+            {(()=>{
+              const totalSKU=st?.totalSKUs||1;
+              const cumpl=Math.round(((totalSKU-(st?.totalGaps||0))/totalSKU)*100);
+              return(
+                <div style={{display:"grid",gridTemplateColumns:isMobile?"repeat(2,1fr)":"repeat(4,1fr)",gap:isMobile?7:9,marginBottom:16}}>
+                  {[
+                    {l:"Cumplimiento piso",v:`${cumpl}%`,c:cumpl>=90?C.green:cumpl>=70?C.yellow:C.red,s:`${totalSKU} SKUs en seguimiento`},
+                    {l:"SKUs en ruptura",v:st?.totalRupturas||0,c:C.red,s:"piso = 0 con demanda activa"},
+                    {l:"Pedidos despachables",v:st?.pedDespachables||0,c:C.green,s:`${(st?.uniDespachables||0).toLocaleString()} u listas`},
+                    {l:"Capturas de sesión",v:historico.length,c:C.purple,s:historico.length>0?`última: ${historico[historico.length-1].hora}`:"sin capturas aún"},
+                  ].map((k,i)=>(
+                    <div key={i} style={{background:C.bg2,border:`1px solid ${C.b0}`,borderRadius:11,padding:"13px 14px",borderTop:`2px solid ${k.c}`,animation:"fadeUp .4s ease both",animationDelay:`${i*0.05}s`}}>
+                      <div style={{fontSize:9,fontWeight:600,color:C.t3,textTransform:"uppercase",letterSpacing:"0.8px",marginBottom:5}}>{k.l}</div>
+                      <div style={{fontSize:22,fontWeight:800,color:k.c,lineHeight:1,fontFamily:"'JetBrains Mono',monospace",marginBottom:3}}>{k.v}</div>
+                      <div style={{fontSize:10,color:C.t4}}>{k.s}</div>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
 
             {/* #2: Histórico de cumplimiento (memoria de sesión) */}
             <div style={{background:C.bg2,border:`1px solid ${C.b0}`,borderRadius:13,padding:"14px 18px",marginBottom:14}}>
