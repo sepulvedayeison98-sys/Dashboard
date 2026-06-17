@@ -1821,6 +1821,7 @@ function CEDIDashboard(){
   const [pedFiltro,setPedFiltro]=useState("todos"); // pipeline: todos|despachable|reabasto|ruptura
   const [pedSearch,setPedSearch]=useState(""); // pipeline: búsqueda cliente/ref/ciudad
   const [tipoFiltro,setTipoFiltro]=useState("todos"); // pipeline: todos|PDV|REQ|PDE
+  const [filtroMDE,setFiltroMDE]=useState(false); // pipeline: solo MDE + ITG
   const [skuSearch,setSkuSearch]=useState(""); // dashboard: búsqueda libre de SKU
   const [posCajasOpen,setPosCajasOpen]=useState({}); // buscador: posiciones expandidas para ver cajas
   const [stockTbl,setStockTbl]=useState(false); // tab stock: mostrar tabla detalle
@@ -2916,13 +2917,15 @@ function CEDIDashboard(){
               const hh=Math.floor(Math.abs(mins)/60), mm=Math.abs(mins)%60;
               const tiempo=`${hh>0?hh+"h ":""}${mm}m`;
               return(
-                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,background:`${bg}12`,border:`1px solid ${bg}40`,borderRadius:11,padding:"11px 16px",marginBottom:14}}>
+                <div onClick={()=>setFiltroMDE(f=>!f)}
+                  style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,background:filtroMDE?`${bg}22`:`${bg}12`,border:`1px solid ${filtroMDE?bg:bg+"40"}`,borderRadius:11,padding:"11px 16px",marginBottom:14,cursor:"pointer",transition:"all .15s"}}>
                   <div style={{display:"flex",alignItems:"center",gap:12}}>
                     <span style={{fontSize:20}}>📍</span>
                     <div>
                       <div style={{fontSize:12,fontWeight:800,color:bg}}>Prioridad Medellín — Corte 11:00 AM</div>
                       <div style={{fontSize:10,color:C.t2,marginTop:2}}>
-                        {total} pedidos MDE · <span style={{color:pend>0?C.orange:C.green,fontWeight:700}}>{pend} pendientes de cubrir</span>
+                        {total} pedidos MDE + ITG · <span style={{color:pend>0?C.orange:C.green,fontWeight:700}}>{pend} pendientes de cubrir</span>
+                        <span style={{marginLeft:10,color:filtroMDE?bg:C.t4,fontSize:9,fontWeight:700}}>{filtroMDE?"▼ Filtrando tabla":"↓ Clic para filtrar tabla"}</span>
                       </div>
                     </div>
                   </div>
@@ -2969,7 +2972,15 @@ function CEDIDashboard(){
             {/* Tabla de pedidos */}
             <div style={{background:C.bg2,border:`1px solid ${C.b0}`,borderRadius:13,overflow:"hidden"}}>
               <div style={{padding:"11px 18px",borderBottom:`1px solid ${C.b0}`,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
-                <span style={{fontWeight:700,color:C.t1,fontSize:12}}>Pedidos WMS — Bandeja ITAGUÍ</span>
+                <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                  <span style={{fontWeight:700,color:C.t1,fontSize:12}}>Pedidos WMS — Bandeja ITAGUÍ</span>
+                  {filtroMDE&&(
+                    <span style={{background:`${C.orange}22`,color:C.orange,border:`1px solid ${C.orange}50`,borderRadius:20,padding:"2px 10px",fontSize:9,fontWeight:700}}>
+                      📍 MDE + ITG
+                      <button onClick={e=>{e.stopPropagation();setFiltroMDE(false);}} style={{background:"transparent",border:"none",color:C.orange,cursor:"pointer",fontWeight:800,marginLeft:5,padding:0,lineHeight:1}}>✕</button>
+                    </span>
+                  )}
+                </div>
                 <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
                   {/* Búsqueda global */}
                   <input value={pedSearch} onChange={e=>setPedSearch(e.target.value)} placeholder="🔍 cliente, ref, ciudad..."
@@ -3010,6 +3021,7 @@ function CEDIDashboard(){
                       if(pedFiltro==="reabasto"&&p.clasificacion!=="reabasto"&&p.clasificacion!=="parcial")return false;
                       if(pedFiltro==="ruptura"&&p.clasificacion!=="ruptura")return false;
                       if(tipoFiltro!=="todos"&&p.tipoDocto!==tipoFiltro)return false;
+                      if(filtroMDE&&!esMDE(p.ciudad))return false;
                       if(q){
                         const hay=(p.cliente||"").toLowerCase().includes(q)||(p.ciudad||"").toLowerCase().includes(q)||(p.id||"").toLowerCase().includes(q)||(p.refs||[]).some(r=>(r.ref||"").toLowerCase().includes(q));
                         if(!hay)return false;
