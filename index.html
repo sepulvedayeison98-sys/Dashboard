@@ -1822,6 +1822,7 @@ function CEDIDashboard(){
   const [pedSearch,setPedSearch]=useState(""); // pipeline: búsqueda cliente/ref/ciudad
   const [tipoFiltro,setTipoFiltro]=useState("todos"); // pipeline: todos|PDV|REQ|PDE
   const [filtroMDE,setFiltroMDE]=useState(false); // pipeline: solo MDE + ITG
+  const [filtroEst,setFiltroEst]=useState("todos"); // pipeline: todos|sin_planear|planeado
   const [skuSearch,setSkuSearch]=useState(""); // dashboard: búsqueda libre de SKU
   const [posCajasOpen,setPosCajasOpen]=useState({}); // buscador: posiciones expandidas para ver cajas
   const [stockTbl,setStockTbl]=useState(false); // tab stock: mostrar tabla detalle
@@ -2942,8 +2943,8 @@ function CEDIDashboard(){
                 const todos=data?.pedidosActivos||[];
                 const grupos=[
                   {k:"sin_planear",l:"Sin Planear",c:C.t3,pedidos:todos.filter(p=>p.est==="sin_planear")},
-                  {k:"planeado",l:"Planeado",c:C.accent,pedidos:todos.filter(p=>p.est==="planeado"||p.est==="en_picking")},
-                  {k:"total",l:"Total Pedidos",c:C.teal,pedidos:todos},
+                  {k:"planeado",   l:"Planeado",   c:C.accent,pedidos:todos.filter(p=>p.est==="planeado"||p.est==="en_picking")},
+                  {k:"total",      l:"Total Pedidos",c:C.teal,pedidos:todos},
                 ];
                 return grupos.map(g=>{
                   const sp=g.pedidos;
@@ -2951,9 +2952,16 @@ function CEDIDashboard(){
                   const lineas=sp.reduce((t,p)=>t+(p.lineas||0),0);
                   const piso=sp.filter(p=>p.cobertura==="PISO").length;
                   const mixto=sp.filter(p=>p.cobertura==="MIXTO").length;
+                  const activo=filtroEst===g.k||(filtroEst==="todos"&&g.k==="total");
                   return(
-                    <div key={g.k} style={{background:C.bg2,border:`1px solid ${g.c}30`,borderRadius:12,padding:"14px 16px",borderTop:`2px solid ${g.c}`}}>
-                      <div style={{fontSize:9,color:g.c,fontWeight:700,textTransform:"uppercase",letterSpacing:"1px",marginBottom:6}}>{g.l}</div>
+                    <button key={g.k} onClick={()=>setFiltroEst(g.k==="total"?"todos":g.k)}
+                      style={{background:activo?`${g.c}18`:C.bg2,border:`1px solid ${activo?g.c:g.c+"30"}`,borderRadius:12,padding:"14px 16px",borderTop:`2px solid ${g.c}`,cursor:"pointer",fontFamily:"inherit",textAlign:"left",transition:"all .15s"}}
+                      onMouseEnter={e=>!activo&&(e.currentTarget.style.background=C.bg3)}
+                      onMouseLeave={e=>!activo&&(e.currentTarget.style.background=C.bg2)}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6}}>
+                        <div style={{fontSize:9,color:g.c,fontWeight:700,textTransform:"uppercase",letterSpacing:"1px"}}>{g.l}</div>
+                        {activo&&g.k!=="total"&&<span style={{fontSize:8,color:g.c,fontWeight:700,background:`${g.c}22`,borderRadius:10,padding:"1px 7px"}}>▼ filtrando</span>}
+                      </div>
                       <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:30,fontWeight:800,color:C.t1,lineHeight:1,marginBottom:8}}>{sp.length}</div>
                       <div style={{display:"flex",flexDirection:"column",gap:3,borderTop:`1px solid ${C.b0}`,paddingTop:7}}>
                         {[["Unidades",uni,g.c],["Líneas",lineas,C.t3],["100% Piso",piso,C.green],["Mixto",mixto,C.yellow]].map(([l,v,c])=>(
@@ -2963,7 +2971,7 @@ function CEDIDashboard(){
                           </div>
                         ))}
                       </div>
-                    </div>
+                    </button>
                   );
                 });
               })()}
@@ -3021,6 +3029,8 @@ function CEDIDashboard(){
                       if(pedFiltro==="reabasto"&&p.clasificacion!=="reabasto"&&p.clasificacion!=="parcial")return false;
                       if(pedFiltro==="ruptura"&&p.clasificacion!=="ruptura")return false;
                       if(tipoFiltro!=="todos"&&p.tipoDocto!==tipoFiltro)return false;
+                      if(filtroEst==="sin_planear"&&p.est!=="sin_planear")return false;
+                      if(filtroEst==="planeado"&&p.est!=="planeado"&&p.est!=="en_picking")return false;
                       if(filtroMDE&&!esMDE(p.ciudad))return false;
                       if(q){
                         const hay=(p.cliente||"").toLowerCase().includes(q)||(p.ciudad||"").toLowerCase().includes(q)||(p.id||"").toLowerCase().includes(q)||(p.refs||[]).some(r=>(r.ref||"").toLowerCase().includes(q));
