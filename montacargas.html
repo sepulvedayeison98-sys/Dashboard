@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>INDUCASOS · Montacargas</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  body{background:#070b14;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#e8edf5;overflow-x:hidden;}
+  #root{min-height:100vh;}
+  input{font-family:inherit;}
+  ::-webkit-scrollbar{width:0;height:0;}
+  @keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+  @keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useCallback, useRef } = React;
+
+// ═══════════ PALETA ═══════════
+const C={
+  bg0:"#070b14",bg1:"#0d1320",bg2:"#131b2e",bg3:"#1a2438",
+  b0:"#1f2b42",b1:"#2a3854",
+  t1:"#e8edf5",t2:"#a8b5cc",t3:"#6b7a96",t4:"#46546e",
+  teal:"#2dd4bf",accent:"#3b82f6",green:"#22c55e",yellow:"#eab308",
+  orange:"#f97316",red:"#ef4444",purple:"#a855f7",
+};
+
+// ═══════════ SUPABASE ═══════════
+const SUPA_URL = "https://rfysmwpdzlxmadobdvzh.supabase.co";
+const SUPA_KEY = "sb_publishable_LHZWmeFFmnua2j3y8dqqdw_rx0u3vad";
+const _H = { apikey:SUPA_KEY, Authorization:`Bearer ${SUPA_KEY}`, "Content-Type":"application/json" };
+const _go = (url, opts={}) =>
+  fetch(url, {headers:_H, ...opts})
+    .then(r => r.ok
+      ? r.text().then(t=>({data:t?JSON.parse(t):null, error:null}))
+      : r.text().then(t=>({data:null, error:{status:r.status, message:t}}))
+    ).catch(error=>({data:null, error}));
+const sb = {
+  from: (table) => {
+    const base = `${SUPA_URL}/rest/v1/${table}`;
+    return {
+      insert: (body) => _go(base, {method:"POST", headers:{..._H,Prefer:"return=minimal"}, body:JSON.stringify(body)}),
+      update: (body) => ({
+        eq: (col,val) => _go(`${base}?${col}=eq.${encodeURIComponent(val)}`, {method:"PATCH", headers:{..._H,Prefer:"return=minimal"}, body:JSON.stringify(body)}),
+      }),
+    };
+  },
+};
+const fetchTurnos = () => _go(`${SUPA_URL}/rest/v1/turnos?order=fecha_solicitud.asc`, {headers:_H});
+
+// ═══════════ HELPERS ═══════════
+const CALLE_NOM={B:"Calle 1",C:"Calle 2",D:"Calle 3",E:"Calle 4"};
+const CALLE_ORD={B:1,C:2,D:3,E:4};
+const esMDE=c=>{const x=String(c||"").toUpperCase().trim();return x==="MDE"||x.includes("MEDELL")||x==="ITAGUI"||x==="ITAGÜI"||x.includes("ITAGU");};
+const fmtHora=ts=>{if(!ts)return"";const d=new Date(ts);return d.toLocaleTimeString("es-CO",{hour:"2-digit",minute:"2-digit"});};
+const ordenarPos=arr=>[...(arr||[])].sort((a,b)=>(CALLE_ORD[a.calleLetra]||9)-(CALLE_ORD[b.calleLetra]||9)||(a.modulo||0)-(b.modulo||0));
+
+// ═══════════ LOGIN ═══════════
+function LoginForm({onLogin}){
+  const [nombre,setNombre]=useState("");
+  const [cargando,setCargando]=useState(false);
+  const submit=async()=>{
+    const n=nombre.trim();if(!n||cargando)return;
+    setCargando(true);await onLogin(n);
+  };
+  return(
+    <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"100vh",padding:24,background:C.bg0}}>
+      <div style={{width:"100%",maxWidth:360}}>
+        <div style={{textAlign:"center",marginBottom:28}}>
+          <div style={{width:64,height:64,borderRadius:16,background:"linear-gradient(135deg,#a855f7,#3b82f6)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:28,margin:"0 auto 14px"}}>🏗️</div>
+          <div style={{fontWeight:800,fontSize:22,letterSpacing:0.5,color:C.t1}}>MONTACARGAS</div>
+          <div style={{color:C.t3,fontSize:12,marginTop:4}}>INDUCASOS · CEDI ITAGUÍ</div>
+        </div>
+        <div style={{background:C.bg2,borderRadius:16,padding:24,border:`1px solid ${C.b0}`}}>
+          <div style={{color:C.t2,fontSize:13,fontWeight:700,marginBottom:14}}>¿Cómo te llamas?</div>
+          <input value={nombre} onChange={e=>setNombre(e.target.value)} onKeyDown={e=>e.key==="Enter"&&submit()}
+            placeholder="Tu nombre..." autoFocus
+            style={{width:"100%",background:C.bg3,border:`1px solid ${C.b1}`,borderRadius:10,padding:"12px 14px",fontSize:15,color:C.t1,outline:"none",marginBottom:14}}/>
+          <button onClick={submit} disabled={!nombre.trim()||cargando}
+            style={{width:"100%",padding:"13px",background:nombre.trim()?`linear-gradient(135deg,#a855f7,#3b82f6)`:C.bg3,border:"none",borderRadius:10,color:nombre.trim()?C.bg0:C.t4,fontWeight:800,fontSize:14,cursor:nombre.trim()?"pointer":"not-allowed",transition:"all .2s"}}>
+            {cargando?"Conectando...":"Ver cola de turnos →"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════ COMPONENTE PRINCIPAL ═══════════
+function MontacargasApp(){
+  const [operario,setOperario]=useState(null);
+  const [turnos,setTurnos]=useState([]);
+  const [tab,setTab]=useState("pendiente");
+  const [expandido,setExpandido]=useState({});
+  const [procesando,setProcesando]=useState({});
+  const [ultimaAct,setUltimaAct]=useState(null);
+  const timerRef=useRef(null);
+
+  const refrescar=useCallback(async()=>{
+    const{data}=await fetchTurnos();
+    if(data){setTurnos(data);setUltimaAct(new Date());}
+  },[]);
+
+  useEffect(()=>{
+    if(!operario)return;
+    refrescar();
+    timerRef.current=setInterval(refrescar,20000);
+    return()=>clearInterval(timerRef.current);
+  },[operario,refrescar]);
+
+  const tomarTurno=async(id)=>{
+    setProcesando(p=>({...p,[id]:true}));
+    await sb.from("turnos").update({estado:"en_proceso",montacarguista:operario}).eq("id",id);
+    await refrescar();
+    setProcesando(p=>({...p,[id]:false}));
+  };
+
+  const completarTurno=async(id)=>{
+    setProcesando(p=>({...p,[id]:true}));
+    await sb.from("turnos").update({estado:"completado",montacarguista:operario,fecha_completado:new Date().toISOString()}).eq("id",id);
+    await refrescar();
+    setProcesando(p=>({...p,[id]:false}));
+  };
+
+  if(!operario)return(
+    <LoginForm onLogin={async(nombre)=>{
+      setOperario(nombre);
+      try{await sb.from("usuarios").insert({nombre,rol:"montacarguista",activo:true,fecha_login:new Date().toISOString()});}catch(e){}
+    }}/>
+  );
+
+  const porEstado=est=>turnos
+    .filter(t=>t.estado===est)
+    .sort((a,b)=>{
+      const au=a.es_mde?1:0,bu=b.es_mde?1:0;
+      if(au!==bu)return bu-au;
+      return new Date(a.fecha_solicitud)-new Date(b.fecha_solicitud);
+    });
+
+  const nPend=porEstado("pendiente").length;
+  const nProc=porEstado("en_proceso").length;
+  const lista=porEstado(tab);
+
+  return(
+    <div style={{minHeight:"100vh",paddingBottom:24}}>
+      {/* Header */}
+      <div style={{position:"sticky",top:0,zIndex:10,background:C.bg1,borderBottom:`1px solid ${C.b0}`,padding:"12px 14px"}}>
+        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
+          <div style={{width:34,height:34,borderRadius:9,background:"linear-gradient(135deg,#a855f7,#3b82f6)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18}}>🏗️</div>
+          <div style={{flex:1}}>
+            <div style={{fontWeight:800,fontSize:15}}>MONTACARGAS</div>
+            <div style={{color:C.t3,fontSize:10}}>CEDI ITAGUÍ · {operario}{ultimaAct?` · act. ${fmtHora(ultimaAct)}`:""}</div>
+          </div>
+          <button onClick={refrescar} style={{background:C.bg3,border:`1px solid ${C.b0}`,color:C.t3,borderRadius:8,padding:"7px 11px",fontSize:13}}>↻</button>
+          <button onClick={()=>{setOperario(null);setTurnos([]);}} style={{background:C.bg3,border:`1px solid ${C.b0}`,color:C.t3,borderRadius:8,padding:"7px 10px",fontSize:11}}>⇦</button>
+        </div>
+        {/* Tabs */}
+        <div style={{display:"flex",gap:5}}>
+          {[
+            {key:"pendiente",lbl:"⏳ Pendientes",n:nPend,col:C.yellow},
+            {key:"en_proceso",lbl:"🔄 En proceso",n:nProc,col:C.orange},
+            {key:"completado",lbl:"✅ Completados",n:null,col:C.green},
+          ].map(t=>(
+            <button key={t.key} onClick={()=>setTab(t.key)} style={{flex:1,padding:"8px 4px",borderRadius:9,border:`1px solid ${tab===t.key?t.col:C.b0}`,background:tab===t.key?`${t.col}18`:C.bg2,color:tab===t.key?t.col:C.t3,fontWeight:700,fontSize:10,position:"relative"}}>
+              {t.lbl}
+              {t.n>0&&<span style={{position:"absolute",top:-5,right:-4,background:t.col,color:C.bg0,borderRadius:"50%",width:17,height:17,fontSize:9,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center"}}>{t.n}</span>}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Lista de turnos */}
+      <div style={{padding:"12px 12px 0"}}>
+        {lista.length===0&&(
+          <div style={{textAlign:"center",color:C.t3,padding:"50px 20px"}}>
+            <div style={{fontSize:40,marginBottom:12}}>{tab==="pendiente"?"🎉":tab==="en_proceso"?"⚙️":"📋"}</div>
+            <div style={{fontSize:14}}>
+              {tab==="pendiente"?"Sin turnos pendientes · se actualiza cada 20s":tab==="en_proceso"?"No hay turnos en proceso":"Sin completados hoy"}
+            </div>
+          </div>
+        )}
+        {lista.map((t,ti)=>{
+          const posiciones=ordenarPos(t.posiciones);
+          const exp=!!expandido[t.id];
+          const proc=!!procesando[t.id];
+          const urgente=t.es_mde||t.prioridad==="urgente";
+          const totalUnids=posiciones.reduce((s,p)=>(p.skus||[]).reduce((u,k)=>u+k.cant,s),0);
+          const totalSKUs=posiciones.reduce((s,p)=>s+(p.skus||[]).length,0);
+          const accentCol=urgente?C.red:C.purple;
+          return(
+            <div key={t.id} style={{background:C.bg2,borderRadius:13,marginBottom:10,border:`1px solid ${urgente?C.red+"40":C.b0}`,borderLeft:`4px solid ${accentCol}`,animation:"fadeUp .2s ease both"}}>
+              {/* Cabecera */}
+              <div onClick={()=>setExpandido(o=>({...o,[t.id]:!o[t.id]}))} style={{padding:"12px 14px",cursor:"pointer"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6}}>
+                  <div style={{display:"flex",alignItems:"center",gap:8,flex:1,minWidth:0}}>
+                    <div style={{width:28,height:28,borderRadius:"50%",background:`${accentCol}20`,color:accentCol,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:12,flexShrink:0}}>{ti+1}</div>
+                    <div style={{minWidth:0}}>
+                      <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+                        <span style={{fontFamily:"'JetBrains Mono',monospace",color:C.teal,fontWeight:800,fontSize:15}}>{t.picking}</span>
+                        {urgente&&<span style={{background:`${C.red}20`,color:C.red,border:`1px solid ${C.red}40`,borderRadius:4,padding:"1px 6px",fontSize:8,fontWeight:800}}>🚨 URGENTE</span>}
+                        <span style={{background:`${C.purple}15`,color:C.purple,borderRadius:4,padding:"1px 6px",fontSize:8,fontWeight:700}}>{posiciones.length} pos</span>
+                      </div>
+                      <div style={{color:C.t2,fontSize:11,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",marginTop:2}}>{t.cliente}</div>
+                    </div>
+                  </div>
+                  <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
+                    <div style={{textAlign:"right"}}>
+                      <div style={{fontFamily:"'JetBrains Mono',monospace",color:C.green,fontWeight:800,fontSize:15,lineHeight:1}}>{totalUnids}u</div>
+                      <div style={{color:C.t4,fontSize:8}}>{totalSKUs} SKU{totalSKUs!==1?"s":""}</div>
+                    </div>
+                    <span style={{color:C.t3,fontSize:15,transform:exp?"rotate(90deg)":"none",transition:"transform .2s"}}>▶</span>
+                  </div>
+                </div>
+                {/* Meta */}
+                <div style={{display:"flex",gap:10,fontSize:10,color:C.t3,flexWrap:"wrap",marginBottom:6}}>
+                  <span>👷 {t.operario_solicitante}</span>
+                  <span>📍 {t.ciudad}</span>
+                  <span>🕐 {fmtHora(t.fecha_solicitud)}</span>
+                  {t.montacarguista&&<span style={{color:C.teal}}>🏗️ {t.montacarguista}</span>}
+                </div>
+                {/* Chips posiciones (colapsado) */}
+                {!exp&&<div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                  {posiciones.map((p,pi)=>(
+                    <span key={pi} style={{fontFamily:"'JetBrains Mono',monospace",background:C.bg3,border:`1px solid ${C.b0}`,borderRadius:5,padding:"2px 7px",fontSize:9,color:C.teal}}>{p.ubi}</span>
+                  ))}
+                </div>}
+              </div>
+
+              {/* Detalle expandido */}
+              {exp&&(
+                <div style={{borderTop:`1px solid ${C.b0}`,padding:"8px 14px 10px"}}>
+                  {posiciones.map((pos,pi)=>(
+                    <div key={pi} style={{background:C.bg3,borderRadius:9,padding:"8px 10px",marginBottom:6,borderLeft:`3px solid ${C.purple}`}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:5}}>
+                        <div style={{display:"flex",alignItems:"center",gap:7}}>
+                          <span style={{fontFamily:"'JetBrains Mono',monospace",color:C.teal,fontWeight:800,fontSize:14}}>{pos.ubi}</span>
+                          <span style={{fontSize:9,color:C.t3}}>{CALLE_NOM[pos.calleLetra]||pos.calleLetra} · Mód {pos.modulo} · Niv {pos.nivel}</span>
+                        </div>
+                        <span style={{fontFamily:"'JetBrains Mono',monospace",color:C.green,fontWeight:700,fontSize:12}}>{pos.totalSaldo}u</span>
+                      </div>
+                      {(pos.skus||[]).map((s,si)=>(
+                        <div key={si} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"3px 0",borderTop:si>0?`1px solid ${C.b0}`:"none"}}>
+                          <div style={{display:"flex",alignItems:"center",gap:5}}>
+                            <span style={{fontSize:8,background:`${C.accent}20`,color:C.accent,borderRadius:3,padding:"1px 4px",fontWeight:800}}>SKU</span>
+                            <span style={{fontFamily:"'JetBrains Mono',monospace",color:C.accent,fontSize:11,fontWeight:700}}>{s.ref}</span>
+                          </div>
+                          <div style={{display:"flex",alignItems:"center",gap:6}}>
+                            <span style={{color:C.t3,fontSize:9,maxWidth:90,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{(s.desc||"").slice(0,18)}</span>
+                            <span style={{fontFamily:"'JetBrains Mono',monospace",color:C.yellow,fontSize:11,fontWeight:700}}>{s.cant}u</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Botón de acción */}
+              <div style={{borderTop:`1px solid ${C.b0}`}}>
+                {t.estado==="pendiente"&&(
+                  <button onClick={()=>tomarTurno(t.id)} disabled={proc}
+                    style={{width:"100%",padding:"12px",background:proc?C.bg3:`linear-gradient(135deg,${C.orange},${C.yellow})`,border:"none",borderRadius:"0 0 12px 12px",color:proc?C.t3:C.bg0,fontWeight:800,fontSize:13,cursor:proc?"not-allowed":"pointer",fontFamily:"inherit"}}>
+                    {proc?"Procesando...":"🚜 Tomar turno"}
+                  </button>
+                )}
+                {t.estado==="en_proceso"&&(
+                  <button onClick={()=>completarTurno(t.id)} disabled={proc}
+                    style={{width:"100%",padding:"12px",background:proc?C.bg3:`linear-gradient(135deg,${C.green},${C.teal})`,border:"none",borderRadius:"0 0 12px 12px",color:proc?C.t3:C.bg0,fontWeight:800,fontSize:13,cursor:proc?"not-allowed":"pointer",fontFamily:"inherit"}}>
+                    {proc?"Procesando...":"✅ Marcar completado"}
+                  </button>
+                )}
+                {t.estado==="completado"&&(
+                  <div style={{padding:"10px",textAlign:"center",color:C.green,fontSize:11,fontWeight:700}}>
+                    ✅ Completado a las {fmtHora(t.fecha_completado)} · por {t.montacarguista}
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<MontacargasApp/>);
+</script>
+</body>
+</html>
