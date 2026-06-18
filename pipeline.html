@@ -217,7 +217,16 @@ function procesar(wbInv,wbFact){
     return(ord[a.estado]||0)-(ord[b.estado]||0)||b.uni-a.uni;
   });
 
-  return{invBySKU,stockMap,pedidos:pedidosActivos,multiMap};
+  // Índice UBI → SKUs (para buscador de posiciones)
+  const ubiMap={};
+  for(const[ref,posArr]of Object.entries(invBySKU)){
+    const desc=(stockMap[ref]||{}).desc||"";
+    for(const p of posArr){
+      if(!ubiMap[p.ubi])ubiMap[p.ubi]={ubi:p.ubi,calleLetra:p.calleLetra,modulo:p.modulo,nivel:p.nivel,skus:[]};
+      if(p.saldo>0)ubiMap[p.ubi].skus.push({ref,desc,saldo:p.saldo,cajap:p.cajap||""});
+    }
+  }
+  return{invBySKU,stockMap,pedidos:pedidosActivos,multiMap,ubiMap};
 }
 
 // ═══════════ RECORRIDO (Opción B: por calle ascendente) ═══════════
@@ -343,7 +352,9 @@ function PickingApp(){
 
   // Búsqueda de SKUs
   const [buscaSKU,setBuscaSKU]=useState("");
-  const [tab,setTab]=useState("pedidos"); // pedidos | skus | viajes
+  const [buscaUBI,setBuscaUBI]=useState("");
+  const [ubiTurnosEnviados,setUbiTurnosEnviados]=useState({});
+  const [tab,setTab]=useState("pedidos"); // pedidos | skus | viajes | ubi
   const [filtroClasif,setFiltroClasif]=useState(""); // "" | despachable | parcial | reabasto | ruptura
 
   // ── Plan Global de Viajes (Regla 1: cross-pedido) ──────────────────────────
@@ -452,6 +463,26 @@ function PickingApp(){
       es_mde:!!esMDE(sel.ciudad)
     });
     if(!error)setTurnosEnviados(o=>({...o,[sel.picking]:true}));
+  };
+
+  const agendarTurnoUBI=async(ubiInfo)=>{
+    if(!operario||!ubiInfo)return;
+    const k=ubiInfo.ubi;
+    setUbiTurnosEnviados(o=>({...o,[k]:"loading"}));
+    const totalSaldo=ubiInfo.skus.reduce((t,s)=>t+s.saldo,0);
+    const{error}=await sb.from("turnos").insert({
+      picking:`UBI-${ubiInfo.ubi}`,pedido_siesa:"",
+      cliente:`Bajada manual · ${ubiInfo.ubi}`,ciudad:"ITAGUÍ",
+      operario_solicitante:operario,
+      posiciones:[{
+        ubi:ubiInfo.ubi,calleLetra:ubiInfo.calleLetra,modulo:ubiInfo.modulo,nivel:ubiInfo.nivel,
+        skus:ubiInfo.skus.map(s=>({ref:s.ref,desc:s.desc,cant:s.saldo,saldo:s.saldo})),
+        totalSaldo
+      }],
+      estado:"pendiente",fecha_solicitud:new Date().toISOString(),
+      prioridad:"normal",es_mde:false
+    });
+    setUbiTurnosEnviados(o=>({...o,[k]:error?"error":"ok"}));
   };
 
   const clasifCol={despachable:C.green,parcial:C.yellow,reabasto:C.orange,ruptura:C.red};
@@ -886,6 +917,7 @@ function PickingApp(){
             ⬆ Viajes
             {planGlobal.length>0&&<span style={{position:"absolute",top:-4,right:-4,background:C.purple,color:"#fff",borderRadius:"50%",width:16,height:16,fontSize:8,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center"}}>{planGlobal.length}</span>}
           </button>
+          <button onClick={()=>setTab("ubi")} style={{flex:1,padding:"9px",borderRadius:9,border:`1px solid ${tab==="ubi"?C.orange:C.b0}`,background:tab==="ubi"?`${C.orange}18`:C.bg2,color:tab==="ubi"?C.orange:C.t3,fontWeight:700,fontSize:11}}>📍 UBI</button>
         </div>
         {tab==="pedidos"
           ?<>
@@ -909,7 +941,11 @@ function PickingApp(){
               })}
             </div>
           </>
-          :<input value={buscaSKU} onChange={e=>setBuscaSKU(e.target.value)} placeholder="🔍 Referencia o descripción..." autoFocus style={{width:"100%",background:C.bg3,color:C.t1,border:`1px solid ${C.b1}`,borderRadius:11,padding:"13px 15px",fontSize:15}}/>
+          :tab==="ubi"
+            ?<input value={buscaUBI} onChange={e=>setBuscaUBI(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g,"").slice(0,6))}
+               placeholder="📍 Escribe UBI · ej: B0101" autoFocus
+               style={{width:"100%",background:C.bg3,color:C.t1,border:`1px solid ${C.orange}50`,borderRadius:11,padding:"13px 15px",fontSize:15,fontFamily:"'JetBrains Mono','SF Mono',monospace",letterSpacing:2}}/>
+            :<input value={buscaSKU} onChange={e=>setBuscaSKU(e.target.value)} placeholder="🔍 Referencia o descripción..." autoFocus style={{width:"100%",background:C.bg3,color:C.t1,border:`1px solid ${C.b1}`,borderRadius:11,padding:"13px 15px",fontSize:15}}/>
         }
       </div>
 
@@ -1228,6 +1264,78 @@ function PickingApp(){
               })}
             </div>
         )}
+
+        {/* ── TAB UBI (buscador de posiciones) ── */}
+        {tab==="ubi"&&(()=>{
+          const q=buscaUBI.trim().toUpperCase();
+          const ubiInfo=q.length>=4&&data?.ubiMap?.[q]||null;
+          const yaEnviado=ubiTurnosEnviados[q];
+          const totalSaldo=ubiInfo?ubiInfo.skus.reduce((t,s)=>t+s.saldo,0):0;
+          if(!q)return(
+            <div style={{textAlign:"center",color:C.t3,padding:"40px 20px"}}>
+              <div style={{fontSize:40,marginBottom:12}}>📍</div>
+              <div style={{fontSize:14,marginBottom:6,color:C.t2}}>Buscar por posición</div>
+              <div style={{fontSize:11,color:C.t4,maxWidth:260,margin:"0 auto"}}>Escribe una UBI para ver qué hay ahí y agendar su bajada · ej: B0101, C0203</div>
+            </div>
+          );
+          if(!ubiInfo)return(
+            <div style={{textAlign:"center",color:C.t3,padding:"40px 20px"}}>
+              <div style={{fontSize:36,marginBottom:12}}>🔍</div>
+              <div style={{fontSize:13,color:C.t2,fontFamily:"'JetBrains Mono',monospace"}}>{q}</div>
+              <div style={{fontSize:11,color:C.t4,marginTop:8}}>No hay stock ICH en esta posición</div>
+            </div>
+          );
+          return(
+            <div>
+              {/* Cabecera UBI */}
+              <div style={{background:C.bg2,borderRadius:13,border:`1px solid ${C.orange}40`,borderLeft:`4px solid ${C.orange}`,padding:"14px 16px",marginBottom:10,animation:"fadeUp .2s ease"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
+                  <div>
+                    <div style={{fontFamily:"'JetBrains Mono',monospace",color:C.orange,fontWeight:800,fontSize:22,letterSpacing:1}}>{ubiInfo.ubi}</div>
+                    <div style={{color:C.t3,fontSize:11,marginTop:3}}>{CALLE_NOM[ubiInfo.calleLetra]} · Módulo {ubiInfo.modulo} · Nivel {ubiInfo.nivel}</div>
+                  </div>
+                  <div style={{textAlign:"right"}}>
+                    <div style={{fontFamily:"'JetBrains Mono',monospace",color:C.green,fontWeight:800,fontSize:20,lineHeight:1}}>{totalSaldo}u</div>
+                    <div style={{color:C.t4,fontSize:9,marginTop:2}}>{Math.floor(totalSaldo/CAJA)} caja{Math.floor(totalSaldo/CAJA)!==1?"s":""}{totalSaldo%CAJA>0?` + ${totalSaldo%CAJA}u`:""}</div>
+                  </div>
+                </div>
+                {/* SKUs en esta posición */}
+                <div style={{display:"flex",flexDirection:"column",gap:5}}>
+                  {ubiInfo.skus.map((s,i)=>(
+                    <div key={i} style={{background:C.bg3,borderRadius:8,padding:"8px 11px",borderLeft:`3px solid ${C.accent}`}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:3}}>
+                        <div style={{display:"flex",alignItems:"center",gap:6}}>
+                          <span style={{fontSize:8,background:`${C.accent}25`,color:C.accent,borderRadius:3,padding:"1px 5px",fontWeight:800}}>SKU</span>
+                          <span style={{fontFamily:"'JetBrains Mono',monospace",color:C.accent,fontWeight:700,fontSize:13}}>{s.ref}</span>
+                        </div>
+                        <span style={{fontFamily:"'JetBrains Mono',monospace",color:C.green,fontWeight:800,fontSize:13}}>{s.saldo}u</span>
+                      </div>
+                      <div style={{color:C.t4,fontSize:9}}>{(s.desc||"").slice(0,50)}</div>
+                      {s.cajap&&<div style={{fontFamily:"'JetBrains Mono',monospace",color:C.yellow,fontSize:8,marginTop:4}}>📦 {s.cajap}</div>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+              {/* Botón agendar */}
+              {yaEnviado==="ok"
+                ?<div style={{background:`${C.green}12`,border:`1px solid ${C.green}30`,borderRadius:11,padding:"12px 16px",display:"flex",alignItems:"center",gap:10}}>
+                   <span style={{fontSize:20}}>✅</span>
+                   <div>
+                     <div style={{color:C.green,fontWeight:700,fontSize:12}}>Turno agendado</div>
+                     <div style={{color:C.t3,fontSize:10}}>El montacarguista ya ve la posición {ubiInfo.ubi}</div>
+                   </div>
+                 </div>
+                :yaEnviado==="error"
+                  ?<div style={{background:`${C.red}12`,border:`1px solid ${C.red}30`,borderRadius:11,padding:"10px 16px",color:C.red,fontSize:12,fontWeight:700}}>⚠ Error al agendar — intenta de nuevo</div>
+                  :<button onClick={()=>agendarTurnoUBI(ubiInfo)} disabled={yaEnviado==="loading"}
+                     style={{width:"100%",padding:"14px",background:yaEnviado==="loading"?C.bg3:`linear-gradient(135deg,${C.orange},${C.yellow})`,border:"none",borderRadius:11,color:yaEnviado==="loading"?C.t3:C.bg0,fontWeight:800,fontSize:14,cursor:yaEnviado==="loading"?"not-allowed":"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8,fontFamily:"inherit"}}>
+                     <span style={{fontSize:16}}>⬇</span>
+                     <span>{yaEnviado==="loading"?"Agendando...":"Agendar bajada de esta posición"}</span>
+                   </button>
+              }
+            </div>
+          );
+        })()}
       </div>
     </div>
   );
