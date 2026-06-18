@@ -16,7 +16,9 @@
   ::-webkit-scrollbar{width:0;height:0;}
   @keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
   @keyframes spin{to{transform:rotate(360deg)}}
+  @keyframes pulse-glow{0%,100%{box-shadow:0 0 0 0 rgba(168,85,247,.5)}60%{box-shadow:0 0 16px 3px rgba(168,85,247,.12)}}
   .mono{font-family:'JetBrains Mono','SF Mono',monospace;}
+  .btn-pulse{animation:pulse-glow 2s ease-in-out infinite}
 </style>
 </head>
 <body>
@@ -28,12 +30,20 @@ const { useState, useMemo, useEffect, useCallback } = React;
 const SUPA_URL = "https://rfysmwpdzlxmadobdvzh.supabase.co";
 const SUPA_KEY = "sb_publishable_LHZWmeFFmnua2j3y8dqqdw_rx0u3vad";
 const _H = { apikey:SUPA_KEY, Authorization:`Bearer ${SUPA_KEY}`, "Content-Type":"application/json" };
-const _go = (url, opts={}) =>
-  fetch(url, {headers:_H, ...opts})
-    .then(r => r.ok
-      ? r.text().then(t=>({data:t?JSON.parse(t):null, error:null}))
-      : r.text().then(t=>({data:null, error:{status:r.status, message:t}}))
-    ).catch(error=>({data:null, error}));
+const _go = async (url, opts={}) => {
+  for(let i=0;i<3;i++){
+    try{
+      const res=await fetch(url,{headers:_H,...opts});
+      if(res.ok){const t=await res.text();return{data:t?JSON.parse(t):null,error:null};}
+      if([400,403,404,409].includes(res.status)){const t=await res.text();return{data:null,error:{status:res.status,message:t}};}
+      if(i<2)await new Promise(ok=>setTimeout(ok,(i+1)*2000));
+      else{const t=await res.text();return{data:null,error:{status:res.status,message:t}};}
+    }catch(err){
+      if(i<2)await new Promise(ok=>setTimeout(ok,(i+1)*2000));
+      else return{data:null,error:err};
+    }
+  }
+};
 const sb = {
   from: (table) => {
     const base = `${SUPA_URL}/rest/v1/${table}`;
@@ -323,6 +333,7 @@ function PickingApp(){
   // Búsqueda de SKUs
   const [buscaSKU,setBuscaSKU]=useState("");
   const [tab,setTab]=useState("pedidos"); // pedidos | skus | viajes
+  const [filtroClasif,setFiltroClasif]=useState(""); // "" | despachable | parcial | reabasto | ruptura
 
   // ── Plan Global de Viajes (Regla 1: cross-pedido) ──────────────────────────
   const planGlobal=useMemo(()=>{
@@ -504,6 +515,9 @@ function PickingApp(){
     return Object.values(map).sort((a,b)=>b.skus.length-a.skus.length||b.totalDisp-a.totalDisp);
   },[recorrido.altura]);
 
+  // Detectar si ya se recogió todo el piso (para prompt auto-agendar)
+  const pisoTerminado=recorrido.piso.length>0&&recorrido.piso.every((_,i)=>hechos[`piso-${i}`]);
+
   // ═══════════ PANTALLAS ═══════════
   if(phase==="login")return(
     <LoginForm onLogin={async(nombre)=>{
@@ -565,7 +579,12 @@ function PickingApp(){
                </div>
              </div>
             :<div style={{padding:"8px 14px 4px"}}>
-               <button onClick={agendarTurno} style={{width:"100%",padding:"13px",background:`linear-gradient(135deg,${C.purple},${C.accent})`,border:"none",borderRadius:11,color:"#fff",fontWeight:800,fontSize:14,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8,fontFamily:"inherit"}}>
+               {/* #2 Banner auto-prompt cuando piso terminado */}
+               {pisoTerminado&&<div style={{background:`${C.purple}18`,border:`1px solid ${C.purple}40`,borderRadius:9,padding:"7px 12px",marginBottom:6,display:"flex",alignItems:"center",gap:8}}>
+                 <span style={{fontSize:14}}>🎯</span>
+                 <span style={{color:C.purple,fontSize:11,fontWeight:700}}>¡Piso completo! Agenda el viaje de altura.</span>
+               </div>}
+               <button onClick={agendarTurno} className={pisoTerminado?"btn-pulse":""} style={{width:"100%",padding:"13px",background:`linear-gradient(135deg,${C.purple},${C.accent})`,border:"none",borderRadius:11,color:"#fff",fontWeight:800,fontSize:14,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8,fontFamily:"inherit"}}>
                  <span style={{fontSize:16}}>🔔</span>
                  <span>Agendar Turno al Montacarguista</span>
                </button>
@@ -837,24 +856,46 @@ function PickingApp(){
           </button>
         </div>
         {tab==="pedidos"
-          ?<input value={busca} onChange={e=>setBusca(e.target.value)} placeholder="🔍 Picking, pedido o cliente..." autoFocus style={{width:"100%",background:C.bg3,color:C.t1,border:`1px solid ${C.b1}`,borderRadius:11,padding:"13px 15px",fontSize:15}}/>
+          ?<>
+            <input value={busca} onChange={e=>{setBusca(e.target.value);}} placeholder="🔍 Picking, pedido o cliente..." autoFocus style={{width:"100%",background:C.bg3,color:C.t1,border:`1px solid ${C.b1}`,borderRadius:11,padding:"13px 15px",fontSize:15,marginBottom:8}}/>
+            {/* #4 Filtros rápidos por clasificación */}
+            <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+              {[
+                {k:"",l:"Todos",c:C.t3},
+                {k:"despachable",l:"✅ Desp.",c:C.green},
+                {k:"parcial",l:"⚡ Parcial",c:C.yellow},
+                {k:"reabasto",l:"⬆ Reab.",c:C.orange},
+                {k:"ruptura",l:"❌ Rupt.",c:C.red},
+              ].map(f=>{
+                const cnt=data?data.pedidos.filter(p=>!f.k||p.clasif===f.k).length:0;
+                return(
+                  <button key={f.k} onClick={()=>setFiltroClasif(f.k)}
+                    style={{padding:"5px 10px",borderRadius:7,border:`1px solid ${filtroClasif===f.k?f.c:C.b0}`,background:filtroClasif===f.k?`${f.c}20`:C.bg2,color:filtroClasif===f.k?f.c:C.t3,fontSize:10,fontWeight:700,cursor:"pointer"}}>
+                    {f.l} <span style={{opacity:.6}}>({cnt})</span>
+                  </button>
+                );
+              })}
+            </div>
+          </>
           :<input value={buscaSKU} onChange={e=>setBuscaSKU(e.target.value)} placeholder="🔍 Referencia o descripción..." autoFocus style={{width:"100%",background:C.bg3,color:C.t1,border:`1px solid ${C.b1}`,borderRadius:11,padding:"13px 15px",fontSize:15}}/>
         }
       </div>
 
       <div style={{padding:"14px 12px"}}>
         {/* ── TAB PEDIDOS ── */}
-        {tab==="pedidos"&&(
-          !busca.trim()
-            ?<div style={{textAlign:"center",color:C.t3,padding:"40px 20px"}}>
+        {tab==="pedidos"&&(()=>{
+          const base=busca.trim()?resultados:(filtroClasif?data?.pedidos||[]:[]);
+          const lista=filtroClasif?base.filter(p=>p.clasif===filtroClasif):base;
+          if(!busca.trim()&&!filtroClasif)return(
+            <div style={{textAlign:"center",color:C.t3,padding:"40px 20px"}}>
               <div style={{fontSize:36,marginBottom:12}}>🔎</div>
-              <div style={{fontSize:14,marginBottom:6}}>Busca un pedido para empezar</div>
-              <div style={{fontSize:11,color:C.t4}}>Ingresa el número de picking, pedido SIESA o nombre del cliente</div>
+              <div style={{fontSize:14,marginBottom:6}}>Busca o filtra un pedido</div>
+              <div style={{fontSize:11,color:C.t4}}>Usa la barra de búsqueda o los filtros de arriba</div>
               <div style={{marginTop:18,fontSize:11,color:C.t4}}>{data?.pedidos.length||0} pedidos disponibles</div>
             </div>
-            :resultados.length===0
-              ?<div style={{textAlign:"center",color:C.t3,padding:30,fontSize:13}}>Sin resultados para "{busca}"</div>
-              :resultados.map((p,i)=>{
+          );
+          if(lista.length===0)return<div style={{textAlign:"center",color:C.t3,padding:30,fontSize:13}}>Sin resultados{busca?` para "${busca}"`:""}</div>;
+          return lista.map((p,i)=>{
                 const cajasP=Math.floor(p.uniPiso/CAJA);
                 const sueltosP=p.uniPiso%CAJA;
                 const skusAlt=p.refs.filter(r=>!r.hasPiso&&r.hasAlt).length;
@@ -897,8 +938,8 @@ function PickingApp(){
                   </div>
                 </div>
                 );
-              })
-        )}
+              });
+        })()}
 
         {/* ── TAB SKUs ── */}
         {tab==="skus"&&(

@@ -35,12 +35,20 @@ const C={
 const SUPA_URL = "https://rfysmwpdzlxmadobdvzh.supabase.co";
 const SUPA_KEY = "sb_publishable_LHZWmeFFmnua2j3y8dqqdw_rx0u3vad";
 const _H = { apikey:SUPA_KEY, Authorization:`Bearer ${SUPA_KEY}`, "Content-Type":"application/json" };
-const _go = (url, opts={}) =>
-  fetch(url, {headers:_H, ...opts})
-    .then(r => r.ok
-      ? r.text().then(t=>({data:t?JSON.parse(t):null, error:null}))
-      : r.text().then(t=>({data:null, error:{status:r.status, message:t}}))
-    ).catch(error=>({data:null, error}));
+const _go = async (url, opts={}) => {
+  for(let i=0;i<3;i++){
+    try{
+      const res=await fetch(url,{headers:_H,...opts});
+      if(res.ok){const t=await res.text();return{data:t?JSON.parse(t):null,error:null};}
+      if([400,403,404,409].includes(res.status)){const t=await res.text();return{data:null,error:{status:res.status,message:t}};}
+      if(i<2)await new Promise(ok=>setTimeout(ok,(i+1)*2000));
+      else{const t=await res.text();return{data:null,error:{status:res.status,message:t}};}
+    }catch(err){
+      if(i<2)await new Promise(ok=>setTimeout(ok,(i+1)*2000));
+      else return{data:null,error:err};
+    }
+  }
+};
 
 const api = {
   turnos:    ()=> _go(`${SUPA_URL}/rest/v1/turnos?order=fecha_solicitud.desc`,{headers:_H}),
@@ -59,8 +67,8 @@ const fmtFecha=ts=>{if(!ts)return"—";const d=new Date(ts);return `${d.getDate(
 const hoy=()=>{const d=new Date();d.setHours(0,0,0,0);return d;};
 
 const clasifCol={despachable:"#22c55e",parcial:"#eab308",reabasto:"#f97316",ruptura:"#ef4444"};
-const estadoCol={pendiente:C.yellow,en_proceso:C.orange,completado:C.green,liberado:C.t3};
-const estadoLbl={pendiente:"PEND",en_proceso:"EN PROC",completado:"COMP",liberado:"LIBRE"};
+const estadoCol={pendiente:C.yellow,en_proceso:C.orange,completado:C.green,liberado:C.t3,fallido:C.red};
+const estadoLbl={pendiente:"PEND",en_proceso:"EN PROC",completado:"COMP",liberado:"LIBRE",fallido:"FALLO"};
 
 // ═══════════ COMPONENTE PRINCIPAL ═══════════
 function AdminApp(){
@@ -108,6 +116,12 @@ function AdminApp(){
     if(!window.confirm("¿Cancelar este turno?"))return;
     setProcesando(p=>({...p,[id]:true}));
     await api.patchTurno(id,{estado:"completado",fecha_completado:new Date().toISOString(),montacarguista:"[Admin-cancelado]"});
+    await refrescar();
+    setProcesando(p=>({...p,[id]:false}));
+  };
+  const reintentarTurno=async(id)=>{
+    setProcesando(p=>({...p,[id]:true}));
+    await api.patchTurno(id,{estado:"pendiente",motivo_fallo:null,fecha_completado:null,montacarguista:null});
     await refrescar();
     setProcesando(p=>({...p,[id]:false}));
   };
@@ -290,7 +304,7 @@ function AdminApp(){
                     {editando===`asig-${a.id}`&&(
                       <ReasignarForm
                         operarioActual={a.operario}
-                        operariosDisp={operariosActivos.map(o=>o.nombre)}
+                        operariosDisp={[...new Set([...operariosActivos.map(o=>o.nombre),...usuarios.filter(u=>u.rol==="operario").map(u=>u.nombre)])].filter(Boolean).sort()}
                         onGuardar={nuevoNombre=>reasignarPedido(a.id,nuevoNombre)}
                         onCancelar={()=>setEditando(null)}
                       />
@@ -305,15 +319,15 @@ function AdminApp(){
         {/* ── TAB TURNOS ── */}
         {tab==="turnos"&&(
           <div>
-            {["pendiente","en_proceso","completado"].map(est=>{
+            {["pendiente","en_proceso","fallido","completado"].map(est=>{
               const lista=turnos.filter(t=>t.estado===est).sort((a,b)=>{
                 const au=a.es_mde?1:0,bu=b.es_mde?1:0;
                 if(au!==bu)return bu-au;
                 return new Date(b.fecha_solicitud)-new Date(a.fecha_solicitud);
               });
               if(lista.length===0)return null;
-              const col={pendiente:C.yellow,en_proceso:C.orange,completado:C.green}[est];
-              const lbl={pendiente:"⏳ Pendientes",en_proceso:"🔄 En proceso",completado:"✅ Completados"}[est];
+              const col={pendiente:C.yellow,en_proceso:C.orange,fallido:C.red,completado:C.green}[est];
+              const lbl={pendiente:"⏳ Pendientes",en_proceso:"🔄 En proceso",fallido:"⚠️ Fallidos",completado:"✅ Completados"}[est];
               return(
                 <div key={est} style={{marginBottom:16}}>
                   <div style={{display:"flex",alignItems:"center",gap:7,marginBottom:7}}>
@@ -375,9 +389,13 @@ function AdminApp(){
                                     🚨 Priorizar
                                   </button>
                                 )}
-                                <button onClick={()=>cancelarTurno(t.id)} disabled={!!procesando[t.id]} style={{flex:1,padding:"7px",background:`${C.t4}15`,border:`1px solid ${C.b0}`,borderRadius:7,color:C.t3,fontSize:11,fontWeight:700,cursor:"pointer"}}>
-                                  ✕ Cancelar
-                                </button>
+                                {est==="fallido"&&(
+                                  <button onClick={()=>reintentarTurno(t.id)} disabled={!!procesando[t.id]} style={{flex:1,padding:"7px",background:`${C.green}15`,border:`1px solid ${C.green}30`,borderRadius:7,color:C.green,fontSize:11,fontWeight:700,cursor:"pointer"}}>
+                                    ↻ Reintentar
+                                  </button>
+                                )}
+                                {t.motivo_fallo&&<div style={{flex:1,padding:"5px 8px",background:`${C.orange}10`,borderRadius:7,color:C.orange,fontSize:10}}>{t.motivo_fallo}</div>}
+                                {est!=="fallido"&&<button onClick={()=>cancelarTurno(t.id)} disabled={!!procesando[t.id]} style={{flex:1,padding:"7px",background:`${C.t4}15`,border:`1px solid ${C.b0}`,borderRadius:7,color:C.t3,fontSize:11,fontWeight:700,cursor:"pointer"}}>✕ Cancelar</button>}
                               </div>
                             )}
                           </div>
@@ -430,7 +448,7 @@ function AdminApp(){
                         editando===`asig-${a.id}`
                           ?<ReasignarForm
                               operarioActual={a.operario}
-                              operariosDisp={[...new Set(asigs.filter(x=>x.estado==="en_proceso").map(x=>x.operario))]}
+                              operariosDisp={[...new Set([...operariosActivos.map(o=>o.nombre),...usuarios.filter(u=>u.rol==="operario").map(u=>u.nombre)])].filter(Boolean).sort()}
                               onGuardar={nuevoNombre=>reasignarPedido(a.id,nuevoNombre)}
                               onCancelar={()=>setEditando(null)}
                             />
