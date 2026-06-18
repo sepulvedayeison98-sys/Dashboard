@@ -15,7 +15,7 @@
   ::-webkit-scrollbar{width:0;height:0;}
   @keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
   @keyframes spin{to{transform:rotate(360deg)}}
-  @keyframes blink{0%,100%{opacity:1}50%{opacity:.4}}
+  @keyframes pop{0%{transform:scale(.8);opacity:0}60%{transform:scale(1.08)}100%{transform:scale(1);opacity:1}}
 </style>
 </head>
 <body>
@@ -32,10 +32,10 @@ const C={
 };
 
 // ═══════════ SUPABASE con retry ═══════════
-const SUPA_URL = "https://rfysmwpdzlxmadobdvzh.supabase.co";
-const SUPA_KEY = "sb_publishable_LHZWmeFFmnua2j3y8dqqdw_rx0u3vad";
-const _H = { apikey:SUPA_KEY, Authorization:`Bearer ${SUPA_KEY}`, "Content-Type":"application/json" };
-const _go = async (url, opts={}) => {
+const SUPA_URL="https://rfysmwpdzlxmadobdvzh.supabase.co";
+const SUPA_KEY="sb_publishable_LHZWmeFFmnua2j3y8dqqdw_rx0u3vad";
+const _H={apikey:SUPA_KEY,Authorization:`Bearer ${SUPA_KEY}`,"Content-Type":"application/json"};
+const _go=async(url,opts={})=>{
   for(let i=0;i<3;i++){
     try{
       const res=await fetch(url,{headers:_H,...opts});
@@ -49,7 +49,7 @@ const _go = async (url, opts={}) => {
     }
   }
 };
-const sb = {
+const sb={
   from:(table)=>{
     const base=`${SUPA_URL}/rest/v1/${table}`;
     return{
@@ -68,8 +68,6 @@ const CALLE_ORD={B:1,C:2,D:3,E:4};
 const esMDE=c=>{const x=String(c||"").toUpperCase().trim();return x==="MDE"||x.includes("MEDELL")||x==="ITAGUI"||x==="ITAGÜI"||x.includes("ITAGU");};
 const fmtHora=ts=>{if(!ts)return"";const d=new Date(ts);return d.toLocaleTimeString("es-CO",{hour:"2-digit",minute:"2-digit"});};
 const ordenarPos=arr=>[...(arr||[])].sort((a,b)=>(CALLE_ORD[a.calleLetra]||9)-(CALLE_ORD[b.calleLetra]||9)||(a.modulo||0)-(b.modulo||0));
-
-// Beep de notificación
 const beep=()=>{try{const ctx=new(window.AudioContext||window.webkitAudioContext)();const o=ctx.createOscillator();const g=ctx.createGain();o.connect(g);g.connect(ctx.destination);o.frequency.value=880;g.gain.setValueAtTime(0.3,ctx.currentTime);g.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+0.4);o.start();o.stop(ctx.currentTime+0.4);}catch(e){}};
 
 // ═══════════ LOGIN ═══════════
@@ -108,8 +106,8 @@ function MontacargasApp(){
   const [expandido,setExpandido]=useState({});
   const [procesando,setProcesando]=useState({});
   const [ultimaAct,setUltimaAct]=useState(null);
-  const [alertaCancelacion,setAlertaCancelacion]=useState([]);  // turnos cancelados por admin
-  const [reportando,setReportando]=useState({});               // {id: true} = mostrando motivos
+  const [alertaCancelacion,setAlertaCancelacion]=useState([]);
+  const [reportando,setReportando]=useState({});
   const timerRef=useRef(null);
   const prevPendRef=useRef(0);
   const misEnProcesoRef=useRef(new Set());
@@ -118,7 +116,7 @@ function MontacargasApp(){
     const{data}=await fetchTurnos();
     if(!data)return;
 
-    // #1 Notificación: nuevos turnos pendientes
+    // Notificación nuevos pendientes
     const nPend=data.filter(t=>t.estado==="pendiente").length;
     if(nPend>prevPendRef.current&&prevPendRef.current>=0){
       beep();
@@ -129,15 +127,15 @@ function MontacargasApp(){
     }
     prevPendRef.current=nPend;
 
-    // #5 Detectar cancelaciones por admin: mis turnos en_proceso que desaparecieron
+    // Detectar cancelaciones por admin
     if(operario){
       const misActualesIds=new Set(data.filter(t=>t.montacarguista===operario&&t.estado==="en_proceso").map(t=>t.id));
       const cancelados=[];
       misEnProcesoRef.current.forEach(id=>{
         const t=data.find(x=>x.id===id);
         if(!t||(t.estado!=="en_proceso"&&t.montacarguista!==operario)){
-          const turnoAnterior=turnos.find(x=>x.id===id);
-          if(turnoAnterior)cancelados.push(turnoAnterior.picking||id);
+          const ant=turnos.find(x=>x.id===id);
+          if(ant)cancelados.push(ant.picking||id);
         }
       });
       if(cancelados.length>0)setAlertaCancelacion(c=>[...c,...cancelados]);
@@ -150,9 +148,9 @@ function MontacargasApp(){
 
   useEffect(()=>{
     if(!operario)return;
-    prevPendRef.current=-1; // forzar sin notificación en primera carga
+    prevPendRef.current=-1;
     refrescar();
-    timerRef.current=setInterval(refrescar,20000);
+    timerRef.current=setInterval(refrescar,15000);
     return()=>clearInterval(timerRef.current);
   },[operario]);
 
@@ -170,7 +168,22 @@ function MontacargasApp(){
     setProcesando(p=>({...p,[id]:false}));
   };
 
-  // #8 Reportar fallo
+  // Marcar posición individual como bajada a piso
+  const marcarBajada=async(turnoId,posIdx)=>{
+    const turno=turnos.find(t=>t.id===turnoId);
+    if(!turno)return;
+    const key=`${turnoId}-pos-${posIdx}`;
+    setProcesando(p=>({...p,[key]:true}));
+    const nuevasPos=turno.posiciones.map((p,i)=>i===posIdx?{...p,bajada:true}:p);
+    await sb.from("turnos").update({posiciones:nuevasPos}).eq("id",turnoId);
+    // Auto-completar si todas bajadas
+    if(nuevasPos.every(p=>p.bajada)){
+      await sb.from("turnos").update({estado:"completado",montacarguista:operario,fecha_completado:new Date().toISOString()}).eq("id",turnoId);
+    }
+    await refrescar();
+    setProcesando(p=>({...p,[key]:false}));
+  };
+
   const reportarFallo=async(id,motivo)=>{
     setProcesando(p=>({...p,[id]:true}));
     await sb.from("turnos").update({estado:"fallido",motivo_fallo:motivo,fecha_completado:new Date().toISOString()}).eq("id",id);
@@ -194,7 +207,6 @@ function MontacargasApp(){
       return new Date(a.fecha_solicitud)-new Date(b.fecha_solicitud);
     });
 
-  // #3 Batching: agrupar posiciones de turnos pendientes por UBI
   const agrupadoPorUBI=useMemo(()=>{
     const pend=porEstado("pendiente");
     const map={};
@@ -204,8 +216,16 @@ function MontacargasApp(){
         map[pos.ubi].turnos.push({id:t.id,picking:t.picking,cliente:t.cliente,urgente:t.es_mde||t.prioridad==="urgente",skus:pos.skus||[],totalSaldo:pos.totalSaldo});
       });
     });
-    return Object.values(map)
-      .sort((a,b)=>b.turnos.length-a.turnos.length||(CALLE_ORD[a.calleLetra]||9)-(CALLE_ORD[b.calleLetra]||9)||(a.modulo||0)-(b.modulo||0));
+    return Object.values(map).sort((a,b)=>b.turnos.length-a.turnos.length||(CALLE_ORD[a.calleLetra]||9)-(CALLE_ORD[b.calleLetra]||9)||(a.modulo||0)-(b.modulo||0));
+  },[turnos]);
+
+  // Cuántos turnos pendientes necesitan cada UBI (para priorizar posiciones compartidas)
+  const demandaMap=useMemo(()=>{
+    const m={};
+    turnos.filter(t=>t.estado==="pendiente").forEach(t=>{
+      (t.posiciones||[]).forEach(p=>{m[p.ubi]=(m[p.ubi]||0)+1;});
+    });
+    return m;
   },[turnos]);
 
   const nPend=porEstado("pendiente").length;
@@ -225,11 +245,10 @@ function MontacargasApp(){
           <button onClick={refrescar} style={{background:C.bg3,border:`1px solid ${C.b0}`,color:C.t3,borderRadius:8,padding:"7px 11px",fontSize:13}}>↻</button>
           <button onClick={()=>{setOperario(null);setTurnos([]);prevPendRef.current=0;misEnProcesoRef.current=new Set();}} style={{background:C.bg3,border:`1px solid ${C.b0}`,color:C.t3,borderRadius:8,padding:"7px 10px",fontSize:11}}>⇦</button>
         </div>
-        {/* Tabs */}
         <div style={{display:"flex",gap:4}}>
           {[
             {key:"pendiente",lbl:"⏳ Pend.",n:nPend,col:C.yellow},
-            {key:"en_proceso",lbl:"🔄 Proceso",n:nProc,col:C.orange},
+            {key:"en_proceso",lbl:"🔄 En curso",n:nProc,col:C.orange},
             {key:"agrupado",lbl:"📊 Ruta",n:agrupadoPorUBI.length,col:C.purple},
             {key:"completado",lbl:"✅ Listo",n:null,col:C.green},
           ].map(t=>(
@@ -243,7 +262,7 @@ function MontacargasApp(){
 
       <div style={{padding:"12px 12px 0"}}>
 
-        {/* #5 Banner cancelación por admin */}
+        {/* Banner cancelación */}
         {alertaCancelacion.length>0&&(
           <div style={{background:`${C.red}18`,border:`1px solid ${C.red}40`,borderRadius:11,padding:"10px 14px",marginBottom:10,display:"flex",justifyContent:"space-between",alignItems:"center",animation:"fadeUp .3s ease"}}>
             <div>
@@ -254,14 +273,14 @@ function MontacargasApp(){
           </div>
         )}
 
-        {/* ── TAB PENDIENTE / EN PROCESO / COMPLETADO ── */}
+        {/* ── TURNOS (pendiente / en_proceso / completado) ── */}
         {tab!=="agrupado"&&(
           <>
             {lista.length===0&&(
               <div style={{textAlign:"center",color:C.t3,padding:"50px 20px"}}>
                 <div style={{fontSize:40,marginBottom:12}}>{tab==="pendiente"?"🎉":tab==="en_proceso"?"⚙️":"📋"}</div>
                 <div style={{fontSize:14}}>
-                  {tab==="pendiente"?"Sin turnos pendientes · se actualiza cada 20s":tab==="en_proceso"?"No hay turnos en proceso":"Sin completados hoy"}
+                  {tab==="pendiente"?"Sin turnos pendientes · actualiza cada 15s":tab==="en_proceso"?"No hay turnos en proceso":"Sin completados hoy"}
                 </div>
               </div>
             )}
@@ -270,12 +289,15 @@ function MontacargasApp(){
               const exp=!!expandido[t.id];
               const proc=!!procesando[t.id];
               const urgente=t.es_mde||t.prioridad==="urgente";
-              const fallido=t.estado==="fallido";
+              const accentCol=urgente?C.red:C.purple;
+              const nBaj=posiciones.filter(p=>p.bajada).length;
+              const todosBajados=posiciones.length>0&&nBaj===posiciones.length;
               const totalUnids=posiciones.reduce((s,p)=>(p.skus||[]).reduce((u,k)=>u+k.cant,s),0);
               const totalSKUs=posiciones.reduce((s,p)=>s+(p.skus||[]).length,0);
-              const accentCol=urgente?C.red:fallido?C.orange:C.purple;
               return(
-                <div key={t.id} style={{background:C.bg2,borderRadius:13,marginBottom:10,border:`1px solid ${urgente?C.red+"40":fallido?C.orange+"40":C.b0}`,borderLeft:`4px solid ${accentCol}`,animation:"fadeUp .2s ease both"}}>
+                <div key={t.id} style={{background:C.bg2,borderRadius:13,marginBottom:10,border:`1px solid ${urgente?C.red+"40":C.b0}`,borderLeft:`4px solid ${accentCol}`,animation:"fadeUp .2s ease both"}}>
+
+                  {/* Cabecera */}
                   <div onClick={()=>setExpandido(o=>({...o,[t.id]:!o[t.id]}))} style={{padding:"12px 14px",cursor:"pointer"}}>
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6}}>
                       <div style={{display:"flex",alignItems:"center",gap:8,flex:1,minWidth:0}}>
@@ -284,7 +306,11 @@ function MontacargasApp(){
                           <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
                             <span style={{fontFamily:"'JetBrains Mono',monospace",color:C.teal,fontWeight:800,fontSize:15}}>{t.picking}</span>
                             {urgente&&<span style={{background:`${C.red}20`,color:C.red,border:`1px solid ${C.red}40`,borderRadius:4,padding:"1px 6px",fontSize:8,fontWeight:800}}>🚨 URGENTE</span>}
-                            <span style={{background:`${C.purple}15`,color:C.purple,borderRadius:4,padding:"1px 6px",fontSize:8,fontWeight:700}}>{posiciones.length} pos</span>
+                            {t.estado==="en_proceso"&&(
+                              todosBajados
+                                ?<span style={{background:`${C.green}20`,color:C.green,borderRadius:4,padding:"1px 6px",fontSize:8,fontWeight:800,animation:"pop .3s ease"}}>✅ Todo en piso</span>
+                                :<span style={{background:`${C.orange}15`,color:C.orange,borderRadius:4,padding:"1px 6px",fontSize:8,fontWeight:700}}>{nBaj}/{posiciones.length} en piso</span>
+                            )}
                           </div>
                           <div style={{color:C.t2,fontSize:11,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",marginTop:2}}>{t.cliente}</div>
                         </div>
@@ -297,45 +323,79 @@ function MontacargasApp(){
                         <span style={{color:C.t3,fontSize:15,transform:exp?"rotate(90deg)":"none",transition:"transform .2s"}}>▶</span>
                       </div>
                     </div>
-                    <div style={{display:"flex",gap:10,fontSize:10,color:C.t3,flexWrap:"wrap",marginBottom:6}}>
+                    <div style={{display:"flex",gap:10,fontSize:10,color:C.t3,flexWrap:"wrap",marginBottom:exp?0:6}}>
                       <span>👷 {t.operario_solicitante}</span>
                       <span>📍 {t.ciudad}</span>
                       <span>🕐 {fmtHora(t.fecha_solicitud)}</span>
                       {t.montacarguista&&<span style={{color:C.teal}}>🏗️ {t.montacarguista}</span>}
                     </div>
-                    {!exp&&<div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                    {/* Barra de progreso (en_proceso) */}
+                    {t.estado==="en_proceso"&&posiciones.length>0&&(
+                      <div style={{marginTop:4}}>
+                        <div style={{height:4,background:C.b0,borderRadius:3,overflow:"hidden"}}>
+                          <div style={{height:"100%",width:`${Math.round(nBaj/posiciones.length*100)}%`,background:todosBajados?C.green:C.orange,transition:"width .4s"}}/>
+                        </div>
+                      </div>
+                    )}
+                    {!exp&&t.estado!=="en_proceso"&&<div style={{display:"flex",gap:4,flexWrap:"wrap",marginTop:4}}>
                       {posiciones.map((p,pi)=>(
-                        <span key={pi} style={{fontFamily:"'JetBrains Mono',monospace",background:C.bg3,border:`1px solid ${C.b0}`,borderRadius:5,padding:"2px 7px",fontSize:9,color:C.teal}}>{p.ubi}</span>
+                        <span key={pi} style={{fontFamily:"'JetBrains Mono',monospace",background:p.bajada?`${C.green}15`:C.bg3,border:`1px solid ${p.bajada?C.green+"40":C.b0}`,borderRadius:5,padding:"2px 7px",fontSize:9,color:p.bajada?C.green:C.teal}}>{p.ubi}{p.bajada?" ✓":""}</span>
                       ))}
                     </div>}
                   </div>
 
+                  {/* Detalle expandido */}
                   {exp&&(
                     <div style={{borderTop:`1px solid ${C.b0}`,padding:"8px 14px 10px"}}>
-                      {posiciones.map((pos,pi)=>(
-                        <div key={pi} style={{background:C.bg3,borderRadius:9,padding:"8px 10px",marginBottom:6,borderLeft:`3px solid ${C.purple}`}}>
-                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:5}}>
-                            <div style={{display:"flex",alignItems:"center",gap:7}}>
-                              <span style={{fontFamily:"'JetBrains Mono',monospace",color:C.teal,fontWeight:800,fontSize:14}}>{pos.ubi}</span>
-                              <span style={{fontSize:9,color:C.t3}}>{CALLE_NOM[pos.calleLetra]||pos.calleLetra} · Mód {pos.modulo} · Niv {pos.nivel}</span>
+                      {[...posiciones.map((p,i)=>({...p,_origIdx:i}))]
+                        .sort((a,b)=>{
+                          if(a.bajada&&!b.bajada)return 1;
+                          if(!a.bajada&&b.bajada)return -1;
+                          return(demandaMap[b.ubi]||0)-(demandaMap[a.ubi]||0);
+                        })
+                        .map((pos)=>{
+                        const pi=pos._origIdx;
+                        const keyBaj=`${t.id}-pos-${pi}`;
+                        const bajando=!!procesando[keyBaj];
+                        const esBajada=!!pos.bajada;
+                        const demanda=(demandaMap[pos.ubi]||0);
+                        const esPrioridad=!esBajada&&demanda>1;
+                        return(
+                          <div key={pi} style={{background:esBajada?`${C.green}10`:esPrioridad?`${C.yellow}08`:C.bg3,borderRadius:9,padding:"8px 10px",marginBottom:6,borderLeft:`3px solid ${esBajada?C.green:esPrioridad?C.yellow:C.purple}`,transition:"all .3s"}}>
+                            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:esBajada?0:5}}>
+                              <div style={{display:"flex",alignItems:"center",gap:7,flex:1,minWidth:0,flexWrap:"wrap"}}>
+                                <span style={{fontFamily:"'JetBrains Mono',monospace",color:esBajada?C.green:esPrioridad?C.yellow:C.teal,fontWeight:800,fontSize:14}}>{pos.ubi}</span>
+                                {esPrioridad&&<span style={{background:`${C.yellow}20`,color:C.yellow,border:`1px solid ${C.yellow}40`,borderRadius:4,padding:"1px 6px",fontSize:8,fontWeight:800,animation:"pop .3s ease"}}>⚡ {demanda} pedidos</span>}
+                                <span style={{fontSize:9,color:C.t3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{CALLE_NOM[pos.calleLetra]||pos.calleLetra} · Mód {pos.modulo} · Niv {pos.nivel}</span>
+                              </div>
+                              {t.estado==="en_proceso"
+                                ?esBajada
+                                  ?<span style={{color:C.green,fontSize:11,fontWeight:800,flexShrink:0,animation:"pop .3s ease"}}>✅ En piso</span>
+                                  :<button onClick={()=>marcarBajada(t.id,pi)} disabled={bajando}
+                                      style={{flexShrink:0,padding:"5px 12px",background:bajando?C.bg2:`linear-gradient(135deg,${C.green},${C.teal})`,border:"none",borderRadius:7,color:bajando?C.t3:C.bg0,fontSize:11,fontWeight:800,cursor:bajando?"not-allowed":"pointer",fontFamily:"inherit"}}>
+                                      {bajando?"...":"⬇ Bajar a piso"}
+                                    </button>
+                                :<span style={{fontFamily:"'JetBrains Mono',monospace",color:C.green,fontWeight:700,fontSize:12,flexShrink:0}}>{pos.totalSaldo}u</span>
+                              }
                             </div>
-                            <span style={{fontFamily:"'JetBrains Mono',monospace",color:C.green,fontWeight:700,fontSize:12}}>{pos.totalSaldo}u</span>
+                            {!esBajada&&(pos.skus||[]).map((s,si)=>(
+                              <div key={si} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"3px 0",borderTop:si>0?`1px solid ${C.b0}`:"none"}}>
+                                <div style={{display:"flex",alignItems:"center",gap:5}}>
+                                  <span style={{fontSize:8,background:`${C.accent}20`,color:C.accent,borderRadius:3,padding:"1px 4px",fontWeight:800}}>SKU</span>
+                                  <span style={{fontFamily:"'JetBrains Mono',monospace",color:C.accent,fontSize:11,fontWeight:700}}>{s.ref}</span>
+                                </div>
+                                <div style={{display:"flex",alignItems:"center",gap:6}}>
+                                  <span style={{color:C.t3,fontSize:9,maxWidth:90,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{(s.desc||"").slice(0,18)}</span>
+                                  <span style={{fontFamily:"'JetBrains Mono',monospace",color:C.yellow,fontSize:11,fontWeight:700}}>{s.cant}u</span>
+                                </div>
+                              </div>
+                            ))}
+                            {esBajada&&<div style={{color:C.green,fontSize:9,marginTop:4,fontWeight:600}}>
+                              {(pos.skus||[]).map(s=>`${s.ref} · ${s.cant}u`).join("  ·  ")}
+                            </div>}
                           </div>
-                          {(pos.skus||[]).map((s,si)=>(
-                            <div key={si} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"3px 0",borderTop:si>0?`1px solid ${C.b0}`:"none"}}>
-                              <div style={{display:"flex",alignItems:"center",gap:5}}>
-                                <span style={{fontSize:8,background:`${C.accent}20`,color:C.accent,borderRadius:3,padding:"1px 4px",fontWeight:800}}>SKU</span>
-                                <span style={{fontFamily:"'JetBrains Mono',monospace",color:C.accent,fontSize:11,fontWeight:700}}>{s.ref}</span>
-                              </div>
-                              <div style={{display:"flex",alignItems:"center",gap:6}}>
-                                <span style={{color:C.t3,fontSize:9,maxWidth:90,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{(s.desc||"").slice(0,18)}</span>
-                                <span style={{fontFamily:"'JetBrains Mono',monospace",color:C.yellow,fontSize:11,fontWeight:700}}>{s.cant}u</span>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      ))}
-                      {/* #8 motivo fallo si aplica */}
+                        );
+                      })}
                       {t.motivo_fallo&&<div style={{background:`${C.orange}10`,border:`1px solid ${C.orange}30`,borderRadius:8,padding:"6px 10px",marginTop:4}}>
                         <span style={{color:C.orange,fontSize:10,fontWeight:700}}>⚠️ Fallo: </span>
                         <span style={{color:C.t2,fontSize:10}}>{t.motivo_fallo}</span>
@@ -355,16 +415,14 @@ function MontacargasApp(){
                       <>
                         <div style={{display:"flex"}}>
                           <button onClick={()=>completarTurno(t.id)} disabled={proc}
-                            style={{flex:3,padding:"12px",background:proc?C.bg3:`linear-gradient(135deg,${C.green},${C.teal})`,border:"none",borderRadius:"0 0 0 12px",color:proc?C.t3:C.bg0,fontWeight:800,fontSize:13,cursor:proc?"not-allowed":"pointer",fontFamily:"inherit"}}>
-                            {proc?"Procesando...":"✅ Marcar completado"}
+                            style={{flex:3,padding:"12px",background:proc?C.bg3:todosBajados?`linear-gradient(135deg,${C.green},${C.teal})`:`${C.green}30`,border:"none",borderRadius:"0 0 0 12px",color:proc?C.t3:todosBajados?C.bg0:C.green,fontWeight:800,fontSize:12,cursor:proc?"not-allowed":"pointer",fontFamily:"inherit"}}>
+                            {proc?"Procesando...":todosBajados?"✅ Completar turno":`⬇ ${nBaj}/${posiciones.length} bajadas · Completar`}
                           </button>
-                          {/* #8 Botón reportar problema */}
                           <button onClick={()=>setReportando(r=>({...r,[t.id]:!r[t.id]}))}
                             style={{flex:1,padding:"12px",background:reportando[t.id]?`${C.red}30`:C.bg3,border:"none",borderLeft:`1px solid ${C.b0}`,borderRadius:"0 0 12px 0",color:C.red,fontWeight:800,fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>
                             ⚠️
                           </button>
                         </div>
-                        {/* #8 Panel de motivos */}
                         {reportando[t.id]&&(
                           <div style={{padding:"10px 14px",background:C.bg3,borderTop:`1px solid ${C.b0}`,borderRadius:"0 0 12px 12px"}}>
                             <div style={{color:C.t3,fontSize:10,marginBottom:8,fontWeight:700}}>¿Qué pasó? Selecciona el motivo:</div>
@@ -384,7 +442,7 @@ function MontacargasApp(){
                       <div style={{padding:"10px",textAlign:"center",color:t.estado==="fallido"?C.orange:C.green,fontSize:11,fontWeight:700}}>
                         {t.estado==="fallido"
                           ?`⚠️ Reportado: ${t.motivo_fallo||"problema"}`
-                          :`✅ Completado a las ${fmtHora(t.fecha_completado)} · por ${t.montacarguista}`
+                          :`✅ Completado a las ${fmtHora(t.fecha_completado)} · ${t.montacarguista}`
                         }
                       </div>
                     )}
@@ -395,16 +453,15 @@ function MontacargasApp(){
           </>
         )}
 
-        {/* ── TAB AGRUPADO (Ruta óptima por UBI) ── */}
+        {/* ── TAB RUTA AGRUPADA ── */}
         {tab==="agrupado"&&(
           <>
             {agrupadoPorUBI.length===0
               ?<div style={{textAlign:"center",color:C.t3,padding:"50px 20px"}}>
                 <div style={{fontSize:40,marginBottom:12}}>🎉</div>
-                <div style={{fontSize:14}}>Sin turnos pendientes · cola vacía</div>
+                <div style={{fontSize:14}}>Sin turnos pendientes</div>
               </div>
               :<div>
-                {/* Resumen */}
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginBottom:10}}>
                   {[
                     {l:"Posiciones",v:agrupadoPorUBI.length,c:C.purple},
@@ -416,7 +473,7 @@ function MontacargasApp(){
                     </div>
                   ))}
                 </div>
-                <div style={{fontSize:10,color:C.t3,marginBottom:8,textAlign:"center"}}>Posiciones con más pedidos primero · ordenadas por calle</div>
+                <div style={{fontSize:10,color:C.t3,marginBottom:8,textAlign:"center"}}>Un viaje por posición · baja para todos los pedidos de una sola vez</div>
                 {agrupadoPorUBI.map((pos,pi)=>{
                   const isMultiPed=pos.turnos.length>1;
                   const tieneUrgente=pos.turnos.some(t=>t.urgente);
@@ -445,7 +502,6 @@ function MontacargasApp(){
                             <span style={{color:C.t3,fontSize:14,transform:exp?"rotate(90deg)":"none",transition:"transform .2s"}}>▶</span>
                           </div>
                         </div>
-                        {/* Chips de pedidos colapsados */}
                         {!exp&&<div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
                           {pos.turnos.map((t,ti)=>(
                             <span key={ti} style={{fontFamily:"'JetBrains Mono',monospace",background:t.urgente?`${C.red}15`:C.bg3,border:`1px solid ${t.urgente?C.red+"40":C.b0}`,borderRadius:4,padding:"2px 6px",fontSize:9,color:t.urgente?C.red:C.teal}}>{t.picking}</span>

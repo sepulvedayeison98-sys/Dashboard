@@ -286,6 +286,7 @@ function PickingApp(){
   const [skuAbierto,setSkuAbierto]=useState({}); // SKUs expandidos para ver ubicaciones
   const [skuDetAbierto,setSkuDetAbierto]=useState({}); // SKUs expandidos en tab SKUs
   const [hechos,setHechos]=useState({}); // paradas completadas
+  const [turnoActivo,setTurnoActivo]=useState(null);
 
   const cargar=useCallback(async()=>{
     setPhase("loading");setErr("");
@@ -316,6 +317,16 @@ function PickingApp(){
     const ch=sb.channel("asig-pipe").on("postgres_changes",{event:"*",schema:"public",table:"asignaciones"},refrescar).subscribe();
     return()=>sb.removeChannel(ch);
   },[operario]);
+
+  // Polling turno activo del pedido seleccionado (para ver qué posiciones ya bajaron)
+  useEffect(()=>{
+    if(!sel){setTurnoActivo(null);return;}
+    const url=`${SUPA_URL}/rest/v1/turnos?picking=eq.${encodeURIComponent(sel.picking)}&estado=neq.completado&order=fecha_solicitud.desc&limit=1`;
+    const poll=async()=>{const{data:rows}=await _go(url);setTurnoActivo(rows&&rows.length?rows[0]:null);};
+    poll();
+    const timer=setInterval(poll,8000);
+    return()=>clearInterval(timer);
+  },[sel?.picking]);
 
   // Búsqueda de pedido por picking o pedidoSiesa
   const resultados=useMemo(()=>{
@@ -517,6 +528,9 @@ function PickingApp(){
 
   // Detectar si ya se recogió todo el piso (para prompt auto-agendar)
   const pisoTerminado=recorrido.piso.length>0&&recorrido.piso.every((_,i)=>hechos[`piso-${i}`]);
+  const bajadas=new Set((turnoActivo?.posiciones||[]).filter(p=>p.bajada).map(p=>p.ubi));
+  const nBajadas=bajadas.size;
+  const nAlturaTotal=(turnoActivo?.posiciones||[]).length;
 
   // ═══════════ PANTALLAS ═══════════
   if(phase==="login")return(
@@ -620,6 +634,22 @@ function PickingApp(){
           <button onClick={()=>setModo("altura")} style={{flex:1,padding:"11px",borderRadius:10,border:`1px solid ${modo==="altura"?C.purple:C.b0}`,background:modo==="altura"?`${C.purple}18`:C.bg2,color:modo==="altura"?C.purple:C.t3,fontWeight:700,fontSize:13}}>⬆ Altura ({viajesAltura.length} viajes)</button>
         </div>
 
+        {/* Banner turno montacargas activo */}
+        {turnoActivo&&(
+          <div style={{margin:"0 12px 8px",background:nBajadas===nAlturaTotal&&nAlturaTotal>0?`${C.green}15`:`${C.purple}12`,border:`1px solid ${nBajadas===nAlturaTotal&&nAlturaTotal>0?C.green+"50":C.purple+"40"}`,borderRadius:10,padding:"8px 12px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:8}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,minWidth:0}}>
+              <span style={{fontSize:16,flexShrink:0}}>{nBajadas===nAlturaTotal&&nAlturaTotal>0?"✅":"🏗️"}</span>
+              <div style={{minWidth:0}}>
+                <div style={{color:nBajadas===nAlturaTotal&&nAlturaTotal>0?C.green:C.purple,fontSize:11,fontWeight:800,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
+                  {nBajadas===nAlturaTotal&&nAlturaTotal>0?"¡Todo en piso!":turnoActivo.montacarguista?`${turnoActivo.montacarguista} bajando...`:"Turno en cola"}
+                </div>
+                <div style={{color:C.t3,fontSize:9}}>{nBajadas}/{nAlturaTotal} posiciones en piso</div>
+              </div>
+            </div>
+            <div style={{fontFamily:"'JetBrains Mono',monospace",color:nBajadas===nAlturaTotal&&nAlturaTotal>0?C.green:C.orange,fontWeight:800,fontSize:14,flexShrink:0}}>{nAlturaTotal>0?Math.round(nBajadas/nAlturaTotal*100):0}%</div>
+          </div>
+        )}
+
         {/* Progreso */}
         {(()=>{
           const listaP=modo==="piso"?recorrido.piso:viajesAltura;
@@ -669,18 +699,20 @@ function PickingApp(){
               {viajesAltura.map((v,vi)=>{
                 const isMulti=v.skus.length>1;
                 const hecho=hechos[`altura-${vi}`];
+                const enPiso=bajadas.has(v.ubi);
                 const totalCubre=v.skus.reduce((t,s)=>t+s.cubre,0);
                 const cajasCompletas=Math.floor(totalCubre/CAJA);
                 return(
-                  <div key={v.ubi} style={{borderBottom:vi<viajesAltura.length-1?`1px solid ${C.b0}`:"none",background:hecho?`${C.green}08`:vi%2===0?C.bg1:"transparent",opacity:hecho?0.5:1,transition:"opacity .3s"}}>
+                  <div key={v.ubi} style={{borderBottom:vi<viajesAltura.length-1?`1px solid ${C.b0}`:"none",background:enPiso?`${C.green}12`:hecho?`${C.green}08`:vi%2===0?C.bg1:"transparent",opacity:hecho?0.5:1,transition:"opacity .3s",borderLeft:enPiso?`3px solid ${C.green}`:undefined}}>
                     {/* Cabecera del viaje */}
                     <div style={{padding:"10px 12px 6px",display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:6}}>
                       <div style={{display:"flex",alignItems:"center",gap:8,flex:1,minWidth:0}}>
-                        <div style={{width:26,height:26,borderRadius:"50%",background:`${isMulti?C.yellow:C.purple}20`,color:isMulti?C.yellow:C.purple,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:11,flexShrink:0}}>{vi+1}</div>
+                        <div style={{width:26,height:26,borderRadius:"50%",background:`${enPiso?C.green:isMulti?C.yellow:C.purple}20`,color:enPiso?C.green:isMulti?C.yellow:C.purple,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:11,flexShrink:0}}>{vi+1}</div>
                         <div style={{minWidth:0}}>
                           <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
-                            <span style={{fontFamily:"'JetBrains Mono',monospace",color:C.teal,fontWeight:800,fontSize:16}}>{v.ubi}</span>
-                            {isMulti&&<span style={{background:`${C.yellow}20`,color:C.yellow,border:`1px solid ${C.yellow}40`,borderRadius:4,padding:"1px 6px",fontSize:8,fontWeight:700}}>{v.skus.length} SKUs</span>}
+                            <span style={{fontFamily:"'JetBrains Mono',monospace",color:enPiso?C.green:C.teal,fontWeight:800,fontSize:16}}>{v.ubi}</span>
+                            {enPiso&&<span style={{background:`${C.green}20`,color:C.green,border:`1px solid ${C.green}40`,borderRadius:4,padding:"1px 6px",fontSize:8,fontWeight:800,animation:"pop .3s ease"}}>✅ En piso</span>}
+                            {!enPiso&&isMulti&&<span style={{background:`${C.yellow}20`,color:C.yellow,border:`1px solid ${C.yellow}40`,borderRadius:4,padding:"1px 6px",fontSize:8,fontWeight:700}}>{v.skus.length} SKUs</span>}
                           </div>
                           <div style={{color:C.t3,fontSize:9,marginTop:2}}>{CALLE_NOM[v.calleLetra]} · Mód {v.modulo} · Niv {v.nivel}</div>
                         </div>
