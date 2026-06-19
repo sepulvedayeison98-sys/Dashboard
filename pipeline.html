@@ -2091,10 +2091,28 @@ function PickingApp() {
           fontSize: 9
         }
       }, s.cajas.length, " caja", s.cajas.length !== 1 ? "s" : ""))))), /*#__PURE__*/React.createElement("button", {
-        onClick: () => setHechos(h => ({
-          ...h,
-          [`altura-${vi}`]: !h[`altura-${vi}`]
-        })),
+        onClick: async () => {
+          const nuevoVal = !hechos[`altura-${vi}`];
+          setHechos(h => ({ ...h, [`altura-${vi}`]: nuevoVal }));
+          // Sincronizar con Supabase si hay turno activo
+          if (sb && turnoActivo && turnoActivo.estado !== "completado" && turnoActivo.estado !== "fallido") {
+            const posIdx = (turnoActivo.posiciones || []).findIndex(p => p.ubi === v.ubi);
+            if (posIdx >= 0) {
+              const ts = new Date().toISOString();
+              const nuevasPos = turnoActivo.posiciones.map((p, i) =>
+                i === posIdx ? { ...p, bajada: nuevoVal, bajada_ts: nuevoVal ? ts : null } : p
+              );
+              await sb.from("turnos").update({ posiciones: nuevasPos }).eq("id", turnoActivo.id);
+              if (nuevoVal && nuevasPos.every(p => p.bajada || p.fallo)) {
+                await sb.from("turnos").update({
+                  estado: "completado",
+                  montacarguista: operario || "picker",
+                  fecha_completado: new Date().toISOString()
+                }).eq("id", turnoActivo.id);
+              }
+            }
+          }
+        },
         className: "btn-main",
         style: {
           width: "100%",
