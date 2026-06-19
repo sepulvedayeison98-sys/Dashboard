@@ -115,6 +115,19 @@ const sb = {
           Prefer: "resolution=merge-duplicates,return=minimal"
         },
         body: JSON.stringify(body)
+      }),
+      update: body => ({
+        eq: (col, val) => _go(`${base}?${col}=eq.${encodeURIComponent(val)}`, {
+          method: "PATCH",
+          headers: { ..._H, Prefer: "return=minimal" },
+          body: JSON.stringify(body)
+        })
+      }),
+      delete: () => ({
+        eq: (col, val) => _go(`${base}?${col}=eq.${encodeURIComponent(val)}`, {
+          method: "DELETE",
+          headers: { ..._H, Prefer: "return=minimal" }
+        })
       })
     };
   },
