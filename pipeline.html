@@ -8,9 +8,10 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <style>
   *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
-  body{background:#070b14;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#e8edf5;overflow-x:hidden;}
+  body{background:#05080f;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#e8edf5;overflow-x:hidden;}
   #root{min-height:100vh;}
   input{font-family:inherit;}
   ::-webkit-scrollbar{width:0;height:0;}
@@ -19,6 +20,14 @@
   @keyframes pulse-glow{0%,100%{box-shadow:0 0 0 0 rgba(168,85,247,.5)}60%{box-shadow:0 0 16px 3px rgba(168,85,247,.12)}}
   .mono{font-family:'JetBrains Mono','SF Mono',monospace;}
   .btn-pulse{animation:pulse-glow 2s ease-in-out infinite}
+  .card{transition:box-shadow .2s;}
+  .card:active{box-shadow:0 0 0 1px rgba(56,189,248,.3) inset;}
+  .row-item{transition:background .15s,opacity .3s;}
+  .btn-main{transition:all .15s;letter-spacing:.3px;}
+  .btn-main:active{transform:scale(.97);}
+  .tag{display:inline-flex;align-items:center;gap:3px;border-radius:5px;padding:2px 7px;font-size:9px;font-weight:700;letter-spacing:.4px;}
+  ::-webkit-scrollbar{width:0;height:0;}
+  ::selection{background:#38bdf820;}
 </style>
 </head>
 <body>
@@ -61,11 +70,15 @@ const sb = {
 
 // ═══════════ PALETA ═══════════
 const C={
-  bg0:"#070b14",bg1:"#0d1320",bg2:"#131b2e",bg3:"#1a2438",
-  b0:"#1f2b42",b1:"#2a3854",
-  t1:"#e8edf5",t2:"#a8b5cc",t3:"#6b7a96",t4:"#46546e",
-  teal:"#2dd4bf",accent:"#3b82f6",green:"#22c55e",yellow:"#eab308",
-  orange:"#f97316",red:"#ef4444",purple:"#a855f7",
+  bg0:"#05080f",bg1:"#080d19",bg2:"#0c1220",bg3:"#111a2c",
+  b0:"#182236",b1:"#1f2d45",
+  t1:"#dde6f8",t2:"#6f84a8",t3:"#3f5270",t4:"#283548",
+  teal:"#38bdf8",accent:"#818cf8",green:"#34d399",yellow:"#fbbf24",
+  orange:"#fb923c",red:"#fb7185",purple:"#c084fc",
+  // dims usados en badges/backgrounds
+  greenDim:"#34d39914",yellowDim:"#fbbf2414",tealDim:"#38bdf814",
+  accentDim:"#818cf814",orangeDim:"#fb923c14",purpleDim:"#c084fc14",
+  redDim:"#fb718514",
 };
 
 // ═══════════ HELPERS (misma lógica que el master) ═══════════
@@ -98,7 +111,7 @@ function procesar(wbInv,wbFact){
   const invCasco=invRows.filter(r=>{
     const linea=String(r["Linea"]||"").trim();
     const desc=String(r["Descripcion"]||"");
-    return linea==="CASCO"&&!esEXPO(desc)&&MARCAS.includes(marcaDe(desc));
+    return linea==="CASCO"&&MARCAS.includes(marcaDe(desc));
   });
   if(invCasco.length===0)throw new Error("No se encontraron SKUs CASCO ICH en el inventario.");
 
@@ -297,6 +310,8 @@ function PickingApp(){
   const [skuDetAbierto,setSkuDetAbierto]=useState({}); // SKUs expandidos en tab SKUs
   const [hechos,setHechos]=useState({}); // paradas completadas
   const [turnoActivo,setTurnoActivo]=useState(null);
+  const [notifs,setNotifs]=useState([]); // notificaciones en tiempo real del montacarguista
+  const prevTurnoRef=useRef(null);
 
   const cargar=useCallback(async()=>{
     setPhase("loading");setErr("");
@@ -328,15 +343,60 @@ function PickingApp(){
     return()=>sb.removeChannel(ch);
   },[operario]);
 
-  // Polling turno activo del pedido seleccionado (para ver qué posiciones ya bajaron)
+  // Polling + Realtime: turno activo del pedido seleccionado
   useEffect(()=>{
-    if(!sel){setTurnoActivo(null);return;}
-    const url=`${SUPA_URL}/rest/v1/turnos?picking=eq.${encodeURIComponent(sel.picking)}&estado=neq.completado&order=fecha_solicitud.desc&limit=1`;
-    const poll=async()=>{const{data:rows}=await _go(url);setTurnoActivo(rows&&rows.length?rows[0]:null);};
+    if(!sel){setTurnoActivo(null);prevTurnoRef.current=null;return;}
+    const url=`${SUPA_URL}/rest/v1/turnos?picking=eq.${encodeURIComponent(sel.picking)}&order=fecha_solicitud.desc&limit=1`;
+    const poll=async()=>{
+      const{data:rows}=await _go(url);
+      const nuevo=rows&&rows.length?rows[0]:null;
+      const prev=prevTurnoRef.current;
+      // Detectar cambios y generar notificaciones
+      if(nuevo&&prev&&nuevo.id===prev.id){
+        const nBaj=(nuevo.posiciones||[]).filter(p=>p.bajada).length;
+        const pBaj=(prev.posiciones||[]).filter(p=>p.bajada).length;
+        if(nBaj>pBaj){
+          const nuevasBaj=(nuevo.posiciones||[]).filter((p,i)=>p.bajada&&!((prev.posiciones||[])[i]||{}).bajada);
+          const ubis=nuevasBaj.map(p=>p.ubi).join(', ');
+          setNotifs(n=>[...n,{id:Date.now(),tipo:'bajada',msg:`⬇ Bajado: ${ubis}`,by:nuevo.montacarguista||"Montacargas"}]);
+        }
+        // Detectar fallos por posición nuevos
+        const nFalloPos=(nuevo.posiciones||[]).filter(p=>p.fallo).length;
+        const pFalloPos=(prev.posiciones||[]).filter(p=>p.fallo).length;
+        if(nFalloPos>pFalloPos){
+          const nuevosFallos=(nuevo.posiciones||[]).filter((p,i)=>p.fallo&&!((prev.posiciones||[])[i]||{}).fallo);
+          nuevosFallos.forEach(p=>{
+            setNotifs(n=>[...n,{id:Date.now()+(Math.random()*100|0),tipo:'fallo',msg:`⚠ ${p.ubi}: ${p.motivo_fallo||'Sin motivo'}`,by:nuevo.montacarguista||"Montacargas"}]);
+          });
+        }
+        if(nuevo.estado==='completado'&&prev.estado!=='completado'){
+          setNotifs(n=>[...n,{id:Date.now(),tipo:'ok',msg:`✅ Turno completado`,by:nuevo.montacarguista||"Montacargas"}]);
+        }
+      }
+      prevTurnoRef.current=nuevo;
+      setTurnoActivo(nuevo);
+    };
+    prevTurnoRef.current=null; // reset al cambiar de pedido
     poll();
-    const timer=setInterval(poll,8000);
-    return()=>clearInterval(timer);
+    const timer=setInterval(poll,10000);
+    let rtClient=null;
+    try{
+      rtClient=window.supabase?.createClient(SUPA_URL,SUPA_KEY);
+      if(rtClient){
+        rtClient.channel(`turno-pipe-${sel.picking}`)
+          .on("postgres_changes",{event:"*",schema:"public",table:"turnos",filter:`picking=eq.${encodeURIComponent(sel.picking)}`},()=>poll())
+          .subscribe();
+      }
+    }catch(e){}
+    return()=>{clearInterval(timer);try{rtClient?.removeAllChannels();}catch(e){}};
   },[sel?.picking]);
+
+  // Auto-dismiss notificaciones después de 6s
+  useEffect(()=>{
+    if(!notifs.length)return;
+    const t=setTimeout(()=>setNotifs(n=>n.slice(1)),6000);
+    return()=>clearTimeout(t);
+  },[notifs.length]);
 
   // Búsqueda de pedido por picking o pedidoSiesa
   const resultados=useMemo(()=>{
@@ -449,10 +509,21 @@ function PickingApp(){
 
   const agendarTurno=async()=>{
     if(!sb||!operario||!sel)return;
+    // Guard: bloquear si ya hay turno activo para este picking
+    const{data:yaActivo}=await _go(`${SUPA_URL}/rest/v1/turnos?picking=eq.${encodeURIComponent(sel.picking)}&estado=in.(pendiente,en_proceso)&select=id&limit=1`);
+    if(yaActivo?.length){
+      setTurnosEnviados(o=>({...o,[sel.picking]:true}));
+      return;
+    }
+    // Heredar posiciones ya bajadas de turnos completados anteriores
+    const{data:prevT}=await _go(`${SUPA_URL}/rest/v1/turnos?picking=eq.${encodeURIComponent(sel.picking)}&estado=eq.completado&select=posiciones`);
+    const yaBajadas=new Set();
+    if(prevT)prevT.forEach(t=>(t.posiciones||[]).filter(p=>p.bajada).forEach(p=>yaBajadas.add(p.ubi)));
     const posiciones=viajesAltura.map(v=>({
       ubi:v.ubi,calleLetra:v.calleLetra,modulo:v.modulo,nivel:v.nivel,
       skus:v.skus.map(s=>({ref:s.ref,desc:s.desc,cant:s.pide,saldo:s.disp})),
-      totalSaldo:v.totalDisp
+      totalSaldo:v.totalDisp,
+      ...(yaBajadas.has(v.ubi)?{bajada:true}:{})
     }));
     const{error}=await sb.from("turnos").insert({
       picking:sel.picking,pedido_siesa:sel.pedSiesa||"",
@@ -484,6 +555,17 @@ function PickingApp(){
       prioridad:"normal",es_mde:false
     });
     setUbiTurnosEnviados(o=>({...o,[k]:error?"error":"ok"}));
+  };
+
+  const limpiarBandeja=async()=>{
+    if(!window.confirm("¿Limpiar todos los turnos completados y fallidos?\nEsta acción no se puede deshacer."))return;
+    const{data:doneT}=await _go(`${SUPA_URL}/rest/v1/turnos?estado=in.(completado,fallido)&select=id,picking`);
+    if(!doneT?.length)return;
+    await _go(`${SUPA_URL}/rest/v1/turnos?estado=in.(completado,fallido)`,{method:"DELETE",headers:{..._H,Prefer:"return=minimal"}});
+    const picklist=doneT.map(t=>encodeURIComponent(t.picking)).join(",");
+    if(picklist)await _go(`${SUPA_URL}/rest/v1/asignaciones?picking=in.(${picklist})`,{method:"DELETE",headers:{..._H,Prefer:"return=minimal"}});
+    const{data:rows}=await _go(`${SUPA_URL}/rest/v1/asignaciones?estado=eq.en_proceso&select=picking,operario,estado`);
+    if(rows){const m={};rows.forEach(r=>{m[r.picking]=r;});setAsignaciones(m);}
   };
 
   const clasifCol={despachable:C.green,parcial:C.yellow,reabasto:C.orange,ruptura:C.red};
@@ -593,6 +675,28 @@ function PickingApp(){
   if(sel){
     return(
       <div style={{minHeight:"100vh",paddingBottom:30}}>
+        {/* ── Overlay notificaciones montacarguista ── */}
+        {notifs.length>0&&(
+          <div style={{position:"fixed",top:14,right:14,zIndex:1000,display:"flex",flexDirection:"column",gap:6,maxWidth:300}}>
+            {notifs.slice(-3).map(n=>(
+              <div key={n.id} style={{
+                background:n.tipo==='fallo'?`${C.red}f0`:n.tipo==='ok'?`${C.green}f0`:`${C.teal}f0`,
+                border:`1px solid ${n.tipo==='fallo'?C.red:n.tipo==='ok'?C.green:C.teal}`,
+                borderRadius:12,padding:"10px 14px",
+                boxShadow:"0 6px 24px #00000060",
+                animation:"fadeUp .3s ease"
+              }}>
+                <div style={{display:"flex",alignItems:"flex-start",gap:8}}>
+                  <div style={{flex:1}}>
+                    <div style={{color:"#fff",fontWeight:800,fontSize:12}}>{n.msg}</div>
+                    <div style={{color:"rgba(255,255,255,.65)",fontSize:9,marginTop:2}}>{n.by}</div>
+                  </div>
+                  <button onClick={()=>setNotifs(ns=>ns.filter(x=>x.id!==n.id))} style={{background:"none",border:"none",color:"rgba(255,255,255,.6)",cursor:"pointer",fontSize:15,padding:"0 0 0 4px",lineHeight:1}}>✕</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
         {/* Header pedido */}
         <div style={{position:"sticky",top:0,zIndex:10,background:C.bg1,borderBottom:`1px solid ${C.b0}`,padding:"14px 16px"}}>
           <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
@@ -615,27 +719,39 @@ function PickingApp(){
         </div>
 
         {/* ── Botón Agendar Turno (visible siempre que haya altura) ── */}
-        {recorrido.altura.length>0&&operario&&(
-          turnosEnviados[sel.picking]
-            ?<div style={{margin:"8px 14px 4px",padding:"10px 14px",background:`${C.green}12`,border:`1px solid ${C.green}30`,borderRadius:11,display:"flex",alignItems:"center",gap:10}}>
-               <span style={{fontSize:18}}>✅</span>
-               <div>
-                 <div style={{color:C.green,fontWeight:700,fontSize:12}}>Turno agendado</div>
-                 <div style={{color:C.t3,fontSize:10}}>El montacarguista ya lo ve en su cola</div>
-               </div>
-             </div>
-            :<div style={{padding:"8px 14px 4px"}}>
-               {/* #2 Banner auto-prompt cuando piso terminado */}
-               {pisoTerminado&&<div style={{background:`${C.purple}18`,border:`1px solid ${C.purple}40`,borderRadius:9,padding:"7px 12px",marginBottom:6,display:"flex",alignItems:"center",gap:8}}>
-                 <span style={{fontSize:14}}>🎯</span>
-                 <span style={{color:C.purple,fontSize:11,fontWeight:700}}>¡Piso completo! Agenda el viaje de altura.</span>
-               </div>}
-               <button onClick={agendarTurno} className={pisoTerminado?"btn-pulse":""} style={{width:"100%",padding:"13px",background:`linear-gradient(135deg,${C.purple},${C.accent})`,border:"none",borderRadius:11,color:"#fff",fontWeight:800,fontSize:14,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8,fontFamily:"inherit"}}>
-                 <span style={{fontSize:16}}>🔔</span>
-                 <span>Agendar Turno al Montacarguista</span>
-               </button>
-             </div>
-        )}
+        {recorrido.altura.length>0&&operario&&(()=>{
+          const turnoEnCurso=turnoActivo&&turnoActivo.estado!=="completado"&&turnoActivo.estado!=="fallido";
+          const yaEnviado=turnosEnviados[sel.picking]||turnoEnCurso;
+          if(yaEnviado){
+            const enProceso=turnoActivo?.estado==="en_proceso";
+            const enCola=turnoActivo?.estado==="pendiente";
+            return(
+              <div style={{margin:"8px 14px 4px",padding:"10px 14px",background:enProceso?`${C.orange}12`:`${C.green}12`,border:`1px solid ${enProceso?C.orange+"30":C.green+"30"}`,borderRadius:11,display:"flex",alignItems:"center",gap:10}}>
+                <span style={{fontSize:18}}>{enProceso?"⬇️":"✅"}</span>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{color:enProceso?C.orange:C.green,fontWeight:700,fontSize:12}}>
+                    {enProceso
+                      ?`${turnoActivo.montacarguista||"Montacargas"} ya está bajando`
+                      :enCola?"Turno en cola · esperando montacargas":"Turno agendado"}
+                  </div>
+                  <div style={{color:C.t3,fontSize:10}}>No se puede duplicar — el turno ya está activo</div>
+                </div>
+              </div>
+            );
+          }
+          return(
+            <div style={{padding:"8px 14px 4px"}}>
+              {pisoTerminado&&<div style={{background:`${C.purple}18`,border:`1px solid ${C.purple}40`,borderRadius:9,padding:"7px 12px",marginBottom:6,display:"flex",alignItems:"center",gap:8}}>
+                <span style={{fontSize:14}}>🎯</span>
+                <span style={{color:C.purple,fontSize:11,fontWeight:700}}>¡Piso completo! Agenda el viaje de altura.</span>
+              </div>}
+              <button onClick={agendarTurno} className={pisoTerminado?"btn-pulse":""} style={{width:"100%",padding:"13px",background:`linear-gradient(135deg,${C.purple},${C.accent})`,border:"none",borderRadius:11,color:"#fff",fontWeight:800,fontSize:14,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8,fontFamily:"inherit"}}>
+                <span style={{fontSize:16}}>🔔</span>
+                <span>Agendar Turno al Montacarguista</span>
+              </button>
+            </div>
+          );
+        })()}
 
         {/* ── Resumen del pedido ── */}
         {(()=>{
@@ -667,33 +783,116 @@ function PickingApp(){
         </div>
 
         {/* Banner turno montacargas activo */}
-        {turnoActivo&&(
-          <div style={{margin:"0 12px 8px",background:nBajadas===nAlturaTotal&&nAlturaTotal>0?`${C.green}15`:`${C.purple}12`,border:`1px solid ${nBajadas===nAlturaTotal&&nAlturaTotal>0?C.green+"50":C.purple+"40"}`,borderRadius:10,padding:"8px 12px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:8}}>
-            <div style={{display:"flex",alignItems:"center",gap:8,minWidth:0}}>
-              <span style={{fontSize:16,flexShrink:0}}>{nBajadas===nAlturaTotal&&nAlturaTotal>0?"✅":"🏗️"}</span>
-              <div style={{minWidth:0}}>
-                <div style={{color:nBajadas===nAlturaTotal&&nAlturaTotal>0?C.green:C.purple,fontSize:11,fontWeight:800,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
-                  {nBajadas===nAlturaTotal&&nAlturaTotal>0?"¡Todo en piso!":turnoActivo.montacarguista?`${turnoActivo.montacarguista} bajando...`:"Turno en cola"}
+        {turnoActivo&&(()=>{
+          const completado=turnoActivo.estado==="completado";
+          const todosPiso=nBajadas===nAlturaTotal&&nAlturaTotal>0;
+          const listo=completado||todosPiso;
+          const montacarguista=turnoActivo.montacarguista||"";
+          const bgColor=listo?`${C.green}18`:nBajadas>0?`${C.orange}14`:`${C.purple}12`;
+          const borderColor=listo?C.green+"50":nBajadas>0?C.orange+"50":C.purple+"40";
+          const textColor=listo?C.green:nBajadas>0?C.orange:C.purple;
+          const icon=listo?"✅":nBajadas>0?"⬇️":"🏗️";
+          const titulo=listo
+            ?`¡Todo en piso! ${montacarguista?`· ${montacarguista}`:""}`
+            :nBajadas>0
+              ?`${montacarguista||"Montacargas"} bajando... ${nBajadas}/${nAlturaTotal}`
+              :montacarguista?`${montacarguista} en camino`:"Turno en cola";
+          const pct=nAlturaTotal>0?Math.round(nBajadas/nAlturaTotal*100):0;
+          const barCol=listo?C.green:C.orange;
+          return(
+            <div style={{margin:"0 12px 8px",background:bgColor,border:`1px solid ${borderColor}`,borderRadius:10,padding:"8px 12px 10px",
+              boxShadow:listo?`0 0 12px ${C.green}30`:nBajadas>0?`0 0 10px ${C.orange}20`:"none",transition:"all .4s"}}>
+              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:nAlturaTotal>0?6:0}}>
+                <span style={{fontSize:16,flexShrink:0}}>{icon}</span>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{color:textColor,fontSize:11,fontWeight:800,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{titulo}</div>
+                  <div style={{color:C.t3,fontSize:9}}>{nBajadas}/{nAlturaTotal} posiciones en piso{completado?" · turno completado":""}</div>
                 </div>
-                <div style={{color:C.t3,fontSize:9}}>{nBajadas}/{nAlturaTotal} posiciones en piso</div>
+                <div style={{fontFamily:"'JetBrains Mono',monospace",color:textColor,fontWeight:800,fontSize:18,flexShrink:0,lineHeight:1}}>
+                  {pct}<span style={{fontSize:9,fontWeight:600,color:C.t3}}>%</span>
+                </div>
+              </div>
+              {nAlturaTotal>0&&(
+                <div style={{height:6,background:C.b0,borderRadius:5,overflow:"hidden"}}>
+                  <div style={{height:"100%",width:`${pct}%`,
+                    background:listo?barCol:`linear-gradient(90deg,${barCol}99,${barCol})`,
+                    borderRadius:5,transition:"width .5s cubic-bezier(.4,0,.2,1)",
+                    boxShadow:pct>0?`0 0 8px ${barCol}60`:"none"}}/>
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
+        {/* ── Log de actividad del turno ── */}
+        {turnoActivo&&(()=>{
+          const eventos=[];
+          (turnoActivo.posiciones||[]).forEach(p=>{
+            if(p.bajada)eventos.push({tipo:'bajada',ts:p.bajada_ts,icon:'⬇',col:C.green,msg:p.ubi,sub:(p.skus||[]).map(s=>s.ref).join(' · ')});
+            if(p.fallo)eventos.push({tipo:'fallo_pos',ts:p.fallo_ts,icon:'⚠',col:C.red,msg:p.ubi,sub:p.motivo_fallo||'Sin motivo'});
+          });
+          if(turnoActivo.estado==='completado')eventos.push({tipo:'ok',ts:turnoActivo.fecha_completado,icon:'✓',col:C.green,msg:'Turno completado',sub:''});
+          eventos.sort((a,b)=>new Date(a.ts||0)-new Date(b.ts||0));
+          if(!eventos.length)return null;
+          return(
+            <div style={{padding:"0 12px 6px"}}>
+              <div style={{background:C.bg2,border:`1px solid ${C.b0}`,borderRadius:10,overflow:"hidden"}}>
+                <div style={{padding:"7px 12px",borderBottom:`1px solid ${C.b0}`,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                  <div style={{fontSize:9,fontWeight:700,color:C.t3,textTransform:"uppercase",letterSpacing:".5px"}}>📋 Actividad</div>
+                  <div style={{fontSize:9,color:C.t4}}>{turnoActivo.montacarguista||"Montacargas"}</div>
+                </div>
+                {eventos.map((e,i)=>(
+                  <div key={i} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 12px",borderBottom:i<eventos.length-1?`1px solid ${C.b0}`:"none",
+                    background:e.tipo==='fallo'?`${C.red}08`:e.tipo==='ok'?`${C.green}08`:"transparent"}}>
+                    <span style={{color:e.col,fontSize:12,width:14,textAlign:"center",flexShrink:0}}>{e.icon}</span>
+                    <div style={{flex:1,minWidth:0}}>
+                      <span style={{color:e.tipo==='bajada'?C.t1:e.col,fontSize:11,fontWeight:700,fontFamily:"'JetBrains Mono',monospace"}}>{e.msg}</span>
+                      {e.sub&&<span style={{color:C.t4,fontSize:9,marginLeft:6}}>{e.sub}</span>}
+                    </div>
+                    <span style={{color:C.t4,fontSize:9,flexShrink:0}}>{e.ts?fmtHora(e.ts):"—"}</span>
+                  </div>
+                ))}
               </div>
             </div>
-            <div style={{fontFamily:"'JetBrains Mono',monospace",color:nBajadas===nAlturaTotal&&nAlturaTotal>0?C.green:C.orange,fontWeight:800,fontSize:14,flexShrink:0}}>{nAlturaTotal>0?Math.round(nBajadas/nAlturaTotal*100):0}%</div>
-          </div>
-        )}
+          );
+        })()}
 
         {/* Progreso */}
         {(()=>{
           const listaP=modo==="piso"?recorrido.piso:viajesAltura;
+          const total=listaP.length;
           const hechosCnt=listaP.filter((_,i)=>hechos[`${modo}-${i}`]).length;
+          const pct=total>0?Math.round(hechosCnt/total*100):0;
+          const col=modo==="piso"?C.green:C.purple;
+          const done=hechosCnt===total&&total>0;
           return(
-            <div style={{padding:"0 16px 10px"}}>
-              <div style={{display:"flex",justifyContent:"space-between",fontSize:10,color:C.t3,marginBottom:4}}>
-                <span>Recorrido {modo==="piso"?"a pie · por calle":"montacargas · optimizado"}</span>
-                <span>{hechosCnt}/{listaP.length} {modo==="piso"?"paradas":"viajes"}</span>
-              </div>
-              <div style={{height:5,background:C.b0,borderRadius:3,overflow:"hidden"}}>
-                <div style={{height:"100%",width:`${listaP.length?hechosCnt/listaP.length*100:0}%`,background:modo==="piso"?C.green:C.purple,transition:"width .3s"}}/>
+            <div style={{padding:"6px 14px 12px"}}>
+              <div style={{background:C.bg2,border:`1px solid ${done?col+"40":C.b0}`,borderRadius:12,padding:"11px 14px",transition:"border-color .4s"}}>
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
+                  <div>
+                    <div style={{fontSize:10,fontWeight:700,color:C.t2,letterSpacing:".5px",textTransform:"uppercase"}}>
+                      {modo==="piso"?"Recorrido piso":"Viajes montacargas"}
+                    </div>
+                    <div style={{fontSize:11,color:done?col:C.t3,marginTop:2,fontWeight:done?700:400}}>
+                      {done?"✓ Completado":`${hechosCnt} de ${total} ${modo==="piso"?"paradas":"viajes"}`}
+                    </div>
+                  </div>
+                  <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:28,fontWeight:900,color:done?col:pct>0?col:C.t4,lineHeight:1,transition:"color .4s"}}>
+                    {pct}<span style={{fontSize:12,fontWeight:600,color:C.t3}}>%</span>
+                  </div>
+                </div>
+                <div style={{height:8,background:C.b0,borderRadius:6,overflow:"hidden"}}>
+                  <div style={{
+                    height:"100%",
+                    width:`${pct}%`,
+                    background:done
+                      ?col
+                      :`linear-gradient(90deg,${col}99,${col})`,
+                    borderRadius:6,
+                    transition:"width .5s cubic-bezier(.4,0,.2,1)",
+                    boxShadow:pct>0?`0 0 10px ${col}60`:"none"
+                  }}/>
+                </div>
               </div>
             </div>
           );
@@ -735,7 +934,8 @@ function PickingApp(){
                 const totalCubre=v.skus.reduce((t,s)=>t+s.cubre,0);
                 const cajasCompletas=Math.floor(totalCubre/CAJA);
                 return(
-                  <div key={v.ubi} style={{borderBottom:vi<viajesAltura.length-1?`1px solid ${C.b0}`:"none",background:enPiso?`${C.green}12`:hecho?`${C.green}08`:vi%2===0?C.bg1:"transparent",opacity:hecho?0.5:1,transition:"opacity .3s",borderLeft:enPiso?`3px solid ${C.green}`:undefined}}>
+                  <div key={v.ubi} style={{borderBottom:vi<viajesAltura.length-1?`1px solid ${C.b0}`:"none",background:enPiso?`${C.green}10`:hecho?`${C.b0}60`:"transparent",opacity:hecho?0.55:1,transition:"all .3s",position:"relative"}}>
+                    {enPiso&&<div style={{position:"absolute",left:0,top:0,bottom:0,width:2,background:C.green,borderRadius:1}}/>}
                     {/* Cabecera del viaje */}
                     <div style={{padding:"10px 12px 6px",display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:6}}>
                       <div style={{display:"flex",alignItems:"center",gap:8,flex:1,minWidth:0}}>
@@ -772,8 +972,8 @@ function PickingApp(){
                       ))}
                     </div>
                     {/* Botón marcar viaje hecho */}
-                    <button onClick={()=>setHechos(h=>({...h,[`altura-${vi}`]:!h[`altura-${vi}`]}))} style={{width:"100%",padding:"8px",background:hecho?`${C.green}15`:C.bg3,border:"none",borderTop:`1px solid ${C.b0}`,color:hecho?C.green:C.t2,fontWeight:700,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>
-                      {hecho?"✓ Viaje completado":"Marcar viaje completado"}
+                    <button onClick={()=>setHechos(h=>({...h,[`altura-${vi}`]:!h[`altura-${vi}`]}))} className="btn-main" style={{width:"100%",padding:"10px",background:hecho?`${C.green}20`:`${C.b1}80`,border:"none",borderTop:`1px solid ${C.b0}`,color:hecho?C.green:C.t3,fontWeight:700,fontSize:11,cursor:"pointer",fontFamily:"inherit",letterSpacing:".3px"}}>
+                      {hecho?"✓ Viaje marcado · toca para deshacer":"Marcar viaje como completado"}
                     </button>
                   </div>
                 );
@@ -884,8 +1084,8 @@ function PickingApp(){
                     </div>
                   </div>
                   {/* Botón hecho */}
-                  <button onClick={()=>setHechos(h=>({...h,[key]:!h[key]}))} style={{width:"100%",padding:"9px",background:hecho?`${C.green}15`:C.bg3,border:"none",borderTop:`1px solid ${C.b0}`,color:hecho?C.green:C.t2,fontWeight:700,fontSize:12,borderRadius:"0 0 11px 11px"}}>
-                    {hecho?"✓ Recogido":"Marcar recogido"}
+                  <button onClick={()=>setHechos(h=>({...h,[key]:!h[key]}))} className="btn-main" style={{width:"100%",padding:"10px",background:hecho?`${C.green}20`:`${C.b1}80`,border:"none",borderTop:`1px solid ${C.b0}`,color:hecho?C.green:C.t3,fontWeight:700,fontSize:12,borderRadius:"0 0 11px 11px",letterSpacing:".3px"}}>
+                    {hecho?"✓ Recogido · toca para deshacer":"Marcar recogido"}
                   </button>
                 </div>
               );
@@ -907,6 +1107,7 @@ function PickingApp(){
           </div>
           <div style={{marginLeft:"auto",display:"flex",gap:6,alignItems:"center"}}>
             <button onClick={cargar} style={{background:C.bg3,border:`1px solid ${C.b0}`,color:C.t3,borderRadius:8,padding:"7px 11px",fontSize:11}}>↻</button>
+            <button onClick={limpiarBandeja} style={{background:`${C.red}15`,border:`1px solid ${C.red}35`,color:C.red,borderRadius:8,padding:"7px 10px",fontSize:13}} title="Limpiar completados">🗑</button>
             <button onClick={()=>{setOperario(null);setPhase("login");setData(null);setAsignaciones({});}} style={{background:C.bg3,border:`1px solid ${C.b0}`,color:C.t3,borderRadius:8,padding:"7px 10px",fontSize:11}} title="Cambiar operario">⇦</button>
           </div>
         </div>
@@ -973,7 +1174,8 @@ function PickingApp(){
                 const esMio=asig&&asig.operario===operario;
                 const esOtro=asig&&asig.operario!==operario;
                 return(
-                <div key={i} onClick={()=>abrirPedido(p)} style={{background:C.bg2,borderRadius:12,marginBottom:8,border:`1px solid ${esOtro?C.orange+"40":C.b0}`,borderLeft:`4px solid ${clasifCol[p.clasif]}`,padding:"13px 15px",animation:"fadeUp .2s ease both",cursor:"pointer"}}>
+                <div key={i} onClick={()=>abrirPedido(p)} className="card" style={{background:C.bg2,borderRadius:13,marginBottom:9,border:`1px solid ${esOtro?C.orange+"50":C.b1}`,padding:"14px 15px",animation:"fadeUp .2s ease both",cursor:"pointer",boxShadow:"0 1px 3px #00000030",position:"relative",overflow:"hidden"}}>
+                  <div style={{position:"absolute",left:0,top:0,bottom:0,width:3,background:clasifCol[p.clasif],borderRadius:"13px 0 0 13px"}}/>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:5}}>
                     <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
                       <span style={{fontFamily:"'JetBrains Mono',monospace",color:C.teal,fontWeight:800,fontSize:15}}>{p.picking}</span>
@@ -985,14 +1187,14 @@ function PickingApp(){
                   </div>
                   <div style={{color:C.t2,fontSize:12,marginBottom:7,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.cliente}</div>
                   {/* Mini KPIs */}
-                  <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:4,marginBottom:7}}>
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:5,marginBottom:8,marginLeft:6}}>
                     {[
                       {l:"Cajas piso",v:cajasP,sub:sueltosP>0?`+${sueltosP}u`:"",c:C.green},
                       {l:"Unids total",v:p.uni,sub:`${p.nLineas}L`,c:C.teal},
                       {l:"SKUs alt.",v:skusAlt,sub:skusAlt>0?"altura":"solo piso",c:skusAlt>0?C.purple:C.t4},
                       {l:"Sin stock",v:sinSt,sub:sinSt>0?"gestionar":"ok",c:sinSt>0?C.red:C.t4},
                     ].map(k=>(
-                      <div key={k.l} style={{background:C.bg1,borderRadius:6,padding:"4px 3px",textAlign:"center"}}>
+                      <div key={k.l} style={{background:C.bg3,borderRadius:7,padding:"6px 4px",textAlign:"center",border:`1px solid ${C.b0}`}}>
                         <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:13,fontWeight:800,color:k.c,lineHeight:1}}>{k.v}</div>
                         <div style={{fontSize:7,color:C.t4,fontWeight:600,marginTop:2}}>{k.l}</div>
                         {k.sub&&<div style={{fontSize:7,color:C.t3}}>{k.sub}</div>}
