@@ -417,7 +417,10 @@ function MontacargasApp(){
                         .sort((a,b)=>{
                           if(a.bajada&&!b.bajada)return 1;
                           if(!a.bajada&&b.bajada)return -1;
-                          return(demandaMap[b.ubi]||0)-(demandaMap[a.ubi]||0);
+                          return(CALLE_ORD[a.calleLetra]||9)-(CALLE_ORD[b.calleLetra]||9)
+                            ||(a.modulo||0)-(b.modulo||0)
+                            ||(a.nivel||0)-(b.nivel||0)
+                            ||(demandaMap[b.ubi]||0)-(demandaMap[a.ubi]||0);
                         })
                         .map((pos)=>{
                         const pi=pos._origIdx;
