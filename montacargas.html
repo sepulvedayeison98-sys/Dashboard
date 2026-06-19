@@ -6,7 +6,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>INDUCASOS · Montacargas v5</title>
+<title>INDUCASOS · Montacargas v6</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
@@ -465,18 +465,23 @@ function MontacargasApp(){
                                   :<span style={{fontFamily:"'JetBrains Mono',monospace",color:C.green,fontWeight:700,fontSize:12,flexShrink:0}}>{pos.totalSaldo}u</span>
                                 }
                               </div>
-                              {!esBajada&&!esFalloPosicion&&!reportandoEstePosicion&&(pos.skus||[]).map((s,si)=>(
+                              {!esBajada&&!esFalloPosicion&&!reportandoEstePosicion&&(pos.skus||[]).map((s,si)=>{
+                                const tipo=s.tipo||((s.desc||'').split(' ')[1]||'');
+                                const modelo=(s.desc||'').match(/[A-Z]{2,5}-(\w+)/i)?.[1]||'';
+                                return(
                                 <div key={si} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"3px 0",borderTop:si>0?`1px solid ${C.b0}`:"none"}}>
                                   <div style={{display:"flex",alignItems:"center",gap:5,flexWrap:"wrap"}}>
                                     <span style={{fontSize:8,background:`${C.accent}20`,color:C.accent,borderRadius:3,padding:"1px 4px",fontWeight:800}}>SKU</span>
                                     <span style={{fontFamily:"'JetBrains Mono',monospace",color:C.accent,fontSize:11,fontWeight:700}}>{s.ref}</span>
-                                    {s.tipo&&<span style={{fontSize:8,background:`${C.purple}20`,color:C.purple,border:`1px solid ${C.purple}30`,borderRadius:3,padding:"1px 5px",fontWeight:800,letterSpacing:.3}}>{s.tipo}</span>}
+                                    {tipo&&<span style={{fontSize:8,background:`${C.purple}20`,color:C.purple,border:`1px solid ${C.purple}30`,borderRadius:3,padding:"1px 5px",fontWeight:800,letterSpacing:.3}}>{tipo}</span>}
+                                    {modelo&&<span style={{fontSize:8,background:`${C.teal}15`,color:C.teal,border:`1px solid ${C.teal}30`,borderRadius:3,padding:"1px 5px",fontWeight:700}}>{modelo}</span>}
                                   </div>
                                   <div style={{display:"flex",alignItems:"center",gap:6}}>
                                     <span style={{fontFamily:"'JetBrains Mono',monospace",color:C.yellow,fontSize:11,fontWeight:700}}>{s.cant}u</span>
                                   </div>
                                 </div>
-                              ))}
+                                );
+                              })}
                               {esBajada&&<div style={{color:C.green,fontSize:9,marginTop:4,fontWeight:600}}>
                                 {(pos.skus||[]).map(s=>`${s.ref} · ${s.cant}u`).join("  ·  ")}
                               </div>}
