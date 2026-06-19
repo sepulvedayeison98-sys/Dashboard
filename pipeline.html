@@ -6,7 +6,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>INDUCASOS · Picking Móvil v6</title>
+<title>INDUCASOS · Picking Móvil v7</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -502,7 +502,7 @@ function LoginForm({
       fontSize: 12,
       marginTop: 4
     }
-  }, "Picking Móvil · CEDI ITAGUÍ · v6")), /*#__PURE__*/React.createElement("div", {
+  }, "Picking Móvil · CEDI ITAGUÍ · v7")), /*#__PURE__*/React.createElement("div", {
     style: {
       background: C.bg2,
       borderRadius: 16,
@@ -704,6 +704,20 @@ function PickingApp() {
     return () => clearTimeout(t);
   }, [notifs.length]);
 
+  // Cargar historial de bajadas manuales (tab "bajadas")
+  useEffect(() => {
+    if (tab !== "bajadas" || !operario) return;
+    const cargar = async () => {
+      setBajadasCargando(true);
+      const { data: rows } = await _go(`${SUPA_URL}/rest/v1/turnos?picking=like.UBI-*&operario_solicitante=eq.${encodeURIComponent(operario)}&order=fecha_solicitud.desc&limit=60`);
+      if (rows) setMisBajadas(rows);
+      setBajadasCargando(false);
+    };
+    cargar();
+    const timer = setInterval(cargar, 12000);
+    return () => clearInterval(timer);
+  }, [tab, operario]);
+
   // Búsqueda de pedido por picking o pedidoSiesa
   const resultados = useMemo(() => {
     if (!data) return [];
@@ -721,8 +735,10 @@ function PickingApp() {
   const [buscaSKU, setBuscaSKU] = useState("");
   const [buscaUBI, setBuscaUBI] = useState("");
   const [ubiTurnosEnviados, setUbiTurnosEnviados] = useState({});
-  const [tab, setTab] = useState("pedidos"); // pedidos | skus | viajes | ubi
+  const [tab, setTab] = useState("pedidos"); // pedidos | skus | viajes | ubi | bajadas
   const [filtroClasif, setFiltroClasif] = useState(""); // "" | despachable | parcial | reabasto | ruptura
+  const [misBajadas, setMisBajadas] = useState([]);
+  const [bajadascargando, setBajadasCargando] = useState(false);
 
   // ── Plan Global de Viajes (Regla 1: cross-pedido) ──────────────────────────
   const planGlobal = useMemo(() => {
@@ -2623,35 +2639,6 @@ function PickingApp() {
       fontSize: 11
     }
   }, "🔍 SKUs"), /*#__PURE__*/React.createElement("button", {
-    onClick: () => setTab("viajes"),
-    style: {
-      flex: 1,
-      padding: "9px",
-      borderRadius: 9,
-      border: `1px solid ${tab === "viajes" ? C.purple : C.b0}`,
-      background: tab === "viajes" ? `${C.purple}18` : C.bg2,
-      color: tab === "viajes" ? C.purple : C.t3,
-      fontWeight: 700,
-      fontSize: 11,
-      position: "relative"
-    }
-  }, "⬆ Viajes", planGlobal.length > 0 && /*#__PURE__*/React.createElement("span", {
-    style: {
-      position: "absolute",
-      top: -4,
-      right: -4,
-      background: C.purple,
-      color: "#fff",
-      borderRadius: "50%",
-      width: 16,
-      height: 16,
-      fontSize: 8,
-      fontWeight: 800,
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center"
-    }
-  }, planGlobal.length)), /*#__PURE__*/React.createElement("button", {
     onClick: () => setTab("ubi"),
     style: {
       flex: 1,
@@ -2663,7 +2650,28 @@ function PickingApp() {
       fontWeight: 700,
       fontSize: 11
     }
-  }, "📍 UBI")), tab === "pedidos" ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("input", {
+  }, "📍 UBI"), /*#__PURE__*/React.createElement("button", {
+    onClick: () => setTab("bajadas"),
+    style: {
+      flex: 1,
+      padding: "9px",
+      borderRadius: 9,
+      border: `1px solid ${tab === "bajadas" ? C.green : C.b0}`,
+      background: tab === "bajadas" ? `${C.green}18` : C.bg2,
+      color: tab === "bajadas" ? C.green : C.t3,
+      fontWeight: 700,
+      fontSize: 11,
+      position: "relative"
+    }
+  }, "⬇ Bajadas", misBajadas.filter(t => t.estado === "pendiente" || t.estado === "en_proceso").length > 0 && /*#__PURE__*/React.createElement("span", {
+    style: {
+      position: "absolute", top: -4, right: -4,
+      background: C.green, color: "#fff",
+      borderRadius: "50%", width: 16, height: 16,
+      fontSize: 8, fontWeight: 800,
+      display: "flex", alignItems: "center", justifyContent: "center"
+    }
+  }, misBajadas.filter(t => t.estado === "pendiente" || t.estado === "en_proceso").length))), tab === "pedidos" ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("input", {
     value: busca,
     onChange: e => {
       setBusca(e.target.value);
@@ -3441,371 +3449,7 @@ function PickingApp() {
         }
       }, cj.saldo, "u")))));
     }))));
-  })), tab === "viajes" && (planGlobal.length === 0 ? /*#__PURE__*/React.createElement("div", {
-    style: {
-      textAlign: "center",
-      color: C.t3,
-      padding: "40px 20px"
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 36,
-      marginBottom: 12
-    }
-  }, "✅"), /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 14,
-      marginBottom: 6
-    }
-  }, "Sin viajes de altura pendientes"), /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 11,
-      color: C.t4
-    }
-  }, "Todos los pedidos se cubren desde piso")) : /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "grid",
-      gridTemplateColumns: "repeat(3,1fr)",
-      gap: 6,
-      marginBottom: 12
-    }
-  }, [{
-    l: "Viajes",
-    v: planGlobal.length,
-    c: C.purple
-  }, {
-    l: "Pedidos",
-    v: [...new Set(planGlobal.flatMap(v => v.items.map(i => i.picking)))].length,
-    c: C.teal
-  }, {
-    l: "Líneas",
-    v: planGlobal.reduce((t, v) => t + v.items.length, 0),
-    c: C.yellow
-  }].map(k => /*#__PURE__*/React.createElement("div", {
-    key: k.l,
-    style: {
-      background: C.bg2,
-      borderRadius: 9,
-      padding: "10px 6px",
-      textAlign: "center",
-      border: `1px solid ${C.b0}`
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontFamily: "'JetBrains Mono',monospace",
-      fontSize: 22,
-      fontWeight: 800,
-      color: k.c,
-      lineHeight: 1
-    }
-  }, k.v), /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 8,
-      color: C.t4,
-      fontWeight: 700,
-      textTransform: "uppercase",
-      marginTop: 4
-    }
-  }, k.l)))), planGlobal.map((v, vi) => {
-    const isMultiPed = v.nPedidos > 1;
-    // Agrupar items por SKU para mostrar consolidado
-    const porSKU = {};
-    v.items.forEach(it => {
-      if (!porSKU[it.ref]) porSKU[it.ref] = {
-        ref: it.ref,
-        desc: it.desc,
-        pedidos: [],
-        totalPide: 0,
-        totalCubre: 0
-      };
-      porSKU[it.ref].pedidos.push({
-        picking: it.picking,
-        pedSiesa: it.pedSiesa,
-        cliente: it.cliente,
-        clasif: it.clasif,
-        pide: it.pide,
-        cubre: it.cubre,
-        falta: it.falta
-      });
-      porSKU[it.ref].totalPide += it.pide;
-      porSKU[it.ref].totalCubre += it.cubre;
-    });
-    const skuList = Object.values(porSKU).sort((a, b) => b.totalPide - a.totalPide);
-    const totalUnids = skuList.reduce((t, s) => t + s.totalPide, 0);
-    const cajasTotal = Math.floor(totalUnids / CAJA);
-    const vKey = `viaje-${v.ubi}`;
-    const abierto = skuDetAbierto[vKey];
-    return /*#__PURE__*/React.createElement("div", {
-      key: v.ubi,
-      style: {
-        background: C.bg2,
-        borderRadius: 12,
-        marginBottom: 8,
-        border: `1px solid ${isMultiPed ? C.yellow + "40" : C.b0}`,
-        borderLeft: `4px solid ${isMultiPed ? C.yellow : C.purple}`,
-        animation: "fadeUp .2s ease both"
-      }
-    }, /*#__PURE__*/React.createElement("div", {
-      onClick: () => setSkuDetAbierto(o => ({
-        ...o,
-        [vKey]: !o[vKey]
-      })),
-      style: {
-        padding: "12px 14px",
-        cursor: "pointer"
-      }
-    }, /*#__PURE__*/React.createElement("div", {
-      style: {
-        display: "flex",
-        justifyContent: "space-between",
-        alignItems: "flex-start",
-        marginBottom: 6
-      }
-    }, /*#__PURE__*/React.createElement("div", {
-      style: {
-        display: "flex",
-        alignItems: "center",
-        gap: 8,
-        flex: 1,
-        minWidth: 0
-      }
-    }, /*#__PURE__*/React.createElement("div", {
-      style: {
-        width: 26,
-        height: 26,
-        borderRadius: "50%",
-        background: `${isMultiPed ? C.yellow : C.purple}20`,
-        color: isMultiPed ? C.yellow : C.purple,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        fontWeight: 800,
-        fontSize: 11,
-        flexShrink: 0
-      }
-    }, vi + 1), /*#__PURE__*/React.createElement("div", {
-      style: {
-        minWidth: 0
-      }
-    }, /*#__PURE__*/React.createElement("div", {
-      style: {
-        display: "flex",
-        alignItems: "center",
-        gap: 7,
-        flexWrap: "wrap"
-      }
-    }, /*#__PURE__*/React.createElement("span", {
-      style: {
-        fontFamily: "'JetBrains Mono',monospace",
-        color: C.teal,
-        fontWeight: 800,
-        fontSize: 16
-      }
-    }, v.ubi), isMultiPed && /*#__PURE__*/React.createElement("span", {
-      style: {
-        background: `${C.yellow}20`,
-        color: C.yellow,
-        border: `1px solid ${C.yellow}40`,
-        borderRadius: 4,
-        padding: "1px 6px",
-        fontSize: 8,
-        fontWeight: 700
-      }
-    }, v.nPedidos, " pedidos"), /*#__PURE__*/React.createElement("span", {
-      style: {
-        background: `${C.purple}18`,
-        color: C.purple,
-        borderRadius: 4,
-        padding: "1px 6px",
-        fontSize: 8,
-        fontWeight: 700
-      }
-    }, skuList.length, " SKU", skuList.length !== 1 ? "s" : "")), /*#__PURE__*/React.createElement("div", {
-      style: {
-        color: C.t3,
-        fontSize: 9,
-        marginTop: 2
-      }
-    }, CALLE_NOM[v.calleLetra], " · Mód ", v.modulo, " · Niv ", v.nivel))), /*#__PURE__*/React.createElement("div", {
-      style: {
-        textAlign: "right",
-        flexShrink: 0,
-        display: "flex",
-        alignItems: "center",
-        gap: 8
-      }
-    }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
-      style: {
-        fontFamily: "'JetBrains Mono',monospace",
-        color: C.green,
-        fontWeight: 800,
-        fontSize: 15,
-        lineHeight: 1
-      }
-    }, totalUnids, "u"), /*#__PURE__*/React.createElement("div", {
-      style: {
-        color: C.t4,
-        fontSize: 8
-      }
-    }, cajasTotal > 0 ? `${cajasTotal} caja${cajasTotal !== 1 ? "s" : ""}` : "", cajasTotal > 0 && totalUnids % CAJA > 0 ? "+" : "", totalUnids % CAJA > 0 ? `${totalUnids % CAJA}u` : "")), /*#__PURE__*/React.createElement("span", {
-      style: {
-        color: C.t3,
-        fontSize: 16,
-        transform: abierto ? "rotate(90deg)" : "none",
-        transition: "transform .2s"
-      }
-    }, "▶"))), !abierto && /*#__PURE__*/React.createElement("div", {
-      style: {
-        display: "flex",
-        gap: 4,
-        flexWrap: "wrap",
-        marginTop: 4
-      }
-    }, skuList.slice(0, 4).map(s => /*#__PURE__*/React.createElement("span", {
-      key: s.ref,
-      style: {
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 3,
-        background: C.bg3,
-        borderRadius: 4,
-        padding: "2px 7px",
-        fontSize: 9,
-        fontFamily: "'JetBrains Mono',monospace",
-        color: C.accent,
-        border: `1px solid ${C.accent}25`
-      }
-    }, /*#__PURE__*/React.createElement("span", {
-      style: {
-        fontSize: 7,
-        background: `${C.accent}25`,
-        borderRadius: 2,
-        padding: "0 3px",
-        fontWeight: 800,
-        letterSpacing: .5
-      }
-    }, "SKU"), s.ref)), skuList.length > 4 && /*#__PURE__*/React.createElement("span", {
-      style: {
-        color: C.t3,
-        fontSize: 9
-      }
-    }, "+", skuList.length - 4, " más"))), abierto && /*#__PURE__*/React.createElement("div", {
-      style: {
-        borderTop: `1px solid ${C.b0}`,
-        padding: "8px 14px 12px"
-      }
-    }, skuList.map(s => /*#__PURE__*/React.createElement("div", {
-      key: s.ref,
-      style: {
-        background: C.bg3,
-        borderRadius: 8,
-        padding: "8px 10px",
-        marginBottom: 6,
-        borderLeft: `3px solid ${s.totalCubre < s.totalPide ? C.orange : C.green}`
-      }
-    }, /*#__PURE__*/React.createElement("div", {
-      style: {
-        display: "flex",
-        justifyContent: "space-between",
-        alignItems: "center",
-        marginBottom: 4
-      }
-    }, /*#__PURE__*/React.createElement("div", {
-      style: {
-        display: "flex",
-        alignItems: "center",
-        gap: 5
-      }
-    }, /*#__PURE__*/React.createElement("span", {
-      style: {
-        fontSize: 8,
-        background: `${C.accent}25`,
-        color: C.accent,
-        borderRadius: 3,
-        padding: "1px 5px",
-        fontWeight: 800,
-        letterSpacing: .5
-      }
-    }, "SKU"), /*#__PURE__*/React.createElement("span", {
-      style: {
-        fontFamily: "'JetBrains Mono',monospace",
-        color: C.accent,
-        fontWeight: 700,
-        fontSize: 13
-      }
-    }, s.ref)), /*#__PURE__*/React.createElement("span", {
-      style: {
-        fontFamily: "'JetBrains Mono',monospace",
-        color: C.yellow,
-        fontSize: 11,
-        fontWeight: 700
-      }
-    }, "total ", s.totalPide, "u")), /*#__PURE__*/React.createElement("div", {
-      style: {
-        color: C.t4,
-        fontSize: 9,
-        marginBottom: 6
-      }
-    }, (s.desc || "").slice(0, 42)), s.pedidos.map((p, pi) => /*#__PURE__*/React.createElement("div", {
-      key: pi,
-      style: {
-        display: "flex",
-        alignItems: "center",
-        gap: 6,
-        padding: "4px 0",
-        borderTop: pi > 0 ? `1px solid ${C.b0}` : "none"
-      }
-    }, /*#__PURE__*/React.createElement("div", {
-      style: {
-        display: "flex",
-        alignItems: "center",
-        gap: 4,
-        flexShrink: 0
-      }
-    }, /*#__PURE__*/React.createElement("span", {
-      style: {
-        fontSize: 7,
-        background: `${C.teal}20`,
-        color: C.teal,
-        borderRadius: 3,
-        padding: "1px 4px",
-        fontWeight: 800,
-        letterSpacing: .5
-      }
-    }, "PED"), /*#__PURE__*/React.createElement("span", {
-      style: {
-        fontFamily: "'JetBrains Mono',monospace",
-        color: C.teal,
-        fontSize: 10,
-        fontWeight: 700
-      }
-    }, p.picking)), /*#__PURE__*/React.createElement("span", {
-      style: {
-        color: C.t3,
-        fontSize: 9,
-        flex: 1,
-        overflow: "hidden",
-        textOverflow: "ellipsis",
-        whiteSpace: "nowrap"
-      }
-    }, (p.cliente || "").slice(0, 18)), /*#__PURE__*/React.createElement("span", {
-      style: {
-        background: `${clasifCol[p.clasif]}18`,
-        color: clasifCol[p.clasif],
-        borderRadius: 3,
-        padding: "1px 5px",
-        fontSize: 8,
-        fontWeight: 700
-      }
-    }, clasifLbl[p.clasif]?.slice(0, 4)), /*#__PURE__*/React.createElement("span", {
-      style: {
-        fontFamily: "'JetBrains Mono',monospace",
-        color: p.falta > 0 ? C.orange : C.green,
-        fontSize: 10,
-        fontWeight: 700
-      }
-    }, p.pide, "u")))))));
-  }))), tab === "ubi" && (() => {
+  })), tab === "ubi" && (() => {
     const q = buscaUBI.trim().toUpperCase();
     const ubiInfo = q.length >= 4 && data?.ubiMap?.[q] || null;
     const yaEnviado = ubiTurnosEnviados[q];
@@ -4029,6 +3673,72 @@ function PickingApp() {
         fontSize: 16
       }
     }, "⬇"), /*#__PURE__*/React.createElement("span", null, yaEnviado === "loading" ? "Agendando..." : "Agendar bajada de esta posición")));
+  })(), tab === "bajadas" && (() => {
+    if (!operario) return /*#__PURE__*/React.createElement("div", {
+      style: { textAlign: "center", color: C.t3, padding: "40px 20px" }
+    }, /*#__PURE__*/React.createElement("div", { style: { fontSize: 36, marginBottom: 12 } }, "⬇"),
+    /*#__PURE__*/React.createElement("div", { style: { fontSize: 13, color: C.t2 } }, "Selecciona un operario primero"));
+    if (bajadascargando && misBajadas.length === 0) return /*#__PURE__*/React.createElement("div", {
+      style: { textAlign: "center", color: C.t3, padding: "40px 20px" }
+    }, "Cargando...");
+    if (misBajadas.length === 0) return /*#__PURE__*/React.createElement("div", {
+      style: { textAlign: "center", color: C.t3, padding: "40px 20px" }
+    }, /*#__PURE__*/React.createElement("div", { style: { fontSize: 36, marginBottom: 12 } }, "⬇"),
+    /*#__PURE__*/React.createElement("div", { style: { fontSize: 14, marginBottom: 6, color: C.t2 } }, "Sin bajadas registradas"),
+    /*#__PURE__*/React.createElement("div", { style: { fontSize: 11, color: C.t4, maxWidth: 260, margin: "0 auto" } }, "Las bajadas que agendes en la pestaña UBI aparecen aquí"));
+    const eCol = { pendiente: C.yellow, en_proceso: C.orange, completado: C.green, fallido: C.red };
+    const eLbl = { pendiente: "Pendiente", en_proceso: "En proceso", completado: "✓ Listo", fallido: "Fallido" };
+    return /*#__PURE__*/React.createElement("div", null,
+      misBajadas.map((t, ti) => {
+        const ubi = (t.picking || "").replace("UBI-", "");
+        const col = eCol[t.estado] || C.t3;
+        const pos0 = (t.posiciones || [])[0] || {};
+        const skus = pos0.skus || [];
+        const ts = t.fecha_solicitud ? new Date(t.fecha_solicitud) : null;
+        const tsStr = ts ? ts.toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" }) + " · " + ts.toLocaleDateString("es-CO", { day: "2-digit", month: "short" }) : "";
+        return /*#__PURE__*/React.createElement("div", {
+          key: t.id || ti,
+          style: {
+            background: C.bg2, borderRadius: 12, marginBottom: 8,
+            border: `1px solid ${col}25`, borderLeft: `4px solid ${col}`,
+            animation: "fadeUp .2s ease both"
+          }
+        }, /*#__PURE__*/React.createElement("div", { style: { padding: "12px 14px" } },
+          /*#__PURE__*/React.createElement("div", {
+            style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: skus.length ? 8 : 0 }
+          },
+            /*#__PURE__*/React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
+              /*#__PURE__*/React.createElement("span", {
+                style: { fontFamily: "'JetBrains Mono',monospace", color: C.teal, fontWeight: 800, fontSize: 17 }
+              }, ubi),
+              /*#__PURE__*/React.createElement("span", {
+                style: { background: `${col}20`, color: col, borderRadius: 5, padding: "2px 8px", fontSize: 9, fontWeight: 700, border: `1px solid ${col}40` }
+              }, eLbl[t.estado] || t.estado)
+            ),
+            /*#__PURE__*/React.createElement("div", { style: { textAlign: "right" } },
+              /*#__PURE__*/React.createElement("div", { style: { color: C.t4, fontSize: 9 } }, tsStr),
+              t.montacarguista && /*#__PURE__*/React.createElement("div", { style: { color: C.t3, fontSize: 9, marginTop: 2 } }, "👤 ", t.montacarguista)
+            )
+          ),
+          skus.length > 0 && /*#__PURE__*/React.createElement("div", { style: { display: "flex", gap: 4, flexWrap: "wrap" } },
+            skus.map((s, si) => /*#__PURE__*/React.createElement("span", {
+              key: si,
+              style: {
+                display: "inline-flex", alignItems: "center", gap: 3,
+                background: C.bg3, borderRadius: 4, padding: "2px 7px",
+                fontSize: 9, fontFamily: "'JetBrains Mono',monospace",
+                color: C.accent, border: `1px solid ${C.accent}25`
+              }
+            },
+              /*#__PURE__*/React.createElement("span", {
+                style: { fontSize: 7, background: `${C.accent}25`, borderRadius: 2, padding: "0 3px", fontWeight: 800, letterSpacing: .5 }
+              }, "SKU"),
+              s.ref
+            ))
+          )
+        ));
+      })
+    );
   })()));
 }
 ReactDOM.createRoot(document.getElementById("root")).render(/*#__PURE__*/React.createElement(PickingApp, null));
