@@ -1738,7 +1738,7 @@ function PickingApp() {
     })(), (() => {
       const listaP = modo === "piso" ? recorrido.piso : viajesAltura;
       const total = listaP.length;
-      const hechosCnt = listaP.filter((_, i) => hechos[`${modo}-${i}`]).length;
+      const hechosCnt = modo === "altura" ? bajadas.size : listaP.filter((_, i) => hechos[`piso-${i}`]).length;
       const pct = total > 0 ? Math.round(hechosCnt / total * 100) : 0;
       const col = modo === "piso" ? C.green : C.purple;
       const done = hechosCnt === total && total > 0;
@@ -1900,15 +1900,15 @@ function PickingApp() {
       }
     }, k.v)))), viajesAltura.map((v, vi) => {
       const isMulti = v.skus.length > 1;
-      const hecho = hechos[`altura-${vi}`];
       const enPiso = bajadas.has(v.ubi);
+      const hecho = enPiso; // fuente de verdad: bajada confirmada en Supabase
       const totalCubre = v.skus.reduce((t, s) => t + s.cubre, 0);
       const cajasCompletas = Math.floor(totalCubre / CAJA);
       return /*#__PURE__*/React.createElement("div", {
         key: v.ubi,
         style: {
           borderBottom: vi < viajesAltura.length - 1 ? `1px solid ${C.b0}` : "none",
-          background: enPiso ? `${C.green}10` : hecho ? `${C.b0}60` : "transparent",
+          background: hecho ? `${C.green}10` : "transparent",
           opacity: hecho ? 0.55 : 1,
           transition: "all .3s",
           position: "relative"
@@ -2092,9 +2092,7 @@ function PickingApp() {
         }
       }, s.cajas.length, " caja", s.cajas.length !== 1 ? "s" : ""))))), /*#__PURE__*/React.createElement("button", {
         onClick: async () => {
-          const nuevoVal = !hechos[`altura-${vi}`];
-          setHechos(h => ({ ...h, [`altura-${vi}`]: nuevoVal }));
-          // Sincronizar con Supabase si hay turno activo
+          const nuevoVal = !enPiso; // toggle del estado real de Supabase
           if (sb && turnoActivo && turnoActivo.estado !== "completado" && turnoActivo.estado !== "fallido") {
             const posIdx = (turnoActivo.posiciones || []).findIndex(p => p.ubi === v.ubi);
             if (posIdx >= 0) {
