@@ -2093,22 +2093,23 @@ function PickingApp() {
       }, s.cajas.length, " caja", s.cajas.length !== 1 ? "s" : ""))))), /*#__PURE__*/React.createElement("button", {
         onClick: async () => {
           const nuevoVal = !enPiso; // toggle del estado real de Supabase
-          if (sb && turnoActivo && turnoActivo.estado !== "completado" && turnoActivo.estado !== "fallido") {
-            const posIdx = (turnoActivo.posiciones || []).findIndex(p => p.ubi === v.ubi);
-            if (posIdx >= 0) {
-              const ts = new Date().toISOString();
-              const nuevasPos = turnoActivo.posiciones.map((p, i) =>
-                i === posIdx ? { ...p, bajada: nuevoVal, bajada_ts: nuevoVal ? ts : null } : p
-              );
-              await sb.from("turnos").update({ posiciones: nuevasPos }).eq("id", turnoActivo.id);
-              if (nuevoVal && nuevasPos.every(p => p.bajada || p.fallo)) {
-                await sb.from("turnos").update({
-                  estado: "completado",
-                  montacarguista: operario || "picker",
-                  fecha_completado: new Date().toISOString()
-                }).eq("id", turnoActivo.id);
-              }
-            }
+          if (!sb || !turnoActivo || turnoActivo.estado === "fallido") return;
+          const posIdx = (turnoActivo.posiciones || []).findIndex(p => p.ubi === v.ubi);
+          if (posIdx < 0) return;
+          const ts = new Date().toISOString();
+          const nuevasPos = turnoActivo.posiciones.map((p, i) =>
+            i === posIdx ? { ...p, bajada: nuevoVal, bajada_ts: nuevoVal ? ts : null } : p
+          );
+          await sb.from("turnos").update({ posiciones: nuevasPos }).eq("id", turnoActivo.id);
+          if (!nuevoVal && turnoActivo.estado === "completado") {
+            // Reactivar turno si se deshace una bajada en turno ya completado
+            await sb.from("turnos").update({ estado: "en_proceso", fecha_completado: null }).eq("id", turnoActivo.id);
+          } else if (nuevoVal && nuevasPos.every(p => p.bajada || p.fallo)) {
+            await sb.from("turnos").update({
+              estado: "completado",
+              montacarguista: operario || "picker",
+              fecha_completado: new Date().toISOString()
+            }).eq("id", turnoActivo.id);
           }
         },
         className: "btn-main",
