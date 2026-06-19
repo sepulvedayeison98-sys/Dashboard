@@ -161,10 +161,18 @@ function AdminApp(){
     return Object.values(map).sort((a,b)=>b.pedidos.length-a.pedidos.length);
   })();
 
-  const montacarguistasActivos=usuarios.filter(u=>{
-    const diff=(new Date()-new Date(u.fecha_login))/1000/60;
-    return u.rol==="montacarguista"&&diff<240;
-  });
+  // Deduplicar montacarguistas: solo la entrada más reciente por nombre
+  const montacarguistasActivos=(()=>{
+    const map={};
+    usuarios.forEach(u=>{
+      if(u.rol!=="montacarguista")return;
+      const diff=(new Date()-new Date(u.fecha_login))/1000/60;
+      if(diff>=240)return;
+      if(!map[u.nombre]||new Date(u.fecha_login)>new Date(map[u.nombre].fecha_login))
+        map[u.nombre]=u;
+    });
+    return Object.values(map);
+  })();
 
   if(cargando)return(
     <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"100vh",gap:14}}>
@@ -224,26 +232,105 @@ function AdminApp(){
             {/* Montacarguistas */}
             {montacarguistasActivos.length>0&&(
               <div style={{marginBottom:14}}>
-                <div style={{fontSize:10,color:C.purple,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:6}}>🏗️ Montacarguistas activos</div>
-                {montacarguistasActivos.map((u,i)=>{
-                  const enProceso=turnos.filter(t=>t.montacarguista===u.nombre&&t.estado==="en_proceso");
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:7}}>
+                  <div style={{fontSize:10,color:C.purple,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>🏗️ Montacarguistas activos</div>
+                  <div style={{fontSize:9,color:C.t4}}>{montacarguistasActivos.length} conectado{montacarguistasActivos.length!==1?"s":""}</div>
+                </div>
+                {montacarguistasActivos.map((u)=>{
+                  const nombre=u.nombre;
+                  const enProceso=turnos.filter(t=>t.montacarguista===nombre&&t.estado==="en_proceso")
+                    .sort((a,b)=>(b.es_mde?1:0)-(a.es_mde?1:0));
+                  const completadosHoy=turnos.filter(t=>t.montacarguista===nombre&&t.estado==="completado"&&t.fecha_completado&&new Date(t.fecha_completado)>=hoyCut);
+                  const pendientes=turnos.filter(t=>t.operario_solicitante===nombre&&t.estado==="pendiente");
+                  const minutos=Math.round((new Date()-new Date(u.fecha_login))/60000);
+                  const tiempoLabel=minutos<1?"ahora":minutos<60?`hace ${minutos}min`:`hace ${Math.floor(minutos/60)}h${minutos%60>0?` ${minutos%60}min`:""}`;
+                  const libre=enProceso.length===0;
+                  const accentCol=libre?C.green:C.orange;
+                  const expKey=`mc-${nombre}`;
+                  const exp=!!expandido[expKey];
                   return(
-                    <div key={i} style={{background:C.bg2,borderRadius:11,padding:"10px 13px",marginBottom:6,border:`1px solid ${C.b0}`,borderLeft:`4px solid ${C.purple}`}}>
-                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                        <div style={{display:"flex",alignItems:"center",gap:8}}>
-                          <div style={{width:32,height:32,borderRadius:"50%",background:`${C.purple}20`,color:C.purple,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:14}}>🏗️</div>
-                          <div>
-                            <div style={{fontWeight:700,fontSize:13,color:C.t1}}>{u.nombre}</div>
-                            <div style={{fontSize:10,color:C.t3}}>Último acceso: {fmtHora(u.fecha_login)}</div>
+                    <div key={nombre} style={{background:C.bg2,borderRadius:13,marginBottom:8,border:`1px solid ${libre?C.b0:C.orange+"30"}`,borderLeft:`4px solid ${accentCol}`,animation:"fadeUp .2s ease both"}}>
+                      {/* Cabecera */}
+                      <div onClick={()=>setExpandido(o=>({...o,[expKey]:!o[expKey]}))} style={{padding:"11px 13px",cursor:"pointer"}}>
+                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:enProceso.length>0?8:0}}>
+                          <div style={{display:"flex",alignItems:"center",gap:9}}>
+                            <div style={{width:36,height:36,borderRadius:"50%",background:"linear-gradient(135deg,#a855f7,#3b82f6)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:17,flexShrink:0}}>🏗️</div>
+                            <div>
+                              <div style={{fontWeight:800,fontSize:14,color:C.t1,textTransform:"capitalize"}}>{nombre}</div>
+                              <div style={{fontSize:9,color:C.t3}}>{libre?"Libre":enProceso.length===1?"1 turno activo":`${enProceso.length} turnos activos`} · {tiempoLabel}</div>
+                            </div>
+                          </div>
+                          <div style={{display:"flex",alignItems:"center",gap:5}}>
+                            <div style={{textAlign:"center",background:C.bg3,borderRadius:7,padding:"4px 9px",border:`1px solid ${enProceso.length>0?C.orange+"30":C.b0}`}}>
+                              <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:15,fontWeight:800,color:enProceso.length>0?C.orange:C.t4,lineHeight:1}}>{enProceso.length}</div>
+                              <div style={{fontSize:7,color:C.t4,textTransform:"uppercase",marginTop:1}}>activos</div>
+                            </div>
+                            <div style={{textAlign:"center",background:C.bg3,borderRadius:7,padding:"4px 9px",border:`1px solid ${completadosHoy.length>0?C.green+"30":C.b0}`}}>
+                              <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:15,fontWeight:800,color:completadosHoy.length>0?C.green:C.t4,lineHeight:1}}>{completadosHoy.length}</div>
+                              <div style={{fontSize:7,color:C.t4,textTransform:"uppercase",marginTop:1}}>hoy</div>
+                            </div>
+                            {(completadosHoy.length>0||enProceso.length>0)&&
+                              <span style={{color:C.t3,fontSize:13,transform:exp?"rotate(90deg)":"none",transition:"transform .2s"}}>▶</span>}
                           </div>
                         </div>
-                        <div style={{textAlign:"right"}}>
-                          {enProceso.length>0
-                            ?<span style={{background:`${C.orange}20`,color:C.orange,borderRadius:5,padding:"2px 8px",fontSize:9,fontWeight:700}}>EN PROCESO</span>
-                            :<span style={{background:`${C.green}15`,color:C.green,borderRadius:5,padding:"2px 8px",fontSize:9,fontWeight:700}}>LIBRE</span>
-                          }
-                        </div>
+                        {/* Mini barras de progreso por turno activo */}
+                        {enProceso.map((t,ti)=>{
+                          const pos=t.posiciones||[];
+                          const nBaj=pos.filter(p=>p.bajada).length;
+                          const nFallo=pos.filter(p=>p.fallo).length;
+                          const nHecho=nBaj+nFallo;
+                          const pct=pos.length>0?Math.round(nHecho/pos.length*100):0;
+                          const col=pct===100?C.green:nFallo>0?C.orange:C.orange;
+                          const lastAction=pos.map(p=>p.bajada_ts||p.fallo_ts).filter(Boolean).sort().pop();
+                          return(
+                            <div key={t.id} style={{marginTop:ti===0?2:4,background:C.bg3,borderRadius:8,padding:"6px 9px",border:`1px solid ${C.b0}`}}>
+                              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+                                <div style={{display:"flex",alignItems:"center",gap:5,minWidth:0,flex:1}}>
+                                  <span style={{fontFamily:"'JetBrains Mono',monospace",color:C.teal,fontSize:11,fontWeight:800,flexShrink:0}}>{t.picking}</span>
+                                  {(t.es_mde||t.prioridad==="urgente")&&<span style={{background:`${C.red}20`,color:C.red,borderRadius:3,padding:"0 4px",fontSize:7,fontWeight:800,flexShrink:0}}>🚨</span>}
+                                  <span style={{color:C.t4,fontSize:9,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{(t.cliente||"").slice(0,16)}</span>
+                                </div>
+                                <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
+                                  {lastAction&&<span style={{color:C.t4,fontSize:8}}>{fmtHora(lastAction)}</span>}
+                                  <span style={{fontFamily:"'JetBrains Mono',monospace",color:col,fontSize:12,fontWeight:800}}>{pct}%</span>
+                                </div>
+                              </div>
+                              <div style={{height:5,background:C.b0,borderRadius:3,overflow:"hidden",marginBottom:3}}>
+                                <div style={{height:"100%",width:`${pct}%`,background:pct===100?col:`linear-gradient(90deg,${col}80,${col})`,borderRadius:3,transition:"width .5s cubic-bezier(.4,0,.2,1)",boxShadow:pct>0?`0 0 6px ${col}50`:"none"}}/>
+                              </div>
+                              <div style={{display:"flex",justifyContent:"space-between",fontSize:8,color:C.t4}}>
+                                <span>{nBaj} bajada{nBaj!==1?"s":""}{nFallo>0?` · ${nFallo} fallo${nFallo!==1?"s":""}`:""}  /  {pos.length} posiciones</span>
+                                {pendientes.length>0&&<span style={{color:C.yellow}}>+{pendientes.length} en cola</span>}
+                              </div>
+                            </div>
+                          );
+                        })}
+                        {libre&&completadosHoy.length>0&&(
+                          <div style={{marginTop:4,fontSize:9,color:C.green,fontWeight:600}}>✓ Completó {completadosHoy.length} turno{completadosHoy.length!==1?"s":""} hoy</div>
+                        )}
                       </div>
+                      {/* Expandido: historial del día */}
+                      {exp&&completadosHoy.length>0&&(
+                        <div style={{borderTop:`1px solid ${C.b0}`,padding:"7px 13px 10px"}}>
+                          <div style={{fontSize:8,color:C.green,fontWeight:700,textTransform:"uppercase",letterSpacing:".5px",marginBottom:6}}>✅ Completados hoy</div>
+                          {completadosHoy.map(t=>{
+                            const pos=t.posiciones||[];
+                            const nFallo=pos.filter(p=>p.fallo).length;
+                            return(
+                              <div key={t.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"4px 0",borderBottom:`1px solid ${C.b0}`}}>
+                                <div style={{display:"flex",alignItems:"center",gap:6}}>
+                                  <span style={{fontFamily:"'JetBrains Mono',monospace",color:C.teal,fontSize:10,fontWeight:700}}>{t.picking}</span>
+                                  {nFallo>0&&<span style={{background:`${C.orange}20`,color:C.orange,borderRadius:3,padding:"0 4px",fontSize:7,fontWeight:700}}>{nFallo} fallo{nFallo!==1?"s":""}</span>}
+                                </div>
+                                <div style={{display:"flex",gap:8,fontSize:9,color:C.t4}}>
+                                  <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:80}}>{(t.cliente||"").slice(0,14)}</span>
+                                  <span style={{flexShrink:0}}>{fmtHora(t.fecha_completado)}</span>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
                   );
                 })}

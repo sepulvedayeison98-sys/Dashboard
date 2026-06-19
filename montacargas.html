@@ -108,6 +108,7 @@ function MontacargasApp(){
   const [ultimaAct,setUltimaAct]=useState(null);
   const [alertaCancelacion,setAlertaCancelacion]=useState([]);
   const [reportando,setReportando]=useState({});
+  const [reportandoPos,setReportandoPos]=useState({}); // {turnoId-posIdx: true}
   const timerRef=useRef(null);
   const prevPendRef=useRef(0);
   const misEnProcesoRef=useRef(new Set());
@@ -174,7 +175,8 @@ function MontacargasApp(){
     if(!turno)return;
     const key=`${turnoId}-pos-${posIdx}`;
     setProcesando(p=>({...p,[key]:true}));
-    const nuevasPos=turno.posiciones.map((p,i)=>i===posIdx?{...p,bajada:true}:p);
+    const ts=new Date().toISOString();
+    const nuevasPos=turno.posiciones.map((p,i)=>i===posIdx?{...p,bajada:true,bajada_ts:ts}:p);
     await sb.from("turnos").update({posiciones:nuevasPos}).eq("id",turnoId);
     // Auto-completar si todas bajadas
     if(nuevasPos.every(p=>p.bajada)){
@@ -192,12 +194,31 @@ function MontacargasApp(){
     setReportando(r=>({...r,[id]:false}));
   };
 
-  if(!operario)return(
-    <LoginForm onLogin={async(nombre)=>{
-      setOperario(nombre);
-      try{await sb.from("usuarios").insert({nombre,rol:"montacarguista",activo:true,fecha_login:new Date().toISOString()});}catch(e){}
-    }}/>
-  );
+  const marcarFalloPosicion=async(turnoId,posIdx,motivo)=>{
+    const turno=turnos.find(t=>t.id===turnoId);
+    if(!turno)return;
+    const key=`${turnoId}-pos-${posIdx}`;
+    setProcesando(p=>({...p,[key]:true}));
+    const ts=new Date().toISOString();
+    const nuevasPos=turno.posiciones.map((p,i)=>i===posIdx?{...p,fallo:true,motivo_fallo:motivo,fallo_ts:ts}:p);
+    await sb.from("turnos").update({posiciones:nuevasPos}).eq("id",turnoId);
+    if(nuevasPos.every(p=>p.bajada||p.fallo)){
+      await sb.from("turnos").update({estado:"completado",montacarguista:operario,fecha_completado:new Date().toISOString()}).eq("id",turnoId);
+    }
+    await refrescar();
+    setProcesando(p=>({...p,[key]:false}));
+    setReportandoPos(r=>({...r,[key]:false}));
+  };
+
+  const limpiarCompletados=async()=>{
+    if(!window.confirm("¿Eliminar todos los turnos completados y fallidos?\nNo se puede deshacer."))return;
+    const{data:doneT}=await _go(`${SUPA_URL}/rest/v1/turnos?estado=in.(completado,fallido)&select=id,picking`,{headers:_H});
+    if(!doneT?.length)return;
+    await _go(`${SUPA_URL}/rest/v1/turnos?estado=in.(completado,fallido)`,{method:"DELETE",headers:{..._H,Prefer:"return=minimal"}});
+    const picklist=doneT.map(t=>encodeURIComponent(t.picking)).join(",");
+    if(picklist)await _go(`${SUPA_URL}/rest/v1/asignaciones?picking=in.(${picklist})`,{method:"DELETE",headers:{..._H,Prefer:"return=minimal"}});
+    await refrescar();
+  };
 
   const porEstado=est=>turnos
     .filter(t=>t.estado===est)
@@ -208,7 +229,7 @@ function MontacargasApp(){
     });
 
   const agrupadoPorUBI=useMemo(()=>{
-    const pend=porEstado("pendiente");
+    const pend=turnos.filter(t=>t.estado==="pendiente").sort((a,b)=>(a.es_mde?0:1)-(b.es_mde?0:1));
     const map={};
     pend.forEach(t=>{
       (t.posiciones||[]).forEach(pos=>{
@@ -228,9 +249,21 @@ function MontacargasApp(){
     return m;
   },[turnos]);
 
+  if(!operario)return(
+    <LoginForm onLogin={async(nombre)=>{
+      setOperario(nombre);
+      try{await sb.from("usuarios").insert({nombre,rol:"montacarguista",activo:true,fecha_login:new Date().toISOString()});}catch(e){}
+    }}/>
+  );
+
   const nPend=porEstado("pendiente").length;
   const nProc=porEstado("en_proceso").length;
-  const lista=tab==="agrupado"?[]:porEstado(tab);
+  const listaRaw=tab==="agrupado"?[]:porEstado(tab);
+  const unaHoraAtras=Date.now()-3600000;
+  const lista=tab==="completado"
+    ?listaRaw.filter(t=>!t.fecha_completado||new Date(t.fecha_completado).getTime()>unaHoraAtras)
+    :listaRaw;
+  const nOcultos=tab==="completado"?listaRaw.length-lista.length:0;
 
   return(
     <div style={{minHeight:"100vh",paddingBottom:24}}>
@@ -276,22 +309,37 @@ function MontacargasApp(){
         {/* ── TURNOS (pendiente / en_proceso / completado) ── */}
         {tab!=="agrupado"&&(
           <>
+            {tab==="completado"&&listaRaw.length>0&&(
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8,padding:"0 2px"}}>
+                {nOcultos>0
+                  ?<div style={{fontSize:10,color:C.t3}}>+{nOcultos} oculto{nOcultos!==1?"s":""} (&gt;1h)</div>
+                  :<div/>
+                }
+                <button onClick={limpiarCompletados}
+                  style={{background:`${C.red}15`,border:`1px solid ${C.red}35`,color:C.red,borderRadius:8,padding:"6px 13px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit",letterSpacing:".3px"}}>
+                  🗑 Limpiar todo
+                </button>
+              </div>
+            )}
             {lista.length===0&&(
               <div style={{textAlign:"center",color:C.t3,padding:"50px 20px"}}>
                 <div style={{fontSize:40,marginBottom:12}}>{tab==="pendiente"?"🎉":tab==="en_proceso"?"⚙️":"📋"}</div>
                 <div style={{fontSize:14}}>
-                  {tab==="pendiente"?"Sin turnos pendientes · actualiza cada 15s":tab==="en_proceso"?"No hay turnos en proceso":"Sin completados hoy"}
+                  {tab==="pendiente"?"Sin turnos pendientes · actualiza cada 15s":tab==="en_proceso"?"No hay turnos en proceso":nOcultos>0?`${nOcultos} turno${nOcultos!==1?"s":""} oculto${nOcultos!==1?"s":""} (>1h) · usa Limpiar para eliminar`:"Sin completados hoy"}
                 </div>
               </div>
             )}
             {lista.map((t,ti)=>{
-              const posiciones=ordenarPos(t.posiciones);
+              const posiciones=ordenarPos(t.posiciones.map((p,i)=>({...p,_origIdx:i})));
               const exp=!!expandido[t.id];
               const proc=!!procesando[t.id];
               const urgente=t.es_mde||t.prioridad==="urgente";
               const accentCol=urgente?C.red:C.purple;
               const nBaj=posiciones.filter(p=>p.bajada).length;
-              const todosBajados=posiciones.length>0&&nBaj===posiciones.length;
+              const nFalloPosicion=posiciones.filter(p=>p.fallo).length;
+              const nHecho=nBaj+nFalloPosicion;
+              const todosDone=posiciones.length>0&&nHecho===posiciones.length;
+              const todosBajados=todosDone&&nFalloPosicion===0;
               const totalUnids=posiciones.reduce((s,p)=>(p.skus||[]).reduce((u,k)=>u+k.cant,s),0);
               const totalSKUs=posiciones.reduce((s,p)=>s+(p.skus||[]).length,0);
               return(
@@ -330,13 +378,26 @@ function MontacargasApp(){
                       {t.montacarguista&&<span style={{color:C.teal}}>🏗️ {t.montacarguista}</span>}
                     </div>
                     {/* Barra de progreso (en_proceso) */}
-                    {t.estado==="en_proceso"&&posiciones.length>0&&(
-                      <div style={{marginTop:4}}>
-                        <div style={{height:4,background:C.b0,borderRadius:3,overflow:"hidden"}}>
-                          <div style={{height:"100%",width:`${Math.round(nBaj/posiciones.length*100)}%`,background:todosBajados?C.green:C.orange,transition:"width .4s"}}/>
+                    {t.estado==="en_proceso"&&posiciones.length>0&&(()=>{
+                      const pct=Math.round(nHecho/posiciones.length*100);
+                      const col=todosBajados?C.green:todosDone?C.orange:nFalloPosicion>0?C.orange:C.orange;
+                      const label=todosBajados?"✓ Todo en piso":todosDone?`✓ ${nBaj} bajados · ${nFalloPosicion} con fallo`:`${nBaj} bajados${nFalloPosicion>0?` · ${nFalloPosicion} fallo`:""} / ${posiciones.length}`;
+                      return(
+                        <div style={{marginTop:8,background:C.bg3,border:`1px solid ${todosDone?(todosBajados?C.green:C.orange)+"40":C.b0}`,borderRadius:10,padding:"8px 10px",transition:"border-color .4s"}}>
+                          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
+                            <div style={{fontSize:9,fontWeight:700,color:todosBajados?C.green:todosDone?C.orange:C.t3,letterSpacing:".4px",textTransform:"uppercase"}}>
+                              {label}
+                            </div>
+                            <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:20,fontWeight:900,color:col,lineHeight:1}}>
+                              {pct}<span style={{fontSize:10,fontWeight:600,color:C.t3}}>%</span>
+                            </div>
+                          </div>
+                          <div style={{height:7,background:C.b0,borderRadius:5,overflow:"hidden"}}>
+                            <div style={{height:"100%",width:`${pct}%`,background:todosDone?col:`linear-gradient(90deg,${col}99,${col})`,borderRadius:5,transition:"width .5s cubic-bezier(.4,0,.2,1)",boxShadow:pct>0?`0 0 8px ${col}60`:"none"}}/>
+                          </div>
                         </div>
-                      </div>
-                    )}
+                      );
+                    })()}
                     {!exp&&t.estado!=="en_proceso"&&<div style={{display:"flex",gap:4,flexWrap:"wrap",marginTop:4}}>
                       {posiciones.map((p,pi)=>(
                         <span key={pi} style={{fontFamily:"'JetBrains Mono',monospace",background:p.bajada?`${C.green}15`:C.bg3,border:`1px solid ${p.bajada?C.green+"40":C.b0}`,borderRadius:5,padding:"2px 7px",fontSize:9,color:p.bajada?C.green:C.teal}}>{p.ubi}{p.bajada?" ✓":""}</span>
@@ -347,7 +408,7 @@ function MontacargasApp(){
                   {/* Detalle expandido */}
                   {exp&&(
                     <div style={{borderTop:`1px solid ${C.b0}`,padding:"8px 14px 10px"}}>
-                      {[...posiciones.map((p,i)=>({...p,_origIdx:i}))]
+                      {[...posiciones]
                         .sort((a,b)=>{
                           if(a.bajada&&!b.bajada)return 1;
                           if(!a.bajada&&b.bajada)return -1;
@@ -358,41 +419,76 @@ function MontacargasApp(){
                         const keyBaj=`${t.id}-pos-${pi}`;
                         const bajando=!!procesando[keyBaj];
                         const esBajada=!!pos.bajada;
+                        const esFalloPosicion=!!pos.fallo;
+                        const reportandoEstePosicion=!!reportandoPos[keyBaj];
                         const demanda=(demandaMap[pos.ubi]||0);
-                        const esPrioridad=!esBajada&&demanda>1;
+                        const esPrioridad=!esBajada&&!esFalloPosicion&&demanda>1;
+                        const borderCol=esBajada?C.green:esFalloPosicion?C.red:esPrioridad?C.yellow:C.purple;
+                        const bgCol=esBajada?`${C.green}10`:esFalloPosicion?`${C.red}08`:esPrioridad?`${C.yellow}08`:C.bg3;
                         return(
-                          <div key={pi} style={{background:esBajada?`${C.green}10`:esPrioridad?`${C.yellow}08`:C.bg3,borderRadius:9,padding:"8px 10px",marginBottom:6,borderLeft:`3px solid ${esBajada?C.green:esPrioridad?C.yellow:C.purple}`,transition:"all .3s"}}>
-                            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:esBajada?0:5}}>
-                              <div style={{display:"flex",alignItems:"center",gap:7,flex:1,minWidth:0,flexWrap:"wrap"}}>
-                                <span style={{fontFamily:"'JetBrains Mono',monospace",color:esBajada?C.green:esPrioridad?C.yellow:C.teal,fontWeight:800,fontSize:14}}>{pos.ubi}</span>
-                                {esPrioridad&&<span style={{background:`${C.yellow}20`,color:C.yellow,border:`1px solid ${C.yellow}40`,borderRadius:4,padding:"1px 6px",fontSize:8,fontWeight:800,animation:"pop .3s ease"}}>⚡ {demanda} pedidos</span>}
-                                <span style={{fontSize:9,color:C.t3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{CALLE_NOM[pos.calleLetra]||pos.calleLetra} · Mód {pos.modulo} · Niv {pos.nivel}</span>
+                          <div key={pi} style={{background:bgCol,borderRadius:9,marginBottom:6,borderLeft:`3px solid ${borderCol}`,transition:"all .3s",overflow:"hidden"}}>
+                            <div style={{padding:"8px 10px"}}>
+                              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:esBajada||esFalloPosicion?0:5}}>
+                                <div style={{display:"flex",alignItems:"center",gap:7,flex:1,minWidth:0,flexWrap:"wrap"}}>
+                                  <span style={{fontFamily:"'JetBrains Mono',monospace",color:esBajada?C.green:esFalloPosicion?C.red:esPrioridad?C.yellow:C.teal,fontWeight:800,fontSize:14}}>{pos.ubi}</span>
+                                  {esPrioridad&&<span style={{background:`${C.yellow}20`,color:C.yellow,border:`1px solid ${C.yellow}40`,borderRadius:4,padding:"1px 6px",fontSize:8,fontWeight:800,animation:"pop .3s ease"}}>⚡ {demanda} pedidos</span>}
+                                  <span style={{fontSize:9,color:C.t3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{CALLE_NOM[pos.calleLetra]||pos.calleLetra} · Mód {pos.modulo} · Niv {pos.nivel}</span>
+                                </div>
+                                {t.estado==="en_proceso"
+                                  ?esBajada
+                                    ?<span style={{color:C.green,fontSize:11,fontWeight:800,flexShrink:0,animation:"pop .3s ease"}}>✅ En piso</span>
+                                    :esFalloPosicion
+                                      ?<span style={{color:C.red,fontSize:10,fontWeight:700,flexShrink:0}}>⚠ {pos.motivo_fallo}</span>
+                                      :reportandoEstePosicion
+                                        ?null
+                                        :<div style={{display:"flex",gap:4,flexShrink:0}}>
+                                           <button onClick={()=>marcarBajada(t.id,pi)} disabled={bajando}
+                                             style={{padding:"5px 11px",background:bajando?C.bg2:`linear-gradient(135deg,${C.green},${C.teal})`,border:"none",borderRadius:7,color:bajando?C.t3:C.bg0,fontSize:11,fontWeight:800,cursor:bajando?"not-allowed":"pointer",fontFamily:"inherit"}}>
+                                             {bajando?"...":"⬇ Bajar"}
+                                           </button>
+                                           <button onClick={()=>setReportandoPos(r=>({...r,[keyBaj]:true}))}
+                                             style={{padding:"5px 9px",background:`${C.red}15`,border:`1px solid ${C.red}30`,borderRadius:7,color:C.red,fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>
+                                             ⚠
+                                           </button>
+                                         </div>
+                                  :<span style={{fontFamily:"'JetBrains Mono',monospace",color:C.green,fontWeight:700,fontSize:12,flexShrink:0}}>{pos.totalSaldo}u</span>
+                                }
                               </div>
-                              {t.estado==="en_proceso"
-                                ?esBajada
-                                  ?<span style={{color:C.green,fontSize:11,fontWeight:800,flexShrink:0,animation:"pop .3s ease"}}>✅ En piso</span>
-                                  :<button onClick={()=>marcarBajada(t.id,pi)} disabled={bajando}
-                                      style={{flexShrink:0,padding:"5px 12px",background:bajando?C.bg2:`linear-gradient(135deg,${C.green},${C.teal})`,border:"none",borderRadius:7,color:bajando?C.t3:C.bg0,fontSize:11,fontWeight:800,cursor:bajando?"not-allowed":"pointer",fontFamily:"inherit"}}>
-                                      {bajando?"...":"⬇ Bajar a piso"}
-                                    </button>
-                                :<span style={{fontFamily:"'JetBrains Mono',monospace",color:C.green,fontWeight:700,fontSize:12,flexShrink:0}}>{pos.totalSaldo}u</span>
-                              }
+                              {!esBajada&&!esFalloPosicion&&!reportandoEstePosicion&&(pos.skus||[]).map((s,si)=>(
+                                <div key={si} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"3px 0",borderTop:si>0?`1px solid ${C.b0}`:"none"}}>
+                                  <div style={{display:"flex",alignItems:"center",gap:5}}>
+                                    <span style={{fontSize:8,background:`${C.accent}20`,color:C.accent,borderRadius:3,padding:"1px 4px",fontWeight:800}}>SKU</span>
+                                    <span style={{fontFamily:"'JetBrains Mono',monospace",color:C.accent,fontSize:11,fontWeight:700}}>{s.ref}</span>
+                                  </div>
+                                  <div style={{display:"flex",alignItems:"center",gap:6}}>
+                                    <span style={{color:C.t3,fontSize:9,maxWidth:90,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{(s.desc||"").slice(0,18)}</span>
+                                    <span style={{fontFamily:"'JetBrains Mono',monospace",color:C.yellow,fontSize:11,fontWeight:700}}>{s.cant}u</span>
+                                  </div>
+                                </div>
+                              ))}
+                              {esBajada&&<div style={{color:C.green,fontSize:9,marginTop:4,fontWeight:600}}>
+                                {(pos.skus||[]).map(s=>`${s.ref} · ${s.cant}u`).join("  ·  ")}
+                              </div>}
+                              {esFalloPosicion&&<div style={{color:C.red,fontSize:9,marginTop:2,opacity:.7}}>{fmtHora(pos.fallo_ts)||""}</div>}
                             </div>
-                            {!esBajada&&(pos.skus||[]).map((s,si)=>(
-                              <div key={si} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"3px 0",borderTop:si>0?`1px solid ${C.b0}`:"none"}}>
-                                <div style={{display:"flex",alignItems:"center",gap:5}}>
-                                  <span style={{fontSize:8,background:`${C.accent}20`,color:C.accent,borderRadius:3,padding:"1px 4px",fontWeight:800}}>SKU</span>
-                                  <span style={{fontFamily:"'JetBrains Mono',monospace",color:C.accent,fontSize:11,fontWeight:700}}>{s.ref}</span>
-                                </div>
-                                <div style={{display:"flex",alignItems:"center",gap:6}}>
-                                  <span style={{color:C.t3,fontSize:9,maxWidth:90,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{(s.desc||"").slice(0,18)}</span>
-                                  <span style={{fontFamily:"'JetBrains Mono',monospace",color:C.yellow,fontSize:11,fontWeight:700}}>{s.cant}u</span>
+                            {/* Selector de motivo inline por posición */}
+                            {reportandoEstePosicion&&(
+                              <div style={{background:`${C.red}10`,borderTop:`1px solid ${C.red}20`,padding:"8px 10px"}}>
+                                <div style={{fontSize:9,color:C.red,fontWeight:700,marginBottom:6}}>¿Qué pasó en {pos.ubi}?</div>
+                                <div style={{display:"flex",flexDirection:"column",gap:4}}>
+                                  {["Caja no encontrada","Posición vacía","Caja dañada / mojada","Acceso bloqueado","Cantidad incorrecta","Otro"].map(m=>(
+                                    <button key={m} onClick={()=>marcarFalloPosicion(t.id,pi,m)} disabled={bajando}
+                                      style={{padding:"7px 10px",background:`${C.red}12`,border:`1px solid ${C.red}30`,borderRadius:7,color:C.red,fontSize:11,fontWeight:600,cursor:"pointer",textAlign:"left",fontFamily:"inherit"}}>
+                                      {m}
+                                    </button>
+                                  ))}
+                                  <button onClick={()=>setReportandoPos(r=>({...r,[keyBaj]:false}))}
+                                    style={{padding:"6px",background:C.bg3,border:`1px solid ${C.b0}`,borderRadius:7,color:C.t3,fontSize:10,cursor:"pointer",fontFamily:"inherit",marginTop:2}}>
+                                    Cancelar
+                                  </button>
                                 </div>
                               </div>
-                            ))}
-                            {esBajada&&<div style={{color:C.green,fontSize:9,marginTop:4,fontWeight:600}}>
-                              {(pos.skus||[]).map(s=>`${s.ref} · ${s.cant}u`).join("  ·  ")}
-                            </div>}
+                            )}
                           </div>
                         );
                       })}
@@ -412,31 +508,10 @@ function MontacargasApp(){
                       </button>
                     )}
                     {t.estado==="en_proceso"&&(
-                      <>
-                        <div style={{display:"flex"}}>
-                          <button onClick={()=>completarTurno(t.id)} disabled={proc}
-                            style={{flex:3,padding:"12px",background:proc?C.bg3:todosBajados?`linear-gradient(135deg,${C.green},${C.teal})`:`${C.green}30`,border:"none",borderRadius:"0 0 0 12px",color:proc?C.t3:todosBajados?C.bg0:C.green,fontWeight:800,fontSize:12,cursor:proc?"not-allowed":"pointer",fontFamily:"inherit"}}>
-                            {proc?"Procesando...":todosBajados?"✅ Completar turno":`⬇ ${nBaj}/${posiciones.length} bajadas · Completar`}
-                          </button>
-                          <button onClick={()=>setReportando(r=>({...r,[t.id]:!r[t.id]}))}
-                            style={{flex:1,padding:"12px",background:reportando[t.id]?`${C.red}30`:C.bg3,border:"none",borderLeft:`1px solid ${C.b0}`,borderRadius:"0 0 12px 0",color:C.red,fontWeight:800,fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>
-                            ⚠️
-                          </button>
-                        </div>
-                        {reportando[t.id]&&(
-                          <div style={{padding:"10px 14px",background:C.bg3,borderTop:`1px solid ${C.b0}`,borderRadius:"0 0 12px 12px"}}>
-                            <div style={{color:C.t3,fontSize:10,marginBottom:8,fontWeight:700}}>¿Qué pasó? Selecciona el motivo:</div>
-                            <div style={{display:"flex",flexDirection:"column",gap:5}}>
-                              {["Caja no encontrada","Posición vacía","Caja dañada / mojada","Acceso bloqueado","Cantidad incorrecta","Otro"].map(m=>(
-                                <button key={m} onClick={()=>reportarFallo(t.id,m)} disabled={proc}
-                                  style={{padding:"9px 12px",background:`${C.red}12`,border:`1px solid ${C.red}30`,borderRadius:8,color:C.red,fontSize:12,fontWeight:600,cursor:"pointer",textAlign:"left",fontFamily:"inherit"}}>
-                                  {m}
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                      </>
+                      <button onClick={()=>completarTurno(t.id)} disabled={proc}
+                        style={{width:"100%",padding:"12px",background:proc?C.bg3:todosBajados?`linear-gradient(135deg,${C.green},${C.teal})`:todosDone?`linear-gradient(135deg,${C.orange},${C.yellow})`:`${C.green}25`,border:"none",borderRadius:"0 0 12px 12px",color:proc?C.t3:todosDone?C.bg0:C.green,fontWeight:800,fontSize:12,cursor:proc?"not-allowed":"pointer",fontFamily:"inherit",transition:"all .3s"}}>
+                        {proc?"Procesando...":todosBajados?"✅ Completar turno":todosDone?`⚠ ${nFalloPosicion} con fallo · Completar`:`⬇ ${nBaj}/${posiciones.length} bajadas · Completar`}
+                      </button>
                     )}
                     {(t.estado==="completado"||t.estado==="fallido")&&(
                       <div style={{padding:"10px",textAlign:"center",color:t.estado==="fallido"?C.orange:C.green,fontSize:11,fontWeight:700}}>

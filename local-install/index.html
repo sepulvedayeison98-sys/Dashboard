@@ -180,7 +180,7 @@ async function processFiles(wbInv, wbFact, onStep, marcasActivas){
   const invCasco=invRows.filter(r=>{
     const linea=String(r["Linea"]||"").trim();
     const desc=String(r["Descripcion"]||"");
-    return linea==="CASCO"&&!esEXPO(desc)&&MARCAS.includes(marcaDe(desc));
+    return linea==="CASCO"&&MARCAS.includes(marcaDe(desc));
   });
 
   if(invCasco.length===0){
@@ -368,7 +368,7 @@ async function processFiles(wbInv, wbFact, onStep, marcasActivas){
   }
 
   const pisoItems=items.filter(it=>it.destino==="PISO");
-  const alturaItems=items.filter(it=>it.destino==="ALTURA"&&it.stock>0&&!esEXPO(it.desc));
+  const alturaItems=items.filter(it=>it.destino==="ALTURA"&&it.stock>0);
 
   // C3: Sugerencia de pallets en altura — posiciones nivel>=3 con SKUs requeridos
   // Agrupar posiciones de altura por ubicación exacta (cada ubicación = 1 pallet físico)

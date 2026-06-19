@@ -30,8 +30,8 @@
 
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    html, body { height: 100%; background: #040c17; overflow-x: hidden; max-width: 100%; }
-    #root { min-height: 100vh; overflow-x: hidden; max-width: 100vw; }
+    html, body { height: 100%; background: #040c17; max-width: 100%; }
+    #root { min-height: 100vh; max-width: 100vw; }
     /* Loading screen mientras Babel transpila */
     #loading-screen {
       position: fixed; inset: 0;
@@ -61,8 +61,31 @@
   <div id="loading-screen">
     <div class="spinner"></div>
     <div>Iniciando Dashboard CEDI...</div>
-    <div style="font-size:10px;color:#253045">Cargando dependencias</div>
+    <div id="loading-msg" style="font-size:10px;color:#253045">Cargando dependencias</div>
   </div>
+  <script>
+    // Si después de 6 s el dashboard no montó → probablemente Babel sigue compilando
+    setTimeout(function(){
+      var el=document.getElementById('loading-msg');
+      var root=document.getElementById('root');
+      if(el&&(!root||!root.firstChild)){
+        el.textContent='Compilando interfaz (primera carga puede tardar ~20 s en móvil)…';
+        el.style.color='#38bdf8';
+      }
+    },6000);
+    // Si a los 35 s todavía no cargó, mostrar botón de recarga
+    setTimeout(function(){
+      var ls=document.getElementById('loading-screen');
+      var root=document.getElementById('root');
+      if(ls&&ls.style.display!=='none'&&(!root||!root.firstChild)){
+        var btn=document.createElement('button');
+        btn.textContent='Recargar página';
+        btn.style.cssText='margin-top:12px;padding:10px 22px;background:#38bdf8;color:#040c17;border:none;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer;font-family:inherit';
+        btn.onclick=function(){location.reload(true);};
+        ls.appendChild(btn);
+      }
+    },35000);
+  </script>
 
   <div id="root"></div>
 
@@ -180,7 +203,7 @@ async function processFiles(wbInv, wbFact, onStep, marcasActivas){
   const invCasco=invRows.filter(r=>{
     const linea=String(r["Linea"]||"").trim();
     const desc=String(r["Descripcion"]||"");
-    return linea==="CASCO"&&!esEXPO(desc)&&MARCAS.includes(marcaDe(desc));
+    return linea==="CASCO"&&MARCAS.includes(marcaDe(desc));
   });
 
   if(invCasco.length===0){
@@ -374,7 +397,7 @@ async function processFiles(wbInv, wbFact, onStep, marcasActivas){
   }
 
   const pisoItems=items.filter(it=>it.destino==="PISO");
-  const alturaItems=items.filter(it=>it.destino==="ALTURA"&&it.stock>0&&!esEXPO(it.desc));
+  const alturaItems=items.filter(it=>it.destino==="ALTURA"&&it.stock>0);
 
   // C3: Sugerencia de pallets en altura — posiciones nivel>=3 con SKUs requeridos
   // Agrupar posiciones de altura por ubicación exacta (cada ubicación = 1 pallet físico)
@@ -602,7 +625,17 @@ async function processFiles(wbInv, wbFact, onStep, marcasActivas){
     fecha:new Date().toLocaleDateString("es-CO",{day:"2-digit",month:"short",year:"numeric"}),
   };
 
-  return{SKUS:skusMotor,pisoItems,alturaItems,allItems:items,stats,pedidosActivos,invByModule,invBySKU,palletsSugeridos,rupturas,gapsReport,cityReport,modReport};
+  // ── ubiMap: índice inverso UBI → SKUs con stock ─────────────────────────────
+  const ubiMap={};
+  for(const[ref,posArr]of Object.entries(invBySKU)){
+    const desc=(stockMap[ref]||{}).desc||"";
+    for(const p of posArr){
+      if(!ubiMap[p.ubi])ubiMap[p.ubi]={ubi:p.ubi,calleLetra:p.calleLetra,modulo:p.modulo,nivel:p.nivel,skus:[]};
+      if(p.saldo>0)ubiMap[p.ubi].skus.push({ref,desc,saldo:p.saldo,cajap:p.cajap||""});
+    }
+  }
+
+  return{SKUS:skusMotor,pisoItems,alturaItems,allItems:items,stats,pedidosActivos,invByModule,invBySKU,palletsSugeridos,rupturas,gapsReport,cityReport,modReport,ubiMap};
 }
 
 // ── HISTÓRICO LOCAL ─────────────────────────────────────────────────────────
@@ -1160,7 +1193,8 @@ function HistoricoTab({hist,data,onClear,isMobile}){
                               <div style={{fontSize:9,color:C.t3,fontWeight:600,textTransform:'uppercase',letterSpacing:'0.8px',marginBottom:8}}>
                                 {cl.allS.length} SKUs distintos · {cl.unis.toLocaleString()} u acumuladas en {cl.peds} pedidos únicos
                               </div>
-                              <table style={{width:'100%',borderCollapse:'collapse'}}>
+                              <div style={{overflowX:'auto',WebkitOverflowScrolling:'touch'}}>
+                              <table style={{width:'100%',borderCollapse:'collapse',minWidth:320}}>
                                 <thead>
                                   <tr style={{borderBottom:`1px solid ${C.b0}`}}>
                                     {['#','Ref','Descripción','U acumuladas'].map(h=>(
@@ -1179,6 +1213,7 @@ function HistoricoTab({hist,data,onClear,isMobile}){
                                   ))}
                                 </tbody>
                               </table>
+                              </div>
                             </div>
                           </td>
                         </tr>
@@ -1944,10 +1979,14 @@ function CEDIDashboard(){
   const [planOrden,setPlanOrden]=useState("prioridad"); // reposición: prioridad|tiempo|calle
   const [planCompacto,setPlanCompacto]=useState(false); // reposición: vista compacta
   const [expandPlan,setExpandPlan]=useState(null); // reposición: card desplegada (acordeón)
+  const [expandViaje,setExpandViaje]=useState({});  // plan de viajes: fila SKU desplegada
   const [wbCache,setWbCache]=useState(null); // workbooks crudos para reproceso sin re-subir
   const [stockInclAlt,setStockInclAlt]=useState(false); // S1: incluir stock altura en totales
   const [stockFamFiltro,setStockFamFiltro]=useState(null); // S3: familia activa en dona stock
   const [planCalle,setPlanCalle]=useState("todas"); // P2: filtro calle en reposición
+  const [planSubTab,setPlanSubTab]=useState("lista"); // reposición: lista | ubi
+  const [planUbiBusca,setPlanUbiBusca]=useState(""); // reposición: búsqueda UBI
+  const [pedOrden,setPedOrden]=useState({col:null,dir:"asc"}); // pipeline: columna activa + dirección
   const [callePanel,setCallePanel]=useState(null); // D3: panel lateral de calle
   const [isMobile,setIsMobile]=useState(typeof window!=='undefined'&&window.matchMedia('(max-width: 900px)').matches);
   useEffect(()=>{
@@ -2110,7 +2149,7 @@ function CEDIDashboard(){
     return arr;
   },[data,slotFilt,slotFam,slotBusca,slotOrden]);
   const calleCol={C1:C.accent,C2:C.orange,C3:C.red,C4:C.purple};
-  const calleSub={C1:"ICH 102 · 3110",C2:"TECH T-10",C3:"ICH 501_SP",C4:"ICH 3120"};
+  const calleSub={C1:"3110 · 102 · 405",C2:"501-SP SOLID · 503",C3:"ICH-501",C4:"321 · 3130"};
 
   // Datos para tab Reporte — memo para no recalcular en cada render
   const rupturas   = useMemo(()=>data?.rupturas||[],   [data]);
@@ -2730,6 +2769,127 @@ function CEDIDashboard(){
         {/* ═ PLAN REPOSICIÓN ═ */}
         {tab==="plan"&&(
           <div style={{animation:"fadeUp .3s ease"}}>
+            {/* ── Sub-tabs: Lista de reposición | Consultar UBI ── */}
+            <div style={{display:"flex",gap:6,marginBottom:14,background:C.bg2,border:`1px solid ${C.b0}`,borderRadius:10,padding:4,width:"fit-content"}}>
+              {[{k:"lista",l:"📋 Reposición"},{k:"ubi",l:"📍 Consultar UBI"}].map(t=>(
+                <button key={t.k} onClick={()=>setPlanSubTab(t.k)}
+                  style={{padding:"6px 16px",borderRadius:7,border:"none",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit",
+                    background:planSubTab===t.k?(t.k==="ubi"?C.orange:C.teal):"transparent",
+                    color:planSubTab===t.k?C.bg0:C.t3,transition:"all .15s"}}>
+                  {t.l}
+                </button>
+              ))}
+            </div>
+
+            {/* ── Panel Consultar UBI ── */}
+            {planSubTab==="ubi"&&(()=>{
+              const ubiMap=data?.ubiMap||{};
+              const gapMap=Object.fromEntries((data?.SKUS||[]).map(s=>[s.id,{gap:Math.max(0,(s.comp||0)-(s.stock_piso||0)),comp:s.comp||0,familia:s.familia||""}]));
+              const q=planUbiBusca.trim().toUpperCase().replace(/[^A-Z0-9]/g,"");
+              const info=q.length>=3?ubiMap[q]:null;
+              const calleNom={B:"Calle 1",C:"Calle 2",D:"Calle 3",E:"Calle 4"};
+              const nivelLbl=n=>n<=1?"Piso":`Altura ${n}`;
+              return(
+                <div>
+                  {/* Buscador */}
+                  <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:16,background:C.bg2,border:`2px solid ${C.orange}`,borderRadius:12,padding:"12px 16px"}}>
+                    <span style={{fontSize:22}}>📍</span>
+                    <input
+                      value={planUbiBusca}
+                      onChange={e=>setPlanUbiBusca(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g,"").slice(0,6))}
+                      placeholder="Escribe la UBI · ej: B0101, C0302"
+                      autoFocus
+                      style={{flex:1,background:"transparent",border:"none",outline:"none",
+                        fontFamily:"'JetBrains Mono',monospace",fontSize:20,fontWeight:800,
+                        color:C.t1,letterSpacing:3,caretColor:C.orange}}
+                    />
+                    {q&&<button onClick={()=>setPlanUbiBusca("")} style={{background:"transparent",border:"none",color:C.t3,fontSize:18,cursor:"pointer",padding:"2px 6px"}}>✕</button>}
+                  </div>
+
+                  {/* Estado vacío */}
+                  {!q&&(
+                    <div style={{textAlign:"center",padding:"40px 20px",color:C.t3}}>
+                      <div style={{fontSize:40,marginBottom:12}}>🗂</div>
+                      <div style={{fontSize:14,fontWeight:600,color:C.t2,marginBottom:6}}>Consulta cualquier posición del CEDI</div>
+                      <div style={{fontSize:12}}>Escribe la UBI arriba — ej: <span style={{fontFamily:"'JetBrains Mono',monospace",color:C.orange}}>B0101</span></div>
+                    </div>
+                  )}
+
+                  {/* No encontrada */}
+                  {q&&q.length>=3&&!info&&(
+                    <div style={{textAlign:"center",padding:"32px 20px",color:C.t3,background:C.bg2,border:`1px solid ${C.b0}`,borderRadius:12}}>
+                      <div style={{fontSize:32,marginBottom:10}}>🔍</div>
+                      <div style={{fontSize:13,fontWeight:700,color:C.t2,marginBottom:4}}>Sin stock ICH en <span style={{fontFamily:"'JetBrains Mono',monospace",color:C.orange}}>{q}</span></div>
+                      <div style={{fontSize:11}}>La posición no existe o no tiene saldo disponible en el inventario</div>
+                    </div>
+                  )}
+
+                  {/* Resultado */}
+                  {info&&(()=>{
+                    const skusConDemanda=info.skus.filter(s=>(gapMap[s.ref]?.gap||0)>0);
+                    const totalSaldo=info.skus.reduce((t,s)=>t+s.saldo,0);
+                    const totalDemanda=skusConDemanda.reduce((t,s)=>t+(gapMap[s.ref]?.gap||0),0);
+                    return(
+                      <div>
+                        {/* Header de la posición */}
+                        <div style={{background:C.bg2,border:`1px solid ${C.orange}40`,borderRadius:12,padding:"14px 18px",marginBottom:12,display:"flex",alignItems:"center",gap:16,flexWrap:"wrap"}}>
+                          <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:24,fontWeight:900,color:C.orange}}>{info.ubi}</div>
+                          <div style={{flex:1}}>
+                            <div style={{fontSize:12,fontWeight:700,color:C.t1}}>{calleNom[info.calleLetra]||`Calle ${info.calleLetra}`} · Módulo {info.modulo} · {nivelLbl(info.nivel)}</div>
+                            <div style={{fontSize:11,color:C.t3,marginTop:2}}>{info.skus.length} SKU{info.skus.length!==1?"s":""} · {totalSaldo.toLocaleString()} u en total{totalDemanda>0?` · ⚠ ${totalDemanda.toLocaleString()} u con demanda`:""}</div>
+                          </div>
+                          {totalDemanda>0&&(
+                            <div style={{background:`${C.orange}18`,border:`1px solid ${C.orange}50`,borderRadius:8,padding:"6px 12px",fontSize:11,fontWeight:700,color:C.orange}}>
+                              ⬇ Requiere reabasto
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Lista de SKUs */}
+                        <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                          {info.skus.slice().sort((a,b)=>{
+                            const ga=(gapMap[a.ref]?.gap||0),gb=(gapMap[b.ref]?.gap||0);
+                            return gb-ga||b.saldo-a.saldo;
+                          }).map((s,i)=>{
+                            const g=gapMap[s.ref]||{};
+                            const gap=g.gap||0;
+                            const tieneGap=gap>0;
+                            const cajasDisp=s.cajap?Math.floor(s.saldo/parseInt(s.cajap)||1):null;
+                            const borderC=tieneGap?C.orange:C.b0;
+                            const bgC=tieneGap?`${C.orange}0a`:C.bg2;
+                            return(
+                              <div key={i} style={{background:bgC,border:`1px solid ${borderC}`,borderRadius:11,padding:"12px 16px",display:"grid",gridTemplateColumns:"1fr auto",gap:8,alignItems:"start"}}>
+                                <div>
+                                  <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4,flexWrap:"wrap"}}>
+                                    <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:13,fontWeight:800,color:tieneGap?C.orange:C.teal}}>{s.ref}</span>
+                                    {tieneGap&&<span style={{background:`${C.orange}20`,color:C.orange,fontSize:9,fontWeight:700,padding:"2px 7px",borderRadius:4}}>⚠ DEMANDA</span>}
+                                    {g.familia&&<span style={{background:C.bg3,color:C.t3,fontSize:9,fontWeight:600,padding:"2px 6px",borderRadius:4}}>{g.familia}</span>}
+                                  </div>
+                                  <div style={{fontSize:11,color:C.t2,marginBottom:6,lineHeight:1.4}}>{s.desc}</div>
+                                  <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
+                                    <span style={{fontSize:11,color:C.t3}}>Stock: <b style={{color:C.t1}}>{s.saldo.toLocaleString()} u</b></span>
+                                    {cajasDisp!==null&&<span style={{fontSize:11,color:C.t3}}>≈ <b style={{color:C.t1}}>{cajasDisp}</b> cajas (caja {s.cajap}u)</span>}
+                                    {tieneGap&&<span style={{fontSize:11,color:C.orange}}>Demanda pendiente: <b>{gap.toLocaleString()} u</b></span>}
+                                    {g.comp>0&&!tieneGap&&<span style={{fontSize:11,color:C.green}}>Comp.: {g.comp.toLocaleString()} u — cubierto ✓</span>}
+                                  </div>
+                                </div>
+                                <div style={{textAlign:"right",minWidth:60}}>
+                                  <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:20,fontWeight:900,color:tieneGap?C.orange:C.teal}}>{s.saldo}</div>
+                                  <div style={{fontSize:9,color:C.t3}}>unidades</div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+              );
+            })()}
+
+            {/* ── Lista de reposición (contenido existente) ── */}
+            {planSubTab==="lista"&&<>
             {/* KPI strip propio de Reposición */}
             {(()=>{
               const totalAcc=st?.totalGaps||0;
@@ -2803,6 +2963,142 @@ function CEDIDashboard(){
                 </div>
               );
             })()}
+            {/* ── Plan de Viajes — Bajar de Altura (aparece antes de la lista para visibilidad móvil) ── */}
+            {(()=>{
+              const reabasto=(data?.pedidosActivos||[]).filter(p=>p.clasificacion==="reabasto"||p.clasificacion==="parcial"||p.clasificacion==="ruptura");
+              const skuMaestro=Object.fromEntries(sorted.map(x=>[x.id,x]));
+              const skuFalta={};
+              reabasto.forEach(p=>{
+                (p.refs||[]).forEach(r=>{
+                  if(!r.hasPiso&&r.hasAlt){
+                    if(!skuFalta[r.ref]){
+                      const _m=skuMaestro[r.ref]||{};
+                      skuFalta[r.ref]={ref:r.ref,desc:r.desc,uniReq:0,pedidos:new Set(),stockAlt:0,stockPiso:_m.stock_piso||0,comp:_m.comp||0,posPiso:[],mejorAlt:null};
+                    }
+                    skuFalta[r.ref].uniReq+=r.cant;
+                    skuFalta[r.ref].pedidos.add(p.id);
+                    const pos=(data?.invBySKU||{})[r.ref]||[];
+                    skuFalta[r.ref].stockAlt=pos.filter(x=>x.nivel>=2).reduce((t,x)=>t+x.saldo,0);
+                    if(!skuFalta[r.ref].posPiso.length){skuFalta[r.ref].posPiso=pos.filter(x=>x.nivel<=1&&x.saldo>0).sort((a,b)=>b.saldo-a.saldo).slice(0,3).map(x=>x.ubi);}
+                    if(!skuFalta[r.ref].mejorAlt){const _pa=pos.filter(x=>x.nivel>=2&&x.saldo>0).sort((a,b)=>b.saldo-a.saldo);if(_pa.length>0)skuFalta[r.ref].mejorAlt=_pa[0].ubi;}
+                  }
+                });
+              });
+              let listaV=Object.values(skuFalta).map(s=>({...s,nPedidos:s.pedidos.size,pallets:Math.ceil(s.uniReq/72)})).sort((a,b)=>b.uniReq-a.uniReq);
+              if(planCalle!=="todas"){
+                listaV=listaV.filter(s=>{
+                  const f=familia(s.desc)||"";
+                  const d=(s.desc||"").toUpperCase();
+                  if(planCalle==="C1")return["3110","102","405"].includes(f);
+                  if(planCalle==="C2")return(f==="501"&&/SP/.test(d))||f==="503";
+                  if(planCalle==="C3")return f==="501";
+                  if(planCalle==="C4")return["321","3130"].includes(f);
+                  return true;
+                });
+              }
+              if(listaV.length===0)return null;
+              const viajesMap={};
+              listaV.forEach(s=>{
+                const key=s.mejorAlt||'__sin_ubi__';
+                if(!viajesMap[key])viajesMap[key]={ubi:s.mejorAlt,skus:[],totalUnid:0,pedSet:new Set()};
+                viajesMap[key].skus.push(s);
+                viajesMap[key].totalUnid+=s.uniReq;
+                s.pedidos.forEach(pid=>viajesMap[key].pedSet.add(pid));
+              });
+              const viajes=Object.values(viajesMap).filter(v=>v.ubi!==null).sort((a,b)=>b.skus.length-a.skus.length||b.totalUnid-a.totalUnid);
+              const sinUbi=viajesMap['__sin_ubi__']?.skus||[];
+              return(
+                <div style={{background:C.bg2,border:`1px solid ${C.purple}30`,borderTop:`2px solid ${C.purple}`,borderRadius:13,overflow:"hidden",marginBottom:14}}>
+                  <div style={{padding:"12px 18px",borderBottom:`1px solid ${C.b0}`,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
+                    <span style={{fontWeight:700,color:C.t1,fontSize:13}}>📦 Plan de Viajes — Bajar de Altura</span>
+                    <div style={{display:"flex",gap:8}}>
+                      <span style={{background:`${C.purple}22`,color:C.purple,borderRadius:6,padding:"3px 10px",fontSize:11,fontWeight:700}}>{viajes.length} viaje{viajes.length!==1?"s":""}</span>
+                      <span style={{background:`${C.orange}22`,color:C.orange,borderRadius:6,padding:"3px 10px",fontSize:11,fontWeight:700}}>{listaV.length} SKUs</span>
+                    </div>
+                  </div>
+                  <div style={{padding:"12px 14px",display:"flex",flexDirection:"column",gap:10}}>
+                    {viajes.map((v,vi)=>(
+                      <div key={v.ubi} style={{background:C.bg1,borderRadius:10,border:`1px solid ${C.b0}`,overflow:"hidden"}}>
+                        <div style={{padding:"9px 14px",background:`${C.purple}12`,borderBottom:`1px solid ${C.purple}20`,display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+                          <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:10,fontWeight:800,color:C.purple,background:`${C.purple}22`,padding:"2px 8px",borderRadius:5,letterSpacing:"0.5px"}}>VIAJE {vi+1}</span>
+                          <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:13,fontWeight:800,color:C.t1}}>📍 {v.ubi}</span>
+                          <span style={{background:`${C.teal}18`,color:C.teal,borderRadius:5,padding:"2px 8px",fontSize:10,fontWeight:700}}>{v.skus.length} SKU{v.skus.length!==1?"s":""}</span>
+                          <span style={{marginLeft:"auto",fontSize:10,color:C.t3}}>{v.totalUnid} u · {v.pedSet.size} ped.</span>
+                        </div>
+                        <div style={{padding:"8px 12px",display:"flex",flexDirection:"column",gap:6}}>
+                          {v.skus.map(s=>{
+                            const gapPiso=Math.max(0,(s.comp||0)-(s.stockPiso||0));
+                            const pisoOk=(s.stockPiso||0)>=(s.comp||0);
+                            const vKey=v.ubi+"||"+s.ref;
+                            const abierto=!!expandViaje[vKey];
+                            const posAll=((data?.invBySKU||{})[s.ref]||[]).filter(p=>p.saldo>0).sort((a,b)=>a.nivel-b.nivel||b.saldo-a.saldo);
+                            return(
+                            <div key={s.ref} style={{display:"flex",flexDirection:"column",background:C.bg2,borderRadius:8,borderLeft:`3px solid ${pisoOk?C.green:C.red}`,overflow:"hidden",cursor:"pointer"}}
+                              onClick={()=>setExpandViaje(ev=>({...ev,[vKey]:!ev[vKey]}))}>
+                              {/* Resumen (siempre visible) */}
+                              <div style={{display:"flex",flexDirection:"column",gap:5,padding:"9px 11px"}}>
+                                <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                                  <span style={{fontSize:10,color:C.t3,transition:"transform .2s",transform:abierto?"rotate(90deg)":"none",flexShrink:0}}>▶</span>
+                                  <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:11,fontWeight:700,color:C.teal,flexShrink:0}}>{s.ref}</span>
+                                  <span style={{fontSize:10,color:C.t2,flex:1}}>{(s.desc||"").slice(0,38)}</span>
+                                  <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:12,fontWeight:800,color:C.orange,flexShrink:0}}>{s.uniReq}u req.</span>
+                                </div>
+                                <div style={{display:"flex",gap:5,flexWrap:"wrap",alignItems:"center"}}>
+                                  <span style={{fontSize:9,fontWeight:700,color:pisoOk?C.green:C.red,background:pisoOk?`${C.green}18`:`${C.red}18`,borderRadius:4,padding:"2px 7px",border:`1px solid ${pisoOk?C.green+"35":C.red+"35"}`}}>Piso {s.stockPiso||0}u</span>
+                                  <span style={{fontSize:9,color:C.t4}}>vs</span>
+                                  <span style={{fontSize:9,fontWeight:700,color:C.yellow,background:`${C.yellow}18`,borderRadius:4,padding:"2px 7px",border:`1px solid ${C.yellow}30`}}>Comp {s.comp||0}u</span>
+                                  {gapPiso>0&&<span style={{fontSize:9,fontWeight:800,color:C.red}}>→ Gap -{gapPiso}u</span>}
+                                  <span style={{marginLeft:"auto",fontSize:9,fontWeight:700,color:s.stockAlt>=(s.uniReq||0)?C.green:C.red,background:s.stockAlt>=(s.uniReq||0)?`${C.green}15`:`${C.red}15`,borderRadius:4,padding:"2px 7px",flexShrink:0}}>Alt {s.stockAlt}u</span>
+                                  <span style={{fontSize:9,color:C.t4,background:C.bg3,borderRadius:4,padding:"2px 6px"}}>{s.nPedidos} ped.</span>
+                                </div>
+                              </div>
+                              {/* Detalle expandido: todas las posiciones con ubicación, # caja y cantidad */}
+                              {abierto&&posAll.length>0&&(
+                                <div style={{borderTop:`1px solid ${C.b0}`,padding:"8px 11px",display:"flex",flexDirection:"column",gap:4}}>
+                                  <div style={{fontSize:8,fontWeight:700,color:C.t4,textTransform:"uppercase",letterSpacing:"1px",marginBottom:4}}>Posiciones en WMS</div>
+                                  {posAll.map((p,pi)=>{
+                                    const esPiso=p.nivel<=1;
+                                    return(
+                                      <div key={pi} style={{display:"flex",alignItems:"center",gap:8,padding:"5px 8px",background:esPiso?`${C.green}0d`:`${C.purple}0d`,borderRadius:6,border:`1px solid ${esPiso?C.green+"22":C.purple+"22"}`}}>
+                                        <span style={{fontSize:8,fontWeight:700,color:esPiso?C.green:C.purple,background:esPiso?`${C.green}20`:`${C.purple}20`,borderRadius:3,padding:"1px 5px",flexShrink:0}}>{esPiso?"PISO":"ALTURA"}</span>
+                                        <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:11,fontWeight:800,color:C.t1,minWidth:60}}>{p.ubi}</span>
+                                        {p.cajap&&<span style={{fontSize:9,color:C.t3}}>Caja <span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:700,color:C.accent}}>{p.cajap}</span></span>}
+                                        <span style={{marginLeft:"auto",fontFamily:"'JetBrains Mono',monospace",fontSize:12,fontWeight:800,color:esPiso?C.green:C.purple,flexShrink:0}}>{p.saldo}u</span>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                              {abierto&&posAll.length===0&&(
+                                <div style={{borderTop:`1px solid ${C.b0}`,padding:"8px 11px",fontSize:10,color:C.t4}}>Sin posiciones con saldo en WMS.</div>
+                              )}
+                            </div>
+                          );})}
+                        </div>
+                      </div>
+                    ))}
+                    {sinUbi.length>0&&(
+                      <div style={{background:C.bg1,borderRadius:10,border:`1px solid ${C.yellow}30`,overflow:"hidden"}}>
+                        <div style={{padding:"8px 14px",background:`${C.yellow}10`,borderBottom:`1px solid ${C.yellow}20`,display:"flex",alignItems:"center",gap:8}}>
+                          <span style={{fontSize:11,fontWeight:700,color:C.yellow}}>⚠ Sin posición de altura en WMS</span>
+                          <span style={{background:`${C.yellow}25`,color:C.yellow,borderRadius:5,padding:"2px 8px",fontSize:10,fontWeight:700}}>{sinUbi.length} SKUs</span>
+                        </div>
+                        <div style={{padding:"8px 12px",display:"flex",flexDirection:"column",gap:5}}>
+                          {sinUbi.map(s=>(
+                            <div key={s.ref} style={{display:"flex",alignItems:"center",gap:8,padding:"5px 10px",background:C.bg2,borderRadius:7}}>
+                              <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:11,fontWeight:700,color:C.teal,minWidth:90}}>{s.ref}</span>
+                              <span style={{fontSize:10,color:C.t3,flex:1}}>{(s.desc||"").slice(0,38)}</span>
+                              <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:12,fontWeight:800,color:C.orange}}>{s.uniReq}u</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
+
             {(()=>{
               // Base: SOLO acciones reales (con gap) — las "ok" no se renderizan (evita saturar el navegador)
               let lista=sorted.filter(s=>gap(s)>0&&(planFam==="todas"||s.familia===planFam));
@@ -2815,9 +3111,19 @@ function CEDIDashboard(){
                 const calleLet=(piso[0]||alt[0]||{}).calleKey?(piso[0]||alt[0]).ubi?.[0]:null;
                 return{calleLet,mejorAlt:alt[0]?alt[0].ubi:null};
               };
-              // P2: filtro por calle
-              const CALLE_DASH_TO_LETRA={C1:"B",C2:"C",C3:"D",C4:"E"};
-              if(planCalle!=="todas"){const letraFilt=CALLE_DASH_TO_LETRA[planCalle];lista=lista.filter(s=>infoUbi(s).calleLet===letraFilt);}
+              // P2: filtro por calle — basado en familia del SKU según layout del CEDI
+              // C1: 3110 · 102 · 405 | C2: 501-SP SOLID · 503 | C3: 501 general | C4: 321 · 3130
+              if(planCalle!=="todas"){
+                lista=lista.filter(s=>{
+                  const f=s.familia||"";
+                  const d=((s.desc||s.label||"")).toUpperCase();
+                  if(planCalle==="C1")return["3110","102","405"].includes(f);
+                  if(planCalle==="C2")return(f==="501"&&/SP/.test(d))||f==="503";
+                  if(planCalle==="C3")return f==="501";
+                  if(planCalle==="C4")return["321","3130"].includes(f);
+                  return true;
+                });
+              }
               // #5: detectar posiciones de altura compartidas (varios SKUs bajan de la misma ubi)
               const altCount={};
               lista.forEach(s=>{const u=infoUbi(s).mejorAlt;if(u)altCount[u]=(altCount[u]||0)+1;});
@@ -2829,14 +3135,86 @@ function CEDIDashboard(){
               }
               // hechos al final
               lista=[...lista].sort((a,b)=>(hechos[a.id]?1:0)-(hechos[b.id]?1:0));
+
+              // ── RESUMEN Y AGRUPACIÓN POR FAMILIA cuando hay filtro de calle ──
+              const famResumen=(()=>{
+                const map={};
+                lista.forEach(s=>{
+                  const f=s.familia||"OTRO";
+                  if(!map[f])map[f]={fam:f,total:0,hechos_:0,gapTotal:0,abcA:0};
+                  map[f].total++;
+                  if(hechos[s.id])map[f].hechos_++;
+                  map[f].gapTotal+=gap(s);
+                  if(s.abc==="A")map[f].abcA++;
+                });
+                return Object.values(map).sort((a,b)=>b.abcA-a.abcA||b.total-a.total);
+              })();
+
               const TOPE_RENDER=150; // salvaguarda de rendimiento
               const totalLista=lista.length;
               const recortada=totalLista>TOPE_RENDER;
               const listaRender=recortada?lista.slice(0,TOPE_RENDER):lista;
-              return(<>{recortada&&<div style={{background:`${C.yellow}10`,border:`1px solid ${C.yellow}30`,borderRadius:8,padding:"8px 12px",marginBottom:8,fontSize:10,color:C.yellow}}>Mostrando las {TOPE_RENDER} acciones más prioritarias de {totalLista}. Usa el filtro de familia para ver el resto.</div>}
-              {listaRender.map((s,idx)=>{
-              const _ui=infoUbi(s);
-              const calleDestino=_ui.calleLet?CALLE_LET[_ui.calleLet]:null;
+              return(<>
+              {/* Resumen por familia cuando hay filtro de calle */}
+              {planCalle!=="todas"&&famResumen.length>0&&(
+                <div style={{background:C.bg2,border:`2px solid ${calleCol[planCalle]}30`,borderRadius:12,padding:"14px 16px",marginBottom:10}}>
+                  <div style={{fontSize:10,fontWeight:700,color:calleCol[planCalle],textTransform:"uppercase",letterSpacing:"0.8px",marginBottom:10}}>
+                    Análisis {planCalle} — {calleSub[planCalle]} · {lista.length} acciones pendientes
+                  </div>
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(130px,1fr))",gap:7}}>
+                    {famResumen.map(f=>{
+                      const pctH=f.total>0?Math.round(f.hechos_/f.total*100):0;
+                      return(
+                        <div key={f.fam} style={{background:C.bg1,borderRadius:8,padding:"9px 10px",border:`1px solid ${C.b0}`}}>
+                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+                            <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:12,fontWeight:800,color:calleCol[planCalle]}}>ICH-{f.fam}</span>
+                            {f.abcA>0&&<span style={{fontSize:8,background:`${C.green}20`,color:C.green,border:`1px solid ${C.green}30`,borderRadius:3,padding:"1px 4px",fontWeight:700}}>{f.abcA}A</span>}
+                          </div>
+                          <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:18,fontWeight:800,color:C.orange,lineHeight:1}}>{f.total}</div>
+                          <div style={{fontSize:9,color:C.t4,marginTop:2}}>acciones · gap {f.gapTotal}u</div>
+                          <div style={{height:3,background:C.bg3,borderRadius:2,marginTop:6,overflow:"hidden"}}>
+                            <div style={{width:`${pctH}%`,height:"100%",background:C.green}}/>
+                          </div>
+                          <div style={{fontSize:8,color:C.t4,marginTop:2}}>{pctH}% completo</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+              {recortada&&<div style={{background:`${C.yellow}10`,border:`1px solid ${C.yellow}30`,borderRadius:8,padding:"8px 12px",marginBottom:8,fontSize:10,color:C.yellow}}>Mostrando las {TOPE_RENDER} acciones más prioritarias de {totalLista}. Usa el filtro de familia para ver el resto.</div>}
+              {/* Agrupación por familia cuando hay calle seleccionada */}
+              {planCalle!=="todas"?(lista.length===0?(
+                <div style={{textAlign:"center",padding:"48px 20px",display:"flex",flexDirection:"column",alignItems:"center",gap:10}}>
+                  <div style={{fontSize:40,color:C.green}}>✓</div>
+                  <div style={{fontWeight:700,fontSize:15,color:C.green}}>Sin brechas en {planCalle}</div>
+                  <div style={{fontSize:12,color:C.t3}}>No hay acciones pendientes para <span style={{color:calleCol[planCalle],fontWeight:700}}>{calleSub[planCalle]}</span></div>
+                  <div style={{fontSize:11,color:C.t4,maxWidth:300,textAlign:"center",lineHeight:1.5,marginTop:4}}>Todos los productos de esta calle están al día o no tienen brechas activas en el turno actual.</div>
+                </div>
+              ):(()=>{
+                // Agrupar por familia manteniendo el orden de prioridad interno
+                const grupos=[];
+                const famVistas=new Set();
+                listaRender.forEach(s=>{
+                  const f=s.familia||"OTRO";
+                  if(!famVistas.has(f)){famVistas.add(f);grupos.push({tipo:"header",fam:f});}
+                  grupos.push({tipo:"item",s});
+                });
+                let idxReal=0;
+                return grupos.map((grp,gi)=>{
+                  if(grp.tipo==="header"){
+                    const fr=famResumen.find(x=>x.fam===grp.fam)||{total:0,gapTotal:0};
+                    return(
+                      <div key={"h"+grp.fam} style={{display:"flex",alignItems:"center",gap:10,margin:"14px 0 6px",padding:"7px 12px",background:`${calleCol[planCalle]}12`,borderRadius:7,border:`1px solid ${calleCol[planCalle]}30`}}>
+                        <span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:800,fontSize:12,color:calleCol[planCalle]}}>ICH-{grp.fam}</span>
+                        <span style={{fontSize:9,color:C.t3}}>{fr.total} acciones · gap {fr.gapTotal}u</span>
+                        <div style={{flex:1,height:1,background:`${calleCol[planCalle]}20`}}/>
+                      </div>
+                    );
+                  }
+                  const {s}=grp; const idx=idxReal++;
+                  const _ui=infoUbi(s);
+                  const calleDestino=_ui.calleLet?CALLE_LET[_ui.calleLet]:null;
               const altCompartida=_ui.mejorAlt&&altCount[_ui.mejorAlt]>1?_ui.mejorAlt:null;
               const isHecho=!!hechos[s.id];
               const e=estado(s),g=gap(s),t=tRup(s),eM=sem[e],aM=abcCol[s.abc];
@@ -2963,52 +3341,139 @@ function CEDIDashboard(){
                   })()}
                 </div>
               );
-              })}</>); // cierra listaRender.map y fragmento
-            })()}
-
-            {/* Orden de prioridad de reabastecimiento — bajar de altura */}
-            {(()=>{
-              const reabasto=(data?.pedidosActivos||[]).filter(p=>p.clasificacion==="reabasto"||p.clasificacion==="parcial"||p.clasificacion==="ruptura");
-              // Agregar SKUs que faltan en piso (necesitan bajar de altura)
-              const skuFalta={};
-              reabasto.forEach(p=>{
-                (p.refs||[]).forEach(r=>{
-                  if(!r.hasPiso&&r.hasAlt){
-                    if(!skuFalta[r.ref])skuFalta[r.ref]={ref:r.ref,desc:r.desc,uniReq:0,pedidos:new Set(),stockAlt:0};
-                    skuFalta[r.ref].uniReq+=r.cant;
-                    skuFalta[r.ref].pedidos.add(p.id);
-                    const pos=(data?.invBySKU||{})[r.ref]||[];
-                    skuFalta[r.ref].stockAlt=pos.filter(x=>x.nivel>=2).reduce((t,x)=>t+x.saldo,0);
-                  }
-                });
               });
-              const lista=Object.values(skuFalta).map(s=>({...s,nPedidos:s.pedidos.size,pallets:Math.ceil(s.uniReq/72)})).sort((a,b)=>b.uniReq-a.uniReq);
-              if(lista.length===0)return null;
-              return(
-                <div style={{background:C.bg2,border:`1px solid ${C.orange}30`,borderTop:`2px solid ${C.orange}`,borderRadius:13,overflow:"hidden",marginTop:14}}>
-                  <div style={{padding:"11px 18px",borderBottom:`1px solid ${C.b0}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                    <span style={{fontWeight:700,color:C.t1,fontSize:12}}>⬇ Prioridad de Reabastecimiento — Bajar de Altura</span>
-                    <span style={{color:C.orange,fontSize:11,fontWeight:600}}>{lista.length} SKUs · {lista.reduce((t,s)=>t+s.pallets,0)} pallets</span>
-                  </div>
-                  <table style={{width:"100%",borderCollapse:"collapse"}}>
-                    <thead><tr>{["#","Referencia","Descripción","Unid. Faltan","Pedidos Afectados","Stock Altura","Pallets a Bajar"].map(h=><TH key={h}>{h}</TH>)}</tr></thead>
-                    <tbody>
-                      {lista.map((s,i)=>(
-                        <tr key={s.ref} className="row" style={{borderBottom:`1px solid ${C.bg1}`}}>
-                          <TD c={C.t3} fs={10}>{i+1}</TD>
-                          <TD><span onClick={()=>setSelSKU(s.ref)} style={{fontFamily:"'JetBrains Mono',monospace",color:C.teal,fontWeight:700,fontSize:11,cursor:"pointer",textDecoration:"underline",textDecorationColor:`${C.teal}40`}}>{s.ref}</span></TD>
-                          <TD c={C.t2} fs={10}>{(s.desc||"").slice(0,40)}</TD>
-                          <TD right mono c={C.orange} fw={700} fs={13}>{s.uniReq}</TD>
-                          <TD right mono c={C.accent} fw={600}>{s.nPedidos}</TD>
-                          <TD right mono c={s.stockAlt>=s.uniReq?C.green:C.red} fw={600}>{s.stockAlt}</TD>
-                          <TD right><span style={{fontFamily:"'JetBrains Mono',monospace",color:C.purple,fontWeight:700,fontSize:13}}>📦 {s.pallets}</span></TD>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              );
+              })())
+              :(
+                // ── sin filtro de calle: lista normal con acordeón completo ──
+                listaRender.map((s,idx)=>{
+                  const _ui=infoUbi(s);
+                  const calleDestino=_ui.calleLet?CALLE_LET[_ui.calleLet]:null;
+                  const altCompartida=_ui.mejorAlt&&altCount[_ui.mejorAlt]>1?_ui.mejorAlt:null;
+                  const isHecho=!!hechos[s.id];
+                  const e=estado(s),g=gap(s),t=tRup(s),eM=sem[e],aM=abcCol[s.abc];
+                  const cs2=cantSug(s,bufH,bufF),cap=Math.min(100,Math.round((s.stock_res/Math.max(cs2,1))*100));
+                  const v=ventana(s),vM=vtCol[v.st],buf=Math.max(0,cs2-g),isOk=e==="ok",cubierto=s.stock_piso>=s.comp&&!s.nota;
+                  const estaExpandida=expandPlan===s.id||expandPlan==="all";
+                  return(
+                    <div key={s.id} style={{background:isHecho?C.bg1:C.bg2,borderRadius:11,marginBottom:7,border:`1px solid ${isHecho?C.green+"30":isOk?C.b0:eM.c+"25"}`,borderLeft:`3px solid ${isHecho?C.green:isOk?C.b0:eM.c}`,opacity:isHecho?0.45:isOk?0.3:1,animation:idx<15?"fadeUp .3s ease both":"none",animationDelay:idx<15?`${idx*0.03}s`:"0s",transition:"opacity .3s"}}>
+                      <div style={{padding:"11px 16px",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:7}}>
+                        <div onClick={()=>setExpandPlan(estaExpandida?null:s.id)} style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",cursor:"pointer",flex:1,minWidth:0}}>
+                          <span style={{color:isOk?C.t4:eM.c,fontSize:11,transition:"transform .2s",transform:estaExpandida?"rotate(90deg)":"none",flexShrink:0}}>▶</span>
+                          <div style={{width:22,height:22,borderRadius:"50%",background:isOk?C.bg3:eM.dim,border:`1px solid ${isOk?C.b0:eM.c+"50"}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:800,color:isOk?C.t3:eM.c,fontFamily:"'JetBrains Mono',monospace",flexShrink:0}}>
+                            {isOk?"✓":idx+1}
+                          </div>
+                          <Pill label={s.abc} c={aM.c} dim={aM.dim}/>
+                          <Pill label={eM.l} c={eM.c} dim={eM.dim}/>
+                          <span style={{color:C.t1,fontWeight:700,fontFamily:"'JetBrains Mono',monospace"}}>{s.id}</span>
+                          <span style={{color:C.t3,fontSize:10}}>{s.label.slice(0,30)}</span>
+                          {s.tendencia&&s.tendencia!=="estable"&&<Badge label={s.tendencia==="creciente"?"↑ Sube":"↓ Baja"} c={s.tendencia==="creciente"?C.green:C.red} dim={s.tendencia==="creciente"?C.greenDim:C.redDim}/>}
+                          {s.tieneHist===false&&<Badge label="~est." c={C.t3} dim={C.bg3}/>}
+                          {s.ciudad==="MDE"&&<Badge label="📍 MDE 11AM" c={C.orange} dim={C.orangeDim}/>}
+                          {cubierto&&<Badge label="✓ CUBIERTO" c={C.green} dim={C.greenDim}/>}
+                          {calleDestino&&<Badge label={"📍 "+calleDestino} c={C.accent} dim={C.accentDim}/>}
+                          {altCompartida&&<Badge label={"🔗 viaje "+altCompartida} c={C.purple} dim={C.purpleDim}/>}
+                        </div>
+                        <div style={{display:"flex",gap:6,flexShrink:0}}>
+                          {!isOk&&<button onClick={()=>setHechos(h=>({...h,[s.id]:!h[s.id]}))} style={{padding:"12px 18px",minHeight:44,borderRadius:9,background:isHecho?C.green:C.bg3,border:`1px solid ${isHecho?C.green:C.b0}`,color:isHecho?C.bg0:C.t2,fontWeight:700,fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>{isHecho?"✓ Repuesto":"Marcar hecho"}</button>}
+                          {!isOk&&<button onClick={()=>setTareas(t=>({...t,[s.id]:!t[s.id]}))} style={{padding:"12px 18px",minHeight:44,borderRadius:9,background:tareas[s.id]?C.bg3:C.teal,border:`1px solid ${C.teal}`,color:tareas[s.id]?C.teal:C.bg0,fontWeight:700,fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>{tareas[s.id]?"✓ Asignada":"Asignar"}</button>}
+                        </div>
+                      </div>
+                      {!isOk&&estaExpandida&&(
+                        <div style={{borderTop:`1px solid ${C.b0}`,display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr"}}>
+                          <div style={{padding:"11px 14px",borderRight:`1px solid ${C.b0}`}}>
+                            <div style={{fontSize:8,fontWeight:700,color:C.t3,textTransform:"uppercase",letterSpacing:"1px",marginBottom:7}}>① QUÉ</div>
+                            {[{l:"Stock piso",v:s.stock_piso,c:s.stock_piso===0?C.red:C.green},{l:"Comprometido",v:s.comp,c:C.yellow},{l:"Gap",v:g>0?`-${g}`:"✓",c:g>0?C.red:C.green}].map(r=>(
+                              <div key={r.l} style={{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:3}}>
+                                <span style={{color:C.t3}}>{r.l}</span><span style={{color:r.c,fontWeight:700,fontFamily:"'JetBrains Mono',monospace"}}>{r.v}</span>
+                              </div>
+                            ))}
+                          </div>
+                          <div style={{padding:"11px 14px",borderRight:`1px solid ${C.b0}`}}>
+                            <div style={{fontSize:8,fontWeight:700,color:C.t3,textTransform:"uppercase",letterSpacing:"1px",marginBottom:7}}>② CUÁNDO</div>
+                            <div style={{background:`${vM.c}12`,border:`1px solid ${vM.c}30`,borderRadius:7,padding:"7px",textAlign:"center",marginBottom:7}}>
+                              <div style={{fontSize:8,color:vM.c,fontWeight:700}}>{vM.l}</div>
+                              <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:17,fontWeight:800,color:vM.c}}>{v.min<=0?`${Math.abs(v.min)}m tarde`:`en ${v.min}m`}</div>
+                            </div>
+                            <div style={{fontSize:10,color:C.t3}}>Ciclo: {LEAD+TREP}m total</div>
+                          </div>
+                          <div style={{padding:"11px 14px",borderRight:`1px solid ${C.b0}`}}>
+                            <div style={{fontSize:8,fontWeight:700,color:C.t3,textTransform:"uppercase",letterSpacing:"1px",marginBottom:7}}>③ CUÁNTO</div>
+                            <div style={{textAlign:"center",marginBottom:6}}>
+                              <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:36,fontWeight:800,color:C.orange,lineHeight:1}}>{cs2}</div>
+                              <div style={{fontSize:9,color:C.t3}}>u · {Math.ceil(cs2/9)} cajas · ×9</div>
+                            </div>
+                            {[{l:"Gap",v:`+${g}`,c:C.red},{l:`Buffer ${bufH}h`,v:`+${buf}`,c:C.yellow},{l:"Total",v:cs2,c:C.orange}].map((r,i)=>(
+                              <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:10,marginBottom:2,borderTop:i===2?`1px solid ${C.b0}`:"none",paddingTop:i===2?3:0}}>
+                                <span style={{color:C.t3}}>{r.l}</span><span style={{color:r.c,fontWeight:i===2?800:600,fontFamily:"'JetBrains Mono',monospace"}}>{r.v}</span>
+                              </div>
+                            ))}
+                          </div>
+                          <div style={{padding:"11px 14px"}}>
+                            <div style={{fontSize:8,fontWeight:700,color:C.t3,textTransform:"uppercase",letterSpacing:"1px",marginBottom:7}}>④ PUEDO</div>
+                            <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+                              <span style={{fontSize:10,color:C.t3}}>Reserva</span>
+                              <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:18,fontWeight:800,color:cap<70?C.red:cap<100?C.yellow:C.green}}>{cap}%</span>
+                            </div>
+                            <div style={{height:3,background:C.b0,borderRadius:2,overflow:"hidden",marginBottom:7}}>
+                              <div style={{width:`${cap}%`,height:"100%",background:cap<70?C.red:cap<100?C.yellow:C.green}}/>
+                            </div>
+                            <div style={{fontSize:10,color:C.t3}}>Tendencia: <span style={{color:s.tend==="CRECIENTE"?C.green:s.tend==="DECRECIENTE"?C.red:C.yellow,fontWeight:600}}>{s.tend}</span></div>
+                          </div>
+                        </div>
+                      )}
+                      {(()=>{
+                        if(e==="ok"||g<=0||!estaExpandida)return null;
+                        const CALLE_N={B:"C1",C:"C2",D:"C3",E:"C4"};
+                        const posAll=(invBySKU[s.id]||[]);
+                        const enAltura=posAll.filter(p=>p.nivel>=2).sort((a,b)=>b.saldo-a.saldo);
+                        if(enAltura.length===0)return(
+                          <div style={{borderTop:`1px solid ${C.b0}`,padding:"9px 14px",background:`${C.red}06`,display:"flex",alignItems:"center",gap:8}}>
+                            <span style={{fontSize:13}}>⚠</span>
+                            <div>
+                              <div style={{fontSize:8,fontWeight:700,color:C.red,textTransform:"uppercase",letterSpacing:"1px"}}>⑤ BAJAR DE</div>
+                              <div style={{fontSize:10,color:C.red,fontWeight:600,marginTop:2}}>Sin stock en altura — verificar bodega</div>
+                            </div>
+                          </div>
+                        );
+                        const porUbi={};
+                        enAltura.forEach(p=>{if(!porUbi[p.ubi])porUbi[p.ubi]={ubi:p.ubi,nivel:p.nivel,total:0};porUbi[p.ubi].total+=p.saldo;});
+                        const ubis=Object.values(porUbi).sort((a,b)=>b.total-a.total);
+                        const mejor=ubis[0];
+                        return(
+                          <div style={{borderTop:`1px solid ${C.b0}`,padding:"9px 14px",background:`${C.purple}08`}}>
+                            <div style={{fontSize:8,fontWeight:700,color:C.purple,textTransform:"uppercase",letterSpacing:"1px",marginBottom:6}}>⑤ BAJAR DE ALTURA · {ubis.length} posicion{ubis.length>1?"es":""}</div>
+                            <div style={{display:"flex",flexDirection:"column",gap:4}}>
+                              {ubis.map((u,ui)=>{
+                                const calleN=CALLE_N[u.ubi?.[0]]||u.ubi?.[0]||"?";
+                                const modN=u.ubi?.slice(1,3)||"?";
+                                const esRec=ui===0;
+                                return(
+                                  <div key={u.ubi} style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,padding:"5px 8px",borderRadius:7,background:esRec?`${C.green}12`:"transparent",border:esRec?`1px solid ${C.green}35`:`1px solid ${C.b0}`}}>
+                                    <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                                      <span style={{fontFamily:"'JetBrains Mono',monospace",color:C.teal,fontWeight:800,fontSize:14,background:C.bg0,border:`1px solid ${C.teal}40`,borderRadius:6,padding:"2px 8px"}}>{u.ubi}</span>
+                                      <span style={{fontSize:10,color:C.t2}}>Calle {calleN} · Mód {modN} · Niv {u.nivel}</span>
+                                      {esRec&&<span style={{background:C.greenDim,color:C.green,border:`1px solid ${C.green}40`,borderRadius:4,padding:"1px 7px",fontSize:8,fontWeight:800}}>✓ BAJAR ESTA</span>}
+                                    </div>
+                                    <div style={{textAlign:"right",flexShrink:0}}>
+                                      <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:16,fontWeight:800,color:esRec?C.green:C.purple}}>{u.total}</span>
+                                      <span style={{fontSize:8,color:C.t3,marginLeft:2}}>u</span>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                            <div style={{fontSize:8,color:C.t4,marginTop:5}}>Recomendación: bajar de <span style={{color:C.green,fontWeight:700}}>{mejor.ubi}</span> (mayor cantidad disponible)</div>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  );
+                })
+              )}
+              </> ); // cierra fragmento
             })()}
+            </> /* cierra planSubTab==="lista" */}
+
           </div>
         )}
 
@@ -3209,12 +3674,36 @@ function CEDIDashboard(){
               <div style={SCROLL_BOX}>
               <table style={{width:"100%",borderCollapse:"collapse",minWidth:920}}>
                 <thead>
-                  <tr>{["Estado","Pedido","Picking","Cliente","Ciudad","Fecha","Líneas","Unidades","Nota","Despacho"].map(h=><TH key={h}>{h}</TH>)}</tr>
+                  <tr>{[
+                    {k:"estado",  l:"Estado",   sort:null},
+                    {k:"pedido",  l:"Pedido",   sort:null},
+                    {k:"picking", l:"Picking",  sort:null},
+                    {k:"cliente", l:"Cliente",  sort:"cliente"},
+                    {k:"ciudad",  l:"Ciudad",   sort:"ciudad"},
+                    {k:"fecha",   l:"Fecha",    sort:"fecha"},
+                    {k:"lineas",  l:"Líneas",   sort:"lineas",  right:true},
+                    {k:"unidades",l:"Unidades", sort:"unidades",right:true},
+                    {k:"nota",    l:"Nota",     sort:"nota"},
+                    {k:"despacho",l:"Despacho", sort:null},
+                  ].map(h=>{
+                    if(!h.sort)return <TH key={h.k}>{h.l}</TH>;
+                    const activo=pedOrden.col===h.sort;
+                    const flecha=activo?(pedOrden.dir==="asc"?"↑":"↓"):"⇅";
+                    return(
+                      <th key={h.k} onClick={()=>setPedOrden(o=>o.col===h.sort?{col:h.sort,dir:o.dir==="asc"?"desc":"asc"}:{col:h.sort,dir:"asc"})}
+                        style={{padding:"8px 10px",textAlign:h.right?"right":"left",fontSize:9,fontWeight:700,color:activo?C.yellow:C.t3,
+                          textTransform:"uppercase",letterSpacing:"0.7px",whiteSpace:"nowrap",
+                          borderBottom:`1px solid ${C.b0}`,cursor:"pointer",userSelect:"none",
+                          background:activo?`${C.yellow}0a`:"transparent",transition:"all .15s"}}>
+                        {h.l} <span style={{opacity:activo?1:0.4,fontSize:10}}>{flecha}</span>
+                      </th>
+                    );
+                  })}</tr>
                 </thead>
                 <tbody>
                   {(()=>{
                     const q=pedSearch.trim().toLowerCase();
-                    const filtrados=(data?.pedidosActivos||[]).filter(p=>{
+                    let filtrados=(data?.pedidosActivos||[]).filter(p=>{
                       if(pedFiltro==="despachable"&&p.clasificacion!=="despachable")return false;
                       if(pedFiltro==="reabasto"&&p.clasificacion!=="reabasto"&&p.clasificacion!=="parcial")return false;
                       if(pedFiltro==="ruptura"&&p.clasificacion!=="ruptura")return false;
@@ -3228,6 +3717,19 @@ function CEDIDashboard(){
                       }
                       return true;
                     });
+                    // Ordenar por columna activa
+                    if(pedOrden.col){
+                      const d=pedOrden.dir==="asc"?1:-1;
+                      filtrados=[...filtrados].sort((a,b)=>{
+                        if(pedOrden.col==="cliente")  return d*(a.cliente||"").localeCompare(b.cliente||"");
+                        if(pedOrden.col==="ciudad")   return d*(a.ciudad||"").localeCompare(b.ciudad||"");
+                        if(pedOrden.col==="fecha")    return d*((a.fecha||"") < (b.fecha||"")?-1:(a.fecha||"")>(b.fecha||"")?1:0);
+                        if(pedOrden.col==="lineas")   return d*((a.lineas||0)-(b.lineas||0));
+                        if(pedOrden.col==="unidades") return d*((a.uni||0)-(b.uni||0));
+                        if(pedOrden.col==="nota")     return d*((a.nota?1:0)-(b.nota?1:0));
+                        return 0;
+                      });
+                    }
                     if(filtrados.length===0)return(<tr><td colSpan={10} style={{padding:"30px",textAlign:"center",color:C.t3,fontSize:12}}>Sin pedidos que coincidan con el filtro</td></tr>);
                     return filtrados.map((p,i)=>{
                     const ECOL3={sin_planear:{c:C.t3,l:"Sin Planear"},planeado:{c:C.accent,l:"Planeado"},en_picking:{c:C.yellow,l:"En Picking"}};
@@ -3287,7 +3789,8 @@ function CEDIDashboard(){
                                 <div style={{fontSize:9,color:C.t3,fontWeight:600,textTransform:"uppercase",letterSpacing:"0.8px",marginBottom:8}}>
                                   {p.lineas} líneas · {p.cliente}
                                 </div>
-                                <table style={{width:"100%",borderCollapse:"collapse"}}>
+                                <div style={{overflowX:"auto",WebkitOverflowScrolling:"touch"}}>
+                                <table style={{width:"100%",borderCollapse:"collapse",minWidth:520}}>
                                   <thead>
                                     <tr style={{borderBottom:`1px solid ${C.b0}`}}>
                                       {["#","Referencia","Descripción","Cant.","Stock Piso","Stock Altura","Falta Bajar","Cobertura"].map(h=>(
@@ -3381,6 +3884,7 @@ function CEDIDashboard(){
                                     })()}
                                   </tbody>
                                 </table>
+                                </div>
                               </div>
                             </td>
                           </tr>
@@ -3698,7 +4202,7 @@ function CEDIDashboard(){
                 <span style={{fontWeight:700,color:C.t1,fontSize:12}}>{stockTbl?"▼":"▶"} Detalle — Todos los SKUs CASCO</span>
                 <span style={{color:C.t3,fontSize:11}}>{(st?.totalSKUs||0).toLocaleString()} SKUs · EXPO excluido</span>
               </div>
-              {stockTbl&&<table style={{width:"100%",borderCollapse:"collapse"}}>
+              {stockTbl&&<div style={{overflowX:"auto",WebkitOverflowScrolling:"touch"}}><table style={{width:"100%",borderCollapse:"collapse",minWidth:640}}>
                 <thead><tr>{["#","Referencia","Descripción","Familia","Stock Piso","Comprometido","Gap","Días Cob.","Estado Op."].map(h=><TH key={h}>{h}</TH>)}</tr></thead>
                 <tbody>
                   {(data?.allItems||[]).slice(0,60).map((s,i)=>{
@@ -3721,7 +4225,7 @@ function CEDIDashboard(){
                     );
                   })}
                 </tbody>
-              </table>}
+              </table></div>}
             </div>
           </div>
         )}
@@ -3779,7 +4283,8 @@ function CEDIDashboard(){
                   </div>
                 </div>
               </div>
-              <table style={{width:"100%",borderCollapse:"collapse"}}>
+              <div style={{overflowX:"auto",WebkitOverflowScrolling:"touch"}}>
+              <table style={{width:"100%",borderCollapse:"collapse",minWidth:560}}>
                 <thead><tr>{["#","Ref.","Descripción","Stock Piso","Cajas","Fracción","A Subir","Razón","Recomendación"].map(h=><TH key={h}>{h}</TH>)}</tr></thead>
                 <tbody>
                   {altFilt.map((s,i)=>{
@@ -3808,6 +4313,7 @@ function CEDIDashboard(){
                   })}
                 </tbody>
               </table>
+              </div>
               <div style={{padding:"8px 18px",borderTop:`1px solid ${C.b0}`,display:"flex",justifyContent:"space-between",fontSize:10,color:C.t3}}>
                 <span>{altFilt.length} SKUs{slotBusca||slotFam!=="todas"?" (filtrados)":""}</span>
                 <span style={{color:C.yellow,fontWeight:600}}>Pallet = 72u · 8 cajas · {altFilt.reduce((t,s)=>t+(s.pallets_subir||0),0)} pallets total</span>
@@ -3826,7 +4332,8 @@ function CEDIDashboard(){
               {palletsSugeridos.length===0?(
                 <div style={{padding:20,textAlign:"center",color:C.t3,fontSize:12}}>✅ No hay pallets en altura con SKUs requeridos actualmente</div>
               ):(
-                <table style={{width:"100%",borderCollapse:"collapse"}}>
+                <div style={{overflowX:"auto",WebkitOverflowScrolling:"touch"}}>
+                <table style={{width:"100%",borderCollapse:"collapse",minWidth:580}}>
                   <thead><tr>{["Posición","Calle · Mod","Nivel","Stock Pallet","SKUs con Gap","Cajas a Bajar","Acción · Detalle"].map(h=><TH key={h}>{h}</TH>)}</tr></thead>
                   <tbody>
                     {palletsSugeridos.slice(0,25).map((p,i)=>{
@@ -3858,6 +4365,7 @@ function CEDIDashboard(){
                     })}
                   </tbody>
                 </table>
+                </div>
               )}
             </div>
           </div>
@@ -3965,8 +4473,8 @@ function CEDIDashboard(){
             <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:14}}>
 
               <Sec title={`🔴 Rupturas (${rupturas.length})`} sub="piso=0 con pedidos activos" c={`${rupturas.length} SKUs`}>
-                <div style={{maxHeight:420,overflowY:"auto"}}>
-                  <table style={{width:"100%",borderCollapse:"collapse"}}>
+                <div style={{maxHeight:420,overflowY:"auto",overflowX:"auto",WebkitOverflowScrolling:"touch"}}>
+                  <table style={{width:"100%",borderCollapse:"collapse",minWidth:360}}>
                     <thead style={{position:"sticky",top:0,zIndex:1}}>
                       <tr>{["Ref.","Descripción","Comp.","Alt.","Acción"].map(h=><TH key={h}>{h}</TH>)}</tr>
                     </thead>
@@ -3995,8 +4503,8 @@ function CEDIDashboard(){
               </Sec>
 
               <Sec title={`🟠 Para Abastecer (${gapsR.length})`} sub="piso < comprometido" c={`gap: ${(st?.totalGap||0).toLocaleString()}u`}>
-                <div style={{maxHeight:420,overflowY:"auto"}}>
-                  <table style={{width:"100%",borderCollapse:"collapse"}}>
+                <div style={{maxHeight:420,overflowY:"auto",overflowX:"auto",WebkitOverflowScrolling:"touch"}}>
+                  <table style={{width:"100%",borderCollapse:"collapse",minWidth:360}}>
                     <thead style={{position:"sticky",top:0,zIndex:1}}>
                       <tr>{["Ref.","Descripción","Piso","Comp.","Gap","% Falta"].map(h=><TH key={h}>{h}</TH>)}</tr>
                     </thead>
@@ -4119,4 +4627,50 @@ function CEDIDashboard(){
       window.addEventListener('load',()=>{navigator.serviceWorker.register('./sw.js').catch(()=>{});});
     }
   </script>
+
+  <!-- ════════════ SEGURIDAD ════════════ -->
+  <div id="sec-overlay" style="display:none;position:fixed;inset:0;z-index:2147483647;background:rgba(4,12,23,0.98);flex-direction:column;align-items:center;justify-content:center;gap:18px;font-family:'JetBrains Mono',monospace;text-align:center;padding:32px;">
+    <div style="font-size:52px;">🔒</div>
+    <div style="font-size:17px;font-weight:700;color:#38bdf8;letter-spacing:1px;">ACCESO RESTRINGIDO</div>
+    <div style="font-size:12px;color:#4a6380;max-width:340px;line-height:1.7;">Esta plataforma es propiedad exclusiva de <span style="color:#38bdf8;font-weight:700;">INDUCASOS</span>.<br>El acceso no autorizado a su código fuente o estructura interna está prohibido.<br><br>Cierra las herramientas de desarrollador para continuar.</div>
+  </div>
+  <script>
+  (function(){
+    var ov=document.getElementById('sec-overlay');
+    var _dt=false;
+
+    // 1 · Bloquear clic derecho (impide "Inspeccionar" e "Ver código fuente")
+    document.addEventListener('contextmenu',function(e){e.preventDefault();},true);
+
+    // 2 · Bloquear atajos de teclado que exponen el código
+    document.addEventListener('keydown',function(e){
+      var c=e.ctrlKey||e.metaKey, s=e.shiftKey, k=(e.key||'').toLowerCase();
+      // F12 → DevTools
+      if(e.key==='F12'){e.preventDefault();e.stopImmediatePropagation();return false;}
+      // Ctrl+Shift+I / J / C / K → DevTools / Consola / Inspector
+      if(c&&s&&['i','j','c','k'].includes(k)){e.preventDefault();e.stopImmediatePropagation();return false;}
+      // Ctrl+U → Ver código fuente
+      if(c&&k==='u'){e.preventDefault();e.stopImmediatePropagation();return false;}
+      // Ctrl+S → Guardar página (descarga el HTML)
+      if(c&&k==='s'){e.preventDefault();e.stopImmediatePropagation();return false;}
+      // Ctrl+P → Imprimir (puede revelar contenido)
+      if(c&&k==='p'){e.preventDefault();e.stopImmediatePropagation();return false;}
+    },true);
+
+    // 3 · Bloquear arrastrar texto o elementos (drag-to-copy)
+    document.addEventListener('dragstart',function(e){e.preventDefault();},true);
+
+    // 4 · Detectar DevTools por diferencia de ANCHO (solo escritorio, lado/derecho)
+    // NO se usa la altura: en móvil el teclado virtual agranda la diferencia y da falsos positivos
+    var _isMob=/Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+    if(!_isMob){
+      setInterval(function(){
+        var dw=window.outerWidth-window.innerWidth>160;
+        if(dw&&!_dt){_dt=true;if(ov)ov.style.display='flex';}
+        else if(!dw&&_dt){_dt=false;if(ov)ov.style.display='none';}
+      },700);
+    }
+  })();
+  </script>
+  <!-- ═══════════════════════════════════ -->
 </body></html>
