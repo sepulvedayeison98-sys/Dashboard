@@ -6,7 +6,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>INDUCASOS · Montacargas v3</title>
+<title>INDUCASOS · Montacargas v4</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
@@ -467,12 +467,12 @@ function MontacargasApp(){
                               </div>
                               {!esBajada&&!esFalloPosicion&&!reportandoEstePosicion&&(pos.skus||[]).map((s,si)=>(
                                 <div key={si} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"3px 0",borderTop:si>0?`1px solid ${C.b0}`:"none"}}>
-                                  <div style={{display:"flex",alignItems:"center",gap:5}}>
+                                  <div style={{display:"flex",alignItems:"center",gap:5,flexWrap:"wrap"}}>
                                     <span style={{fontSize:8,background:`${C.accent}20`,color:C.accent,borderRadius:3,padding:"1px 4px",fontWeight:800}}>SKU</span>
                                     <span style={{fontFamily:"'JetBrains Mono',monospace",color:C.accent,fontSize:11,fontWeight:700}}>{s.ref}</span>
+                                    {s.tipo&&<span style={{fontSize:8,background:`${C.purple}20`,color:C.purple,border:`1px solid ${C.purple}30`,borderRadius:3,padding:"1px 5px",fontWeight:800,letterSpacing:.3}}>{s.tipo}</span>}
                                   </div>
                                   <div style={{display:"flex",alignItems:"center",gap:6}}>
-                                    <span style={{color:C.t3,fontSize:9,maxWidth:90,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{(s.desc||"").slice(0,18)}</span>
                                     <span style={{fontFamily:"'JetBrains Mono',monospace",color:C.yellow,fontSize:11,fontWeight:700}}>{s.cant}u</span>
                                   </div>
                                 </div>

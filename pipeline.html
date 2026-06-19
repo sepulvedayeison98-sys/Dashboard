@@ -6,7 +6,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>INDUCASOS · Picking Móvil v3</title>
+<title>INDUCASOS · Picking Móvil v4</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -251,11 +251,13 @@ function procesar(wbInv, wbFact) {
     const saldo = toNum(r["saldo"]);
     const ubi = String(r["ubicacion"] || "").trim();
     const cajap = String(r["cajap"] || "").trim();
+    const tipo = String(r["Tipo"] || "").trim();
     if (!ref) continue;
     const p = parseUbi(ubi);
     if (!stockMap[ref]) stockMap[ref] = {
       ref,
       desc,
+      tipo,
       stock: 0,
       stockAlt: 0,
       stockTotal: 0
@@ -271,7 +273,8 @@ function procesar(wbInv, wbFact) {
         pos: p.pos,
         calleLetra: p.calleLetra,
         modulo: p.modulo,
-        cajap
+        cajap,
+        tipo
       });
     }
   }
@@ -499,7 +502,7 @@ function LoginForm({
       fontSize: 12,
       marginTop: 4
     }
-  }, "Picking Móvil · CEDI ITAGUÍ · v3")), /*#__PURE__*/React.createElement("div", {
+  }, "Picking Móvil · CEDI ITAGUÍ · v4")), /*#__PURE__*/React.createElement("div", {
     style: {
       background: C.bg2,
       borderRadius: 16,
@@ -892,6 +895,7 @@ function PickingApp() {
       skus: v.skus.map(s => ({
         ref: s.ref,
         desc: s.desc,
+        tipo: s.tipo || "",
         cant: s.pide,
         saldo: s.disp
       })),
@@ -1103,6 +1107,7 @@ function PickingApp() {
         nivel: mejor.nivel,
         ref,
         desc: mejor.desc,
+        tipo: mejor.tipo || "",
         pide,
         disp: mejor.saldo,
         cubre,
@@ -1125,6 +1130,7 @@ function PickingApp() {
       map[a.ubi].skus.push({
         ref: a.ref,
         desc: a.desc,
+        tipo: a.tipo || "",
         pide: a.pide,
         disp: a.disp,
         cubre: a.cubre,
