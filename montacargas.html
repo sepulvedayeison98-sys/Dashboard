@@ -225,7 +225,12 @@ function MontacargasApp(){
     .sort((a,b)=>{
       const au=a.es_mde?1:0,bu=b.es_mde?1:0;
       if(au!==bu)return bu-au;
-      return new Date(a.fecha_solicitud)-new Date(b.fecha_solicitud);
+      const pa=ordenarPos(a.posiciones||[])[0]||{};
+      const pb=ordenarPos(b.posiciones||[])[0]||{};
+      return (CALLE_ORD[pa.calleLetra]||9)-(CALLE_ORD[pb.calleLetra]||9)
+        ||(pa.modulo||0)-(pb.modulo||0)
+        ||(pa.nivel||0)-(pb.nivel||0)
+        ||new Date(a.fecha_solicitud)-new Date(b.fecha_solicitud);
     });
 
   const agrupadoPorUBI=useMemo(()=>{
