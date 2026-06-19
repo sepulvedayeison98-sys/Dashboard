@@ -84,6 +84,7 @@ const marcaDe=desc=>{const p=String(desc||"").trim().split(/\s+/);return p.lengt
 const familia=d=>{const u=(d||"").toUpperCase();if(/\bT[- ]?10\b/.test(u))return "T-10";const m=u.match(/ICH[- ]?([0-9]{2,4})/);return m?m[1]:"OTRO";};
 const esMDE=ciudad=>{const x=String(ciudad||"").toUpperCase().trim();return x==="MDE"||x.includes("MEDELL")||x==="ITAGUI"||x==="ITAGÜI"||x.includes("ITAGU");};
 const tieneNota=n=>String(n||"").trim().length>0;
+const fmtHora=ts=>{if(!ts)return"";const d=new Date(ts);return d.toLocaleTimeString("es-CO",{hour:"2-digit",minute:"2-digit"});};
 
 // ═══════════ PROCESAR DATOS (lógica idéntica al master) ═══════════
 function procesar(wbInv,wbFact){
