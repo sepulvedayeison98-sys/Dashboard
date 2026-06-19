@@ -753,10 +753,10 @@ function PickingApp() {
       map[n.ubi].items.push(n);
       map[n.ubi].pedidos.add(n.picking);
     });
-    return Object.values(map).map(v => ({
+    return ordenarRecorrido(Object.values(map).map(v => ({
       ...v,
       nPedidos: v.pedidos.size
-    })).sort((a, b) => b.nPedidos - a.nPedidos || b.items.length - a.items.length);
+    })));
   }, [data]);
   const resultadosSKU = useMemo(() => {
     if (!data) return [];
@@ -1118,8 +1118,8 @@ function PickingApp() {
       map[a.ubi].totalDisp += a.disp;
     });
 
-    // 4. Ordenar: más SKUs por viaje primero → maximiza eficiencia por parada
-    return Object.values(map).sort((a, b) => b.skus.length - a.skus.length || b.totalDisp - a.totalDisp);
+    // 4. Ordenar por recorrido: calle B→C→D→E, módulo y nivel ascendente
+    return ordenarRecorrido(Object.values(map));
   }, [recorrido.altura]);
 
   // Detectar si ya se recogió todo el piso (para prompt auto-agendar)
