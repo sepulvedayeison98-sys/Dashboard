@@ -39,7 +39,7 @@ const _H={apikey:SUPA_KEY,Authorization:`Bearer ${SUPA_KEY}`,"Content-Type":"app
 const _go=async(url,opts={})=>{
   for(let i=0;i<3;i++){
     try{
-      const res=await fetch(url,{headers:_H,...opts});
+      const res=await fetch(url,{cache:'no-cache',headers:_H,...opts});
       if(res.ok){const t=await res.text();return{data:t?JSON.parse(t):null,error:null};}
       if([400,403,404,409].includes(res.status)){const t=await res.text();return{data:null,error:{status:res.status,message:t}};}
       if(i<2)await new Promise(ok=>setTimeout(ok,(i+1)*2000));

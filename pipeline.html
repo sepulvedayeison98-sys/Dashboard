@@ -62,6 +62,7 @@ const _go = async (url, opts = {}) => {
   for (let i = 0; i < 3; i++) {
     try {
       const res = await fetch(url, {
+        cache: 'no-cache',
         headers: _H,
         ...opts
       });
