@@ -6,7 +6,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>INDUCASOS · Montacargas v8</title>
+<title>INDUCASOS · Montacargas v9</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
@@ -220,6 +220,31 @@ function MontacargasApp(){
     setReportandoPos(r=>({...r,[key]:false}));
   };
 
+  // Marcar una UBI como bajada en TODOS los turnos activos que la necesiten
+  const marcarRutaUBI=async(ubiEntry)=>{
+    const pendientes=ubiEntry.posiciones.filter(p=>!p.bajada&&!p.fallo);
+    if(!pendientes.length)return;
+    const key=`ruta-${ubiEntry.ubi}`;
+    setProcesando(p=>({...p,[key]:true}));
+    const ts=new Date().toISOString();
+    const byTurno={};
+    pendientes.forEach(p=>{
+      if(!byTurno[p.turnoId])byTurno[p.turnoId]=[];
+      byTurno[p.turnoId].push(p.posIdx);
+    });
+    for(const [turnoId,idxs] of Object.entries(byTurno)){
+      const turno=turnos.find(t=>t.id===turnoId);
+      if(!turno)continue;
+      const nuevasPos=turno.posiciones.map((p,i)=>idxs.includes(i)?{...p,bajada:true,bajada_ts:ts}:p);
+      await sb.from("turnos").update({posiciones:nuevasPos}).eq("id",turnoId);
+      if(nuevasPos.every(p=>p.bajada||p.fallo)){
+        await sb.from("turnos").update({estado:"completado",montacarguista:operario,fecha_completado:ts}).eq("id",turnoId);
+      }
+    }
+    await refrescar();
+    setProcesando(p=>({...p,[key]:false}));
+  };
+
   const limpiarCompletados=async()=>{
     if(!window.confirm("¿Eliminar todos los turnos completados y fallidos?\nNo se puede deshacer."))return;
     const{data:doneT}=await _go(`${SUPA_URL}/rest/v1/turnos?estado=in.(completado,fallido)&select=id,picking`,{headers:_H});
@@ -243,17 +268,48 @@ function MontacargasApp(){
         ||new Date(a.fecha_solicitud)-new Date(b.fecha_solicitud);
     });
 
+  // Turnos que el montacarguista tiene actualmente en proceso
+  const misTurnosActivos=useMemo(()=>
+    turnos.filter(t=>t.estado==="en_proceso"&&t.montacarguista===operario),
+    [turnos,operario]
+  );
+
+  // Ruta agrupada por UBI: usa turnos activos propios si los hay, o todos los pendientes para planear
   const agrupadoPorUBI=useMemo(()=>{
-    const pend=turnos.filter(t=>t.estado==="pendiente").sort((a,b)=>(a.es_mde?0:1)-(b.es_mde?0:1));
+    const enActivo=misTurnosActivos.length>0;
+    const fuente=enActivo
+      ?misTurnosActivos
+      :turnos.filter(t=>t.estado==="pendiente").sort((a,b)=>(a.es_mde?0:1)-(b.es_mde?0:1));
     const map={};
-    pend.forEach(t=>{
-      (t.posiciones||[]).forEach(pos=>{
-        if(!map[pos.ubi])map[pos.ubi]={ubi:pos.ubi,calleLetra:pos.calleLetra,modulo:pos.modulo,nivel:pos.nivel,turnos:[]};
-        map[pos.ubi].turnos.push({id:t.id,picking:t.picking,cliente:t.cliente,urgente:t.es_mde||t.prioridad==="urgente",skus:pos.skus||[],totalSaldo:pos.totalSaldo});
+    fuente.forEach(t=>{
+      (t.posiciones||[]).forEach((pos,i)=>{
+        if(!map[pos.ubi])map[pos.ubi]={ubi:pos.ubi,calleLetra:pos.calleLetra,modulo:pos.modulo,nivel:pos.nivel,posiciones:[]};
+        map[pos.ubi].posiciones.push({
+          turnoId:t.id,posIdx:i,picking:t.picking,cliente:t.cliente,
+          urgente:t.es_mde||t.prioridad==="urgente",
+          skus:pos.skus||[],totalSaldo:pos.totalSaldo,
+          bajada:pos.bajada||false,fallo:pos.fallo||false,
+        });
       });
     });
-    return Object.values(map).sort((a,b)=>b.turnos.length-a.turnos.length||(CALLE_ORD[a.calleLetra]||9)-(CALLE_ORD[b.calleLetra]||9)||(a.modulo||0)-(b.modulo||0));
-  },[turnos]);
+    if(enActivo){
+      // Ruta real: pendientes primero, luego por ubicación física
+      return Object.values(map).sort((a,b)=>{
+        const aDone=a.posiciones.every(p=>p.bajada||p.fallo);
+        const bDone=b.posiciones.every(p=>p.bajada||p.fallo);
+        if(aDone!==bDone)return aDone?1:-1;
+        return (CALLE_ORD[a.calleLetra]||9)-(CALLE_ORD[b.calleLetra]||9)
+          ||(a.modulo||0)-(b.modulo||0)
+          ||(a.nivel||0)-(b.nivel||0);
+      });
+    }
+    // Modo planeación: más demandadas primero, luego por ubicación
+    return Object.values(map).sort((a,b)=>
+      b.posiciones.length-a.posiciones.length
+      ||(CALLE_ORD[a.calleLetra]||9)-(CALLE_ORD[b.calleLetra]||9)
+      ||(a.modulo||0)-(b.modulo||0)
+    );
+  },[turnos,operario,misTurnosActivos]);
 
   // Cuántos turnos pendientes necesitan cada UBI (para priorizar posiciones compartidas)
   const demandaMap=useMemo(()=>{
@@ -276,6 +332,9 @@ function MontacargasApp(){
 
   const nPend=porEstado("pendiente").length;
   const nProc=porEstado("en_proceso").length;
+  const nRuta=misTurnosActivos.length>0
+    ?agrupadoPorUBI.filter(u=>!u.posiciones.every(p=>p.bajada||p.fallo)).length
+    :agrupadoPorUBI.length;
   const listaRaw=tab==="agrupado"?[]:porEstado(tab);
   const unaHoraAtras=Date.now()-3600000;
   const lista=tab==="completado"
@@ -300,7 +359,7 @@ function MontacargasApp(){
           {[
             {key:"pendiente",lbl:"⏳ Pend.",n:nPend,col:C.yellow},
             {key:"en_proceso",lbl:"🔄 En curso",n:nProc,col:C.orange},
-            {key:"agrupado",lbl:"📊 Ruta",n:agrupadoPorUBI.length,col:C.purple},
+            {key:"agrupado",lbl:misTurnosActivos.length>0?"🗺 Mi Ruta":"📊 Ruta",n:nRuta,col:C.purple},
             {key:"completado",lbl:"✅ Listo",n:null,col:C.green},
           ].map(t=>(
             <button key={t.key} onClick={()=>setTab(t.key)} style={{flex:1,padding:"8px 2px",borderRadius:9,border:`1px solid ${tab===t.key?t.col:C.b0}`,background:tab===t.key?`${t.col}18`:C.bg2,color:tab===t.key?t.col:C.t3,fontWeight:700,fontSize:10,position:"relative"}}>
@@ -554,90 +613,221 @@ function MontacargasApp(){
           </>
         )}
 
-        {/* ── TAB RUTA AGRUPADA ── */}
+        {/* ── TAB RUTA ── */}
         {tab==="agrupado"&&(
           <>
-            {agrupadoPorUBI.length===0
-              ?<div style={{textAlign:"center",color:C.t3,padding:"50px 20px"}}>
-                <div style={{fontSize:40,marginBottom:12}}>🎉</div>
-                <div style={{fontSize:14}}>Sin turnos pendientes</div>
-              </div>
-              :<div>
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginBottom:10}}>
-                  {[
-                    {l:"Posiciones",v:agrupadoPorUBI.length,c:C.purple},
-                    {l:"Pedidos únicos",v:new Set(agrupadoPorUBI.flatMap(u=>u.turnos.map(t=>t.picking))).size,c:C.teal},
-                  ].map(k=>(
-                    <div key={k.l} style={{background:C.bg2,borderRadius:9,padding:"10px",textAlign:"center",border:`1px solid ${C.b0}`}}>
-                      <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:24,fontWeight:800,color:k.c,lineHeight:1}}>{k.v}</div>
-                      <div style={{fontSize:9,color:C.t4,fontWeight:700,textTransform:"uppercase",marginTop:4}}>{k.l}</div>
-                    </div>
-                  ))}
-                </div>
-                <div style={{fontSize:10,color:C.t3,marginBottom:8,textAlign:"center"}}>Un viaje por posición · baja para todos los pedidos de una sola vez</div>
-                {agrupadoPorUBI.map((pos,pi)=>{
-                  const isMultiPed=pos.turnos.length>1;
-                  const tieneUrgente=pos.turnos.some(t=>t.urgente);
-                  const totalUnids=pos.turnos.reduce((s,t)=>t.skus.reduce((u,k)=>u+k.cant,s),0);
-                  const exp=!!expandido[`grup-${pos.ubi}`];
-                  return(
-                    <div key={pos.ubi} style={{background:C.bg2,borderRadius:12,marginBottom:8,border:`1px solid ${tieneUrgente?C.red+"40":isMultiPed?C.yellow+"40":C.b0}`,borderLeft:`4px solid ${tieneUrgente?C.red:isMultiPed?C.yellow:C.purple}`,animation:"fadeUp .2s ease both"}}>
-                      <div onClick={()=>setExpandido(o=>({...o,[`grup-${pos.ubi}`]:!o[`grup-${pos.ubi}`]}))} style={{padding:"12px 14px",cursor:"pointer"}}>
-                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6}}>
-                          <div style={{display:"flex",alignItems:"center",gap:8}}>
-                            <div style={{width:28,height:28,borderRadius:"50%",background:`${isMultiPed?C.yellow:C.purple}20`,color:isMultiPed?C.yellow:C.purple,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:11,flexShrink:0}}>{pi+1}</div>
-                            <div>
-                              <div style={{display:"flex",alignItems:"center",gap:7,flexWrap:"wrap"}}>
-                                <span style={{fontFamily:"'JetBrains Mono',monospace",color:C.teal,fontWeight:800,fontSize:16}}>{pos.ubi}</span>
-                                {tieneUrgente&&<span style={{background:`${C.red}20`,color:C.red,borderRadius:4,padding:"1px 5px",fontSize:8,fontWeight:800}}>🚨</span>}
-                                {isMultiPed&&<span style={{background:`${C.yellow}20`,color:C.yellow,borderRadius:4,padding:"1px 6px",fontSize:8,fontWeight:700}}>{pos.turnos.length} pedidos</span>}
-                              </div>
-                              <div style={{color:C.t3,fontSize:9,marginTop:2}}>{CALLE_NOM[pos.calleLetra]} · Mód {pos.modulo} · Niv {pos.nivel}</div>
-                            </div>
-                          </div>
-                          <div style={{textAlign:"right",display:"flex",alignItems:"center",gap:8}}>
-                            <div>
-                              <div style={{fontFamily:"'JetBrains Mono',monospace",color:C.green,fontWeight:800,fontSize:15}}>{totalUnids}u</div>
-                              <div style={{color:C.t4,fontSize:8}}>{pos.turnos.reduce((s,t)=>s+t.skus.length,0)} SKUs</div>
-                            </div>
-                            <span style={{color:C.t3,fontSize:14,transform:exp?"rotate(90deg)":"none",transition:"transform .2s"}}>▶</span>
-                          </div>
+            {misTurnosActivos.length>0?(
+              /* ── MODO RUTA ACTIVA: tengo turnos en proceso ── */
+              (()=>{
+                const totalPos=agrupadoPorUBI.reduce((s,u)=>s+u.posiciones.length,0);
+                const bajadas=agrupadoPorUBI.reduce((s,u)=>s+u.posiciones.filter(p=>p.bajada||p.fallo).length,0);
+                const pct=totalPos>0?Math.round(bajadas/totalPos*100):0;
+                const nPendUBI=agrupadoPorUBI.filter(u=>!u.posiciones.every(p=>p.bajada||p.fallo)).length;
+                return(
+                  <div>
+                    {/* Resumen de ruta */}
+                    <div style={{background:C.bg2,borderRadius:13,padding:"13px 14px",marginBottom:10,border:`1px solid ${C.purple}30`}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10}}>
+                        <div>
+                          <div style={{fontWeight:800,fontSize:13,color:C.purple}}>🗺 Tu ruta</div>
+                          <div style={{fontSize:9,color:C.t3,marginTop:2}}>{misTurnosActivos.length} turno{misTurnosActivos.length!==1?"s":""} activo{misTurnosActivos.length!==1?"s":""} · {nPendUBI} posición{nPendUBI!==1?"es":""} pendiente{nPendUBI!==1?"s":""}</div>
                         </div>
-                        {!exp&&<div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
-                          {pos.turnos.map((t,ti)=>(
-                            <span key={ti} style={{fontFamily:"'JetBrains Mono',monospace",background:t.urgente?`${C.red}15`:C.bg3,border:`1px solid ${t.urgente?C.red+"40":C.b0}`,borderRadius:4,padding:"2px 6px",fontSize:9,color:t.urgente?C.red:C.teal}}>{t.picking}</span>
-                          ))}
-                        </div>}
+                        <div style={{textAlign:"right"}}>
+                          <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:24,fontWeight:900,color:pct===100?C.green:C.orange,lineHeight:1}}>{pct}<span style={{fontSize:11,fontWeight:600,color:C.t3}}>%</span></div>
+                          <div style={{fontSize:8,color:C.t4}}>{bajadas}/{totalPos} bajadas</div>
+                        </div>
                       </div>
-                      {exp&&(
-                        <div style={{borderTop:`1px solid ${C.b0}`,padding:"8px 14px 10px"}}>
-                          {pos.turnos.map((t,ti)=>(
-                            <div key={ti} style={{background:C.bg3,borderRadius:8,padding:"8px 10px",marginBottom:5,borderLeft:`3px solid ${t.urgente?C.red:C.teal}`}}>
-                              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
-                                <div style={{display:"flex",alignItems:"center",gap:5}}>
-                                  {t.urgente&&<span style={{fontSize:9,color:C.red,fontWeight:800}}>🚨</span>}
-                                  <span style={{fontFamily:"'JetBrains Mono',monospace",color:C.teal,fontWeight:800,fontSize:12}}>{t.picking}</span>
-                                </div>
-                                <span style={{color:C.t3,fontSize:10,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:120}}>{t.cliente}</span>
-                              </div>
-                              {t.skus.map((s,si)=>(
-                                <div key={si} style={{display:"flex",justifyContent:"space-between",padding:"2px 0",borderTop:si>0?`1px solid ${C.b0}`:"none"}}>
-                                  <div style={{display:"flex",alignItems:"center",gap:4}}>
-                                    <span style={{fontSize:7,background:`${C.accent}20`,color:C.accent,borderRadius:2,padding:"0 3px",fontWeight:800}}>SKU</span>
-                                    <span style={{fontFamily:"'JetBrains Mono',monospace",color:C.accent,fontSize:10}}>{s.ref}</span>
-                                  </div>
-                                  <span style={{fontFamily:"'JetBrains Mono',monospace",color:C.yellow,fontSize:10,fontWeight:700}}>{s.cant}u</span>
-                                </div>
-                              ))}
-                            </div>
-                          ))}
-                        </div>
-                      )}
+                      <div style={{height:6,background:C.b0,borderRadius:4,overflow:"hidden",marginBottom:10}}>
+                        <div style={{height:"100%",width:`${pct}%`,background:pct===100?C.green:`linear-gradient(90deg,${C.purple},${C.teal})`,borderRadius:4,transition:"width .5s cubic-bezier(.4,0,.2,1)",boxShadow:pct>0?`0 0 8px ${C.purple}50`:"none"}}/>
+                      </div>
+                      {/* Chips por turno */}
+                      <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                        {misTurnosActivos.map(t=>{
+                          const nB=(t.posiciones||[]).filter(p=>p.bajada).length;
+                          const nT=(t.posiciones||[]).length;
+                          const done=nB===nT;
+                          return(
+                            <span key={t.id} style={{fontFamily:"'JetBrains Mono',monospace",background:done?`${C.green}15`:C.bg3,border:`1px solid ${done?C.green+"40":C.b0}`,borderRadius:5,padding:"2px 8px",fontSize:9,color:done?C.green:C.teal}}>
+                              {t.picking} {done?"✓":`${nB}/${nT}`}
+                            </span>
+                          );
+                        })}
+                      </div>
                     </div>
-                  );
-                })}
-              </div>
-            }
+
+                    {nPendUBI===0
+                      ?<div style={{textAlign:"center",color:C.green,padding:"30px 20px"}}>
+                        <div style={{fontSize:40,marginBottom:10}}>✅</div>
+                        <div style={{fontSize:14,fontWeight:700}}>¡Todo bajado!</div>
+                        <div style={{fontSize:11,color:C.t3,marginTop:4}}>Ve a "En curso" para completar los turnos</div>
+                      </div>
+                      :agrupadoPorUBI.map((ubiEntry,pi)=>{
+                        const pendPos=ubiEntry.posiciones.filter(p=>!p.bajada&&!p.fallo);
+                        const allDone=pendPos.length===0;
+                        const tieneUrgente=pendPos.some(p=>p.urgente);
+                        const isMulti=ubiEntry.posiciones.length>1;
+                        const keyProc=`ruta-${ubiEntry.ubi}`;
+                        const proc=!!procesando[keyProc];
+                        const totalUnids=ubiEntry.posiciones.reduce((s,p)=>p.skus.reduce((u,k)=>u+k.cant,s),0);
+                        const exp=!!expandido[`ruta-${ubiEntry.ubi}`];
+                        const borderCol=allDone?C.t4:tieneUrgente?C.red:isMulti?C.yellow:C.purple;
+                        return(
+                          <div key={ubiEntry.ubi} style={{background:allDone?C.bg1:C.bg2,borderRadius:13,marginBottom:7,border:`1px solid ${allDone?C.b0:tieneUrgente?C.red+"40":isMulti?C.yellow+"30":C.purple+"30"}`,borderLeft:`4px solid ${borderCol}`,opacity:allDone?0.45:1,animation:"fadeUp .2s ease both",transition:"opacity .4s"}}>
+                            <div onClick={()=>setExpandido(o=>({...o,[`ruta-${ubiEntry.ubi}`]:!o[`ruta-${ubiEntry.ubi}`]}))} style={{padding:"11px 13px",cursor:"pointer"}}>
+                              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:allDone?0:5}}>
+                                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                                  <div style={{width:27,height:27,borderRadius:"50%",background:allDone?`${C.t4}15`:`${borderCol}20`,color:allDone?C.t4:borderCol,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:10,flexShrink:0}}>
+                                    {allDone?"✓":pi+1}
+                                  </div>
+                                  <div>
+                                    <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+                                      <span style={{fontFamily:"'JetBrains Mono',monospace",color:allDone?C.t3:C.teal,fontWeight:800,fontSize:15}}>{ubiEntry.ubi}</span>
+                                      {tieneUrgente&&!allDone&&<span style={{background:`${C.red}20`,color:C.red,borderRadius:3,padding:"0 4px",fontSize:7,fontWeight:800}}>🚨</span>}
+                                      {isMulti&&!allDone&&<span style={{background:`${C.yellow}20`,color:C.yellow,borderRadius:3,padding:"1px 5px",fontSize:8,fontWeight:700}}>{ubiEntry.posiciones.length} ped.</span>}
+                                    </div>
+                                    <div style={{color:C.t3,fontSize:8,marginTop:1}}>{CALLE_NOM[ubiEntry.calleLetra]} · Mód {ubiEntry.modulo} · Niv {ubiEntry.nivel}</div>
+                                  </div>
+                                </div>
+                                <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
+                                  {!allDone&&<div style={{textAlign:"right"}}>
+                                    <div style={{fontFamily:"'JetBrains Mono',monospace",color:C.green,fontWeight:800,fontSize:14}}>{totalUnids}u</div>
+                                    <div style={{fontSize:7,color:C.t4}}>{ubiEntry.posiciones.reduce((s,p)=>s+p.skus.length,0)} SKUs</div>
+                                  </div>}
+                                  <span style={{color:C.t3,fontSize:13,transform:exp?"rotate(90deg)":"none",transition:"transform .2s"}}>▶</span>
+                                </div>
+                              </div>
+                              {!allDone&&!exp&&(
+                                <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
+                                  {pendPos.map((p,i)=>(
+                                    <span key={i} style={{fontFamily:"'JetBrains Mono',monospace",background:p.urgente?`${C.red}15`:C.bg3,border:`1px solid ${p.urgente?C.red+"40":C.b0}`,borderRadius:4,padding:"1px 6px",fontSize:9,color:p.urgente?C.red:C.teal}}>{p.picking}</span>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                            {exp&&(
+                              <div style={{borderTop:`1px solid ${C.b0}`,padding:"7px 13px 9px"}}>
+                                {ubiEntry.posiciones.map((p,i)=>(
+                                  <div key={i} style={{background:p.bajada?`${C.green}08`:p.fallo?`${C.red}08`:C.bg3,borderRadius:8,padding:"6px 9px",marginBottom:4,borderLeft:`3px solid ${p.bajada?C.green:p.fallo?C.red:p.urgente?C.red:C.teal}`,opacity:p.bajada||p.fallo?0.65:1}}>
+                                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:p.skus.length>0&&!p.bajada&&!p.fallo?4:0}}>
+                                      <div style={{display:"flex",alignItems:"center",gap:5}}>
+                                        {p.urgente&&!p.bajada&&<span style={{fontSize:8,color:C.red}}>🚨</span>}
+                                        <span style={{fontFamily:"'JetBrains Mono',monospace",color:p.bajada?C.green:p.fallo?C.red:C.teal,fontWeight:700,fontSize:11}}>{p.picking}</span>
+                                        {p.bajada&&<span style={{color:C.green,fontSize:9,fontWeight:700}}> ✓ bajado</span>}
+                                        {p.fallo&&<span style={{color:C.red,fontSize:8}}> ⚠ {p.motivo_fallo||"fallo"}</span>}
+                                      </div>
+                                      <span style={{color:C.t3,fontSize:9,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:100}}>{p.cliente}</span>
+                                    </div>
+                                    {!p.bajada&&!p.fallo&&p.skus.map((s,si)=>(
+                                      <div key={si} style={{display:"flex",justifyContent:"space-between",padding:"2px 0",borderTop:si>0?`1px solid ${C.b0}`:"none"}}>
+                                        <div style={{display:"flex",alignItems:"center",gap:4}}>
+                                          <span style={{fontSize:7,background:`${C.accent}20`,color:C.accent,borderRadius:2,padding:"0 3px",fontWeight:800}}>SKU</span>
+                                          <span style={{fontFamily:"'JetBrains Mono',monospace",color:C.accent,fontSize:10}}>{s.ref}</span>
+                                        </div>
+                                        <span style={{fontFamily:"'JetBrains Mono',monospace",color:C.yellow,fontSize:10,fontWeight:700}}>{s.cant}u</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                            {!allDone&&(
+                              <div style={{borderTop:`1px solid ${C.b0}`}}>
+                                <button onClick={()=>marcarRutaUBI(ubiEntry)} disabled={proc}
+                                  style={{width:"100%",padding:"12px",background:proc?C.bg3:`linear-gradient(135deg,${C.purple},${C.teal})`,border:"none",borderRadius:"0 0 12px 12px",color:proc?C.t3:C.bg0,fontWeight:800,fontSize:12,cursor:proc?"not-allowed":"pointer",fontFamily:"inherit",transition:"all .2s"}}>
+                                  {proc?"Procesando...":pendPos.length>1?`⬇ Bajar ${pendPos.length} pallets · ${totalUnids}u`:`⬇ Bajar pallet · ${totalUnids}u`}
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })
+                    }
+                  </div>
+                );
+              })()
+            ):(
+              /* ── MODO PLANEACIÓN: sin turnos activos, vista de demanda pendiente ── */
+              agrupadoPorUBI.length===0
+                ?<div style={{textAlign:"center",color:C.t3,padding:"50px 20px"}}>
+                  <div style={{fontSize:40,marginBottom:12}}>🎉</div>
+                  <div style={{fontSize:14}}>Sin turnos pendientes</div>
+                </div>
+                :<div>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginBottom:10}}>
+                    {[
+                      {l:"Posiciones",v:agrupadoPorUBI.length,c:C.purple},
+                      {l:"Pedidos únicos",v:new Set(agrupadoPorUBI.flatMap(u=>u.posiciones.map(p=>p.picking))).size,c:C.teal},
+                    ].map(k=>(
+                      <div key={k.l} style={{background:C.bg2,borderRadius:9,padding:"10px",textAlign:"center",border:`1px solid ${C.b0}`}}>
+                        <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:24,fontWeight:800,color:k.c,lineHeight:1}}>{k.v}</div>
+                        <div style={{fontSize:9,color:C.t4,fontWeight:700,textTransform:"uppercase",marginTop:4}}>{k.l}</div>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{fontSize:10,color:C.t3,marginBottom:8,textAlign:"center"}}>Vista de demanda · toma turnos para activar tu ruta</div>
+                  {agrupadoPorUBI.map((ubiEntry,pi)=>{
+                    const isMultiPed=ubiEntry.posiciones.length>1;
+                    const tieneUrgente=ubiEntry.posiciones.some(p=>p.urgente);
+                    const totalUnids=ubiEntry.posiciones.reduce((s,p)=>p.skus.reduce((u,k)=>u+k.cant,s),0);
+                    const exp=!!expandido[`grup-${ubiEntry.ubi}`];
+                    return(
+                      <div key={ubiEntry.ubi} style={{background:C.bg2,borderRadius:12,marginBottom:8,border:`1px solid ${tieneUrgente?C.red+"40":isMultiPed?C.yellow+"40":C.b0}`,borderLeft:`4px solid ${tieneUrgente?C.red:isMultiPed?C.yellow:C.purple}`,animation:"fadeUp .2s ease both"}}>
+                        <div onClick={()=>setExpandido(o=>({...o,[`grup-${ubiEntry.ubi}`]:!o[`grup-${ubiEntry.ubi}`]}))} style={{padding:"12px 14px",cursor:"pointer"}}>
+                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6}}>
+                            <div style={{display:"flex",alignItems:"center",gap:8}}>
+                              <div style={{width:28,height:28,borderRadius:"50%",background:`${isMultiPed?C.yellow:C.purple}20`,color:isMultiPed?C.yellow:C.purple,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:11,flexShrink:0}}>{pi+1}</div>
+                              <div>
+                                <div style={{display:"flex",alignItems:"center",gap:7,flexWrap:"wrap"}}>
+                                  <span style={{fontFamily:"'JetBrains Mono',monospace",color:C.teal,fontWeight:800,fontSize:16}}>{ubiEntry.ubi}</span>
+                                  {tieneUrgente&&<span style={{background:`${C.red}20`,color:C.red,borderRadius:4,padding:"1px 5px",fontSize:8,fontWeight:800}}>🚨</span>}
+                                  {isMultiPed&&<span style={{background:`${C.yellow}20`,color:C.yellow,borderRadius:4,padding:"1px 6px",fontSize:8,fontWeight:700}}>{ubiEntry.posiciones.length} pedidos</span>}
+                                </div>
+                                <div style={{color:C.t3,fontSize:9,marginTop:2}}>{CALLE_NOM[ubiEntry.calleLetra]} · Mód {ubiEntry.modulo} · Niv {ubiEntry.nivel}</div>
+                              </div>
+                            </div>
+                            <div style={{textAlign:"right",display:"flex",alignItems:"center",gap:8}}>
+                              <div>
+                                <div style={{fontFamily:"'JetBrains Mono',monospace",color:C.green,fontWeight:800,fontSize:15}}>{totalUnids}u</div>
+                                <div style={{color:C.t4,fontSize:8}}>{ubiEntry.posiciones.reduce((s,p)=>s+p.skus.length,0)} SKUs</div>
+                              </div>
+                              <span style={{color:C.t3,fontSize:14,transform:exp?"rotate(90deg)":"none",transition:"transform .2s"}}>▶</span>
+                            </div>
+                          </div>
+                          {!exp&&<div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                            {ubiEntry.posiciones.map((p,i)=>(
+                              <span key={i} style={{fontFamily:"'JetBrains Mono',monospace",background:p.urgente?`${C.red}15`:C.bg3,border:`1px solid ${p.urgente?C.red+"40":C.b0}`,borderRadius:4,padding:"2px 6px",fontSize:9,color:p.urgente?C.red:C.teal}}>{p.picking}</span>
+                            ))}
+                          </div>}
+                        </div>
+                        {exp&&(
+                          <div style={{borderTop:`1px solid ${C.b0}`,padding:"8px 14px 10px"}}>
+                            {ubiEntry.posiciones.map((p,pi2)=>(
+                              <div key={pi2} style={{background:C.bg3,borderRadius:8,padding:"8px 10px",marginBottom:5,borderLeft:`3px solid ${p.urgente?C.red:C.teal}`}}>
+                                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+                                  <div style={{display:"flex",alignItems:"center",gap:5}}>
+                                    {p.urgente&&<span style={{fontSize:9,color:C.red,fontWeight:800}}>🚨</span>}
+                                    <span style={{fontFamily:"'JetBrains Mono',monospace",color:C.teal,fontWeight:800,fontSize:12}}>{p.picking}</span>
+                                  </div>
+                                  <span style={{color:C.t3,fontSize:10,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:120}}>{p.cliente}</span>
+                                </div>
+                                {p.skus.map((s,si)=>(
+                                  <div key={si} style={{display:"flex",justifyContent:"space-between",padding:"2px 0",borderTop:si>0?`1px solid ${C.b0}`:"none"}}>
+                                    <div style={{display:"flex",alignItems:"center",gap:4}}>
+                                      <span style={{fontSize:7,background:`${C.accent}20`,color:C.accent,borderRadius:2,padding:"0 3px",fontWeight:800}}>SKU</span>
+                                      <span style={{fontFamily:"'JetBrains Mono',monospace",color:C.accent,fontSize:10}}>{s.ref}</span>
+                                    </div>
+                                    <span style={{fontFamily:"'JetBrains Mono',monospace",color:C.yellow,fontSize:10,fontWeight:700}}>{s.cant}u</span>
+                                  </div>
+                                ))}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+            )}
           </>
         )}
       </div>
