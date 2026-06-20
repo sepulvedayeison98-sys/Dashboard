@@ -20,6 +20,13 @@
   @keyframes spin{to{transform:rotate(360deg)}}
   @keyframes pop{0%{transform:scale(.8);opacity:0}60%{transform:scale(1.08)}100%{transform:scale(1);opacity:1}}
 </style>
+<link rel="manifest" href="./manifest-montacargas.json"/>
+<meta name="theme-color" content="#a855f7"/>
+<meta name="mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+<meta name="apple-mobile-web-app-title" content="Montacargas"/>
+<link rel="apple-touch-icon" href="./icon-montacargas.svg"/>
 </head>
 <body>
 <div id="root"></div>
@@ -906,5 +913,6 @@ function MontacargasApp(){
 
 ReactDOM.createRoot(document.getElementById("root")).render(<MontacargasApp/>);
 </script>
+<script>if('serviceWorker' in navigator){window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js'));}</script>
 </body>
 </html>

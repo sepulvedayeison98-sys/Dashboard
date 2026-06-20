@@ -31,6 +31,13 @@
   ::-webkit-scrollbar{width:0;height:0;}
   ::selection{background:#38bdf820;}
 </style>
+<link rel="manifest" href="./manifest-pipeline.json"/>
+<meta name="theme-color" content="#38bdf8"/>
+<meta name="mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+<meta name="apple-mobile-web-app-title" content="Picking"/>
+<link rel="apple-touch-icon" href="./icon-picking.svg"/>
 </head>
 <body>
 <div id="root"></div>
@@ -3737,5 +3744,6 @@ function PickingApp() {
 }
 ReactDOM.createRoot(document.getElementById("root")).render(/*#__PURE__*/React.createElement(PickingApp, null));
 </script>
+<script>if('serviceWorker' in navigator){window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js'));}</script>
 </body>
 </html>
