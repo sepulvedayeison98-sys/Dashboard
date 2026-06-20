@@ -211,7 +211,7 @@ const COL_MC  ={main:'#c084fc',glow:'#9333ea',trail:'rgba(192,132,252,0.35)',sz:
 
 const LW=58,TH=28,AH=14;
 let currentTurnos=[],histTurnos=[],bandejaPedidos=[],invPositions=[];
-let heat={},maxMod=15,maxHeat=1;
+let heat={},maxMod=30,maxHeat=1;
 let agents=[],raf=null,viewMode='heatmap',lastTs=0;
 let simRes=null,mcBalance=null;
 
@@ -442,80 +442,57 @@ function buildAgents(){
   agents=[];
   const {CW,CH}=dims();
 
+  // Always build a full-warehouse grid so all calles and modules are visited.
+  // If real inventory loaded → deduplicate by (calle,mod).
+  // Otherwise → synthetic grid covering every cell we know exists.
+  let grid=[];
   if(invPositions.length>0){
-    // Build unique (calle,mod) waypoints in serpentine picking order
     const seen=new Set();
-    const uniq=[];
     invPositions.forEach(u=>{
       const k=`${u.calle}-${u.mod}`;
-      if(!seen.has(k)){seen.add(k);uniq.push(u);}
+      if(!seen.has(k)){seen.add(k);grid.push(u);}
     });
-    // Serpentine: B left→right, C right→left, D left→right, E right→left
-    uniq.sort((a,b)=>{
-      if(a.ci!==b.ci)return a.ci-b.ci;
-      return a.ci%2===0?a.mod-b.mod:b.mod-a.mod;
-    });
-
-    // Each picker covers a zone (segment of the serpentine)
-    // Sample ~18 stops per picker so the route loops visibly
-    const perPick=Math.ceil(uniq.length/nPick);
-    for(let i=0;i<nPick;i++){
-      const ag=new Agent(i,COL_PICK,'pick');
-      const zone=uniq.slice(i*perPick,(i+1)*perPick);
-      const step=Math.max(1,Math.floor(zone.length/18));
-      const route=zone.filter((_,j)=>j%step===0);
-      if(route.length){
-        ag.x=LW+4; ag.y=cy(route[0].ci,CH)+CH/2;
-        ag.assign(route);
-      }
-      agents.push(ag);
-    }
-
-    // MC agents cross all calles (they restock): one stop per calle per pass
-    for(let i=0;i<nMC;i++){
-      const ag=new Agent(i,COL_MC,'mc');
-      const route=CALLES.flatMap(c=>{
-        const pos=uniq.filter(p=>p.calle===c);
-        // Pick 5 evenly-spaced positions from this calle
-        const s=Math.max(1,Math.floor(pos.length/5));
-        return pos.filter((_,j)=>j%s===0).slice(0,5);
-      });
-      if(route.length){
-        ag.x=LW+4; ag.y=cy(i%CALLES.length,CH)+CH/2;
-        ag.assign(route);
-      }
-      agents.push(ag);
-    }
   }else{
-    // Fallback: demo routes when inventory not loaded
-    const source=currentTurnos.length?currentTurnos:histTurnos;
-    const sample=[...source].filter(t=>(t.posiciones||[]).length>0)
-      .sort(()=>Math.random()-.5).slice(0,Math.max(nPick,nMC)*8);
-    const routeFrom=turno=>(turno.posiciones||[]).map(p=>parseUbi(p.ubi)).filter(Boolean);
+    // Synthetic: every calle × every module in the warehouse
+    const gMod=Math.max(maxMod,20);
+    CALLES.forEach((c,ci)=>{
+      for(let m=1;m<=gMod;m++) grid.push({calle:c,ci,mod:m,niv:1,pos:1});
+    });
+  }
 
-    for(let i=0;i<nPick;i++){
-      const ag=new Agent(i,COL_PICK,'pick');
-      const t=sample.length?sample[i%sample.length]:null;
-      const route=t?routeFrom(t):demoRoute(i);
-      if(route.length){
-        const sc=CALLES[i%CALLES.length];
-        ag.x=LW+4; ag.y=cy(CIDX[sc],CH)+CH/2;
-        ag.assign(route);
-      }
-      agents.push(ag);
+  // Serpentine picking order: B→, C←, D→, E←
+  grid.sort((a,b)=>{
+    if(a.ci!==b.ci)return a.ci-b.ci;
+    return a.ci%2===0?a.mod-b.mod:b.mod-a.mod;
+  });
+
+  // Pickers: each owns a zone of the serpentine path (~18 visible waypoints)
+  const perPick=Math.ceil(grid.length/nPick);
+  for(let i=0;i<nPick;i++){
+    const ag=new Agent(i,COL_PICK,'pick');
+    const zone=grid.slice(i*perPick,(i+1)*perPick);
+    const step=Math.max(1,Math.floor(zone.length/18));
+    const route=zone.filter((_,j)=>j%step===0);
+    if(route.length){
+      ag.x=LW+4; ag.y=cy(route[0].ci,CH)+CH/2;
+      ag.assign(route);
     }
-    for(let i=0;i<nMC;i++){
-      const ag=new Agent(i,COL_MC,'mc');
-      const tIdx=sample.length?(i+nPick)%sample.length:-1;
-      const t=tIdx>=0?sample[tIdx]:null;
-      const route=t?routeFrom(t):demoRoute(i+10);
-      if(route.length){
-        const sc=CALLES[(i*2)%CALLES.length];
-        ag.x=LW+4; ag.y=cy(CIDX[sc],CH)+CH/2;
-        ag.assign(route);
-      }
-      agents.push(ag);
+    agents.push(ag);
+  }
+
+  // MC agents: cross all 4 calles in restocking pattern (5 stops per calle)
+  for(let i=0;i<nMC;i++){
+    const ag=new Agent(i,COL_MC,'mc');
+    const route=CALLES.flatMap((c,ci)=>{
+      const pos=grid.filter(p=>p.calle===c);
+      const s=Math.max(1,Math.floor(pos.length/5));
+      return pos.filter((_,j)=>j%s===0).slice(0,5);
+    });
+    if(route.length){
+      ag.x=LW+4; ag.y=cy(i%CALLES.length,CH)+CH/2;
+      ag.assign(route);
     }
+    agents.push(ag);
   }
 }
 
