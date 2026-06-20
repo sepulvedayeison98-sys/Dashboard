@@ -82,6 +82,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:13px;heigh
 .prob-bar-bg{flex:1;height:10px;background:#0d1628;border-radius:5px;overflow:hidden;}
 .prob-bar{height:100%;border-radius:5px;transition:width .4s;}
 </style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" crossorigin></script>
 </head>
 <body>
 <div class="hdr">
@@ -209,7 +210,7 @@ const COL_PICK={main:'#38bdf8',glow:'#0ea5e9',trail:'rgba(56,189,248,0.28)',sz:7
 const COL_MC  ={main:'#c084fc',glow:'#9333ea',trail:'rgba(192,132,252,0.35)',sz:11};
 
 const LW=58,TH=28,AH=14;
-let currentTurnos=[],histTurnos=[];
+let currentTurnos=[],histTurnos=[],bandejaPedidos=[];
 let heat={},maxMod=15,maxHeat=1;
 let agents=[],raf=null,viewMode='heatmap',lastTs=0;
 let simRes=null,mcBalance=null;
@@ -681,6 +682,27 @@ async function loadData(){
       document.getElementById('badge-hist').style.display='none';
     }
 
+    // Load real pedidos from Bandeja de Planeación Excel
+    document.getElementById('ltxt').textContent='Leyendo Bandeja de Planeación (Excel)...';
+    try{
+      const xRes=await fetch('./Bandejadeplaneacion.xlsx',{cache:'reload'});
+      if(xRes.ok){
+        const xBuf=await xRes.arrayBuffer();
+        const xwb=XLSX.read(xBuf,{type:'array'});
+        const xws=xwb.Sheets['ITAGUÍ'];
+        if(xws){
+          const rows=XLSX.utils.sheet_to_json(xws,{range:5,defval:''});
+          const pm={};
+          rows.forEach(r=>{
+            const k=String(r['Picking']||r['PedidoSiesa']||'').trim();
+            if(!k||k==='0')return;
+            pm[k]=(pm[k]||0)+1;
+          });
+          bandejaPedidos=Object.values(pm); // line count per unique pedido
+        }
+      }
+    }catch(ex){ console.warn('Bandeja Excel no disponible:',ex); }
+
     document.getElementById('ltxt').textContent='Ejecutando Monte Carlo...';
     setTimeout(()=>{
       runMC();
@@ -700,7 +722,7 @@ function setMode(m){
   document.querySelectorAll('.pill').forEach(p=>p.classList.toggle('on',p.dataset.mode===m));
   document.getElementById('cap-pnl').style.display=m==='analisis'?'block':'none';
   if(m==='animate'&&(currentTurnos.length||histTurnos.length)){startAnim();}
-  else if(m==='analisis'){stopAnim();if(histTurnos.length||currentTurnos.length)runCapacityMC();else drawAnalysis();}
+  else if(m==='analisis'){stopAnim();if(bandejaPedidos.length||histTurnos.length||currentTurnos.length)runCapacityMC();else drawAnalysis();}
   else{stopAnim();fullDraw();}
 }
 
@@ -708,54 +730,61 @@ function setMode(m){
 let capResults=null; // [{n, prob}]
 
 function runCapacityMC(){
-  const tPed=parseInt(document.getElementById('sl-tped').value); // min per pedido
-  const tVar=tPed*0.35; // ±35% variance
+  const tPed=parseInt(document.getElementById('sl-tped').value);
   const jornadaMin=parseInt(document.getElementById('sl-jorn').value)*60;
-  const nSims=600;
+  const nSims=400;
 
-  // Daily volume from histTurnos grouped by date
-  const byDate={};
-  histTurnos.forEach(t=>{
-    if(!t.fecha_solicitud)return;
-    const d=t.fecha_solicitud.slice(0,10);
-    byDate[d]=(byDate[d]||0)+1;
-  });
-  const dailyCounts=Object.values(byDate).filter(n=>n>=3); // skip near-empty days
-  if(dailyCounts.length<2){
-    // fallback: use currentTurnos count or a default
-    const fallback=Math.max(currentTurnos.length,15);
-    dailyCounts.push(fallback,fallback,Math.round(fallback*1.2));
+  // Use real Excel pedido data if loaded; fallback to Supabase turno count
+  let pedidos,totalPed,totalLines,avgLines;
+  if(bandejaPedidos.length>0){
+    pedidos=bandejaPedidos; // array of line counts per unique pedido
+    totalPed=pedidos.length;
+    totalLines=pedidos.reduce((a,b)=>a+b,0);
+    avgLines=totalLines/totalPed;
+  }else{
+    const vol=Math.max(currentTurnos.length,50);
+    pedidos=Array.from({length:vol},()=>1);
+    totalPed=vol;totalLines=vol;avgLines=1;
   }
 
   const results=[];
-  for(let N=1;N<=16;N++){
+  for(let N=1;N<=25;N++){
     let done=0;
     for(let s=0;s<nSims;s++){
-      const vol=dailyCounts[Math.floor(Math.random()*dailyCounts.length)];
       const ends=Array(N).fill(0);
-      for(let i=0;i<vol;i++){
-        const t=tPed-tVar+Math.random()*tVar*2;
-        const mi=ends.indexOf(Math.min(...ends));
-        ends[mi]+=Math.max(5,t);
+      for(let i=0;i<pedidos.length;i++){
+        // Scale time by how complex this pedido is relative to average
+        const factor=avgLines>0?pedidos[i]/avgLines:1;
+        const t=Math.max(3,tPed*factor*(0.65+Math.random()*0.70));
+        // Assign to least-busy worker (fast loop, no spread)
+        let mi=0;for(let k=1;k<N;k++)if(ends[k]<ends[mi])mi=k;
+        ends[mi]+=t;
       }
-      if(Math.max(...ends)<=jornadaMin)done++;
+      let maxEnd=ends[0];for(let k=1;k<N;k++)if(ends[k]>maxEnd)maxEnd=ends[k];
+      if(maxEnd<=jornadaMin)done++;
     }
-    results.push({n:N,prob:done/nSims});
+    const prob=done/nSims;
+    results.push({n:N,prob});
+    if(prob>=0.97&&N>=3)break; // stop once clearly sufficient
   }
   capResults=results;
 
-  // Recommendation: first N with P >= 90%
   const rec=results.find(r=>r.prob>=0.90)||results[results.length-1];
   const rec80=results.find(r=>r.prob>=0.80)||rec;
-  const avgVol=dailyCounts.length?Math.round(dailyCounts.reduce((a,b)=>a+b,0)/dailyCounts.length):0;
+
+  const sourceTag=bandejaPedidos.length>0
+    ?`<b style="color:#c084fc">${totalPed} pedidos</b> · <b style="color:#38bdf8">${totalLines.toLocaleString()}</b> líneas · avg <b style="color:#fbbf24">${avgLines.toFixed(1)}</b> líneas/pedido`
+    :`<b style="color:#f87171">⚠ Sin datos Excel</b> — presiona ▶ Cargar primero`;
 
   document.getElementById('cap-result').innerHTML=`
     <div class="rec-num">${rec.n}</div>
     <div class="rec-lbl">operarios para terminar en el día</div>
     <div class="rec-conf">${(rec.prob*100).toFixed(0)}% de confianza · jornada ${document.getElementById('sl-jorn').value}h</div>
     <div style="margin-top:8px;font-size:9px;color:#3b4e6a;text-align:center">
-      Promedio histórico: <b style="color:#c084fc">${avgVol} pedidos/día</b>
-      · ${document.getElementById('sl-tped').value} min/pedido
+      ${sourceTag}
+    </div>
+    <div style="margin-top:4px;font-size:9px;color:#3b4e6a;text-align:center">
+      ${document.getElementById('sl-tped').value} min/pedido promedio · jornada ${document.getElementById('sl-jorn').value}h
     </div>
     <div style="margin-top:6px;font-size:9px;color:#2a3a54">
       Con ${rec80.n} operarios → ${(rec80.prob*100).toFixed(0)}% probabilidad
