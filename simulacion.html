@@ -8,21 +8,24 @@
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
 html,body{height:100%;overflow:hidden;}
 body{background:#05080f;color:#e8edf5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;display:flex;flex-direction:column;}
-.hdr{display:flex;align-items:center;gap:10px;padding:9px 14px;background:#080d1a;border-bottom:1px solid #0f1d35;flex-shrink:0;}
+.hdr{display:flex;align-items:center;gap:10px;padding:9px 14px;background:#080d1a;border-bottom:1px solid #0f1d35;flex-shrink:0;flex-wrap:wrap;}
 .hdr-title{font-size:14px;font-weight:700;color:#c084fc;}
 .hdr-sub{font-size:9px;color:#4b5e7a;margin-top:1px;}
 .spacer{flex:1;}
-.badge{font-size:10px;font-weight:700;padding:3px 9px;border-radius:20px;background:#1a0a3b;color:#c084fc;border:1px solid #4c1d95;white-space:nowrap;}
+.badge{font-size:10px;font-weight:700;padding:3px 9px;border-radius:20px;white-space:nowrap;}
+.badge-v{background:#1a0a3b;color:#c084fc;border:1px solid #4c1d95;}
+.badge-d{background:#0a1e0a;color:#34d399;border:1px solid #065f46;}
+.badge-w{background:#1e150a;color:#fb923c;border:1px solid #92400e;}
 .btn-hdr{padding:7px 14px;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;background:linear-gradient(135deg,#7c3aed,#a855f7);color:#fff;transition:all .15s;flex-shrink:0;}
 .btn-hdr:active{transform:scale(.96);}
 .main{display:flex;flex:1;min-height:0;}
 .canvas-area{flex:1;position:relative;min-width:0;}
 canvas{position:absolute;inset:0;display:block;width:100%;height:100%;}
-.loading{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;background:rgba(5,8,15,.92);z-index:10;}
+.loading{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;background:rgba(5,8,15,.94);z-index:10;}
 .spinner{width:28px;height:28px;border:3px solid #1e2d4a;border-top-color:#a855f7;border-radius:50%;animation:spin .7s linear infinite;}
 @keyframes spin{to{transform:rotate(360deg)}}
 .loading-txt{font-size:11px;color:#4b5e7a;}
-.sidebar{width:242px;flex-shrink:0;background:#080d1a;border-left:1px solid #0f1d35;overflow-y:auto;display:flex;flex-direction:column;}
+.sidebar{width:248px;flex-shrink:0;background:#080d1a;border-left:1px solid #0f1d35;overflow-y:auto;display:flex;flex-direction:column;}
 .sidebar::-webkit-scrollbar{width:3px;}
 .sidebar::-webkit-scrollbar-thumb{background:#1e2d4a;border-radius:2px;}
 .pnl{padding:11px 13px;border-bottom:1px solid #0d1628;}
@@ -33,9 +36,13 @@ canvas{position:absolute;inset:0;display:block;width:100%;height:100%;}
 .pill:active{transform:scale(.97);}
 .ctrl-lbl{display:flex;align-items:center;margin-bottom:4px;}
 .ctrl-lbl span:first-child{font-size:11px;color:#7a8fa8;flex:1;}
-.ctrl-lbl span:last-child{font-size:12px;font-weight:700;color:#c084fc;}
+.ctrl-lbl span:last-child{font-size:12px;font-weight:700;}
 input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:3px;background:#1a2844;border-radius:2px;outline:none;margin-bottom:9px;}
-input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;background:#a855f7;border-radius:50%;cursor:pointer;}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;border-radius:50%;cursor:pointer;}
+.sl-teal::-webkit-slider-thumb{background:#38bdf8;}
+.sl-teal{background:linear-gradient(90deg,#1a2844,#0ea5e9)!important;}
+.sl-purple::-webkit-slider-thumb{background:#a855f7;}
+.sl-purple{background:linear-gradient(90deg,#1a2844,#9333ea)!important;}
 .btns{display:flex;gap:6px;margin-top:8px;}
 .btn{flex:1;padding:8px;border:none;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer;transition:all .15s;}
 .btn:active{transform:scale(.97);}
@@ -43,10 +50,12 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:13px;heigh
 .btn-s{background:#0d1628;color:#64748b;border:1px solid #1a2844;}
 .sg{display:grid;grid-template-columns:1fr 1fr;gap:6px;}
 .sc{background:#0d1628;border:1px solid #1a2844;border-radius:7px;padding:8px 10px;}
-.sc-val{font-size:18px;font-weight:800;color:#c084fc;line-height:1;}
+.sc-val{font-size:18px;font-weight:800;line-height:1;}
 .sc-lbl{font-size:8px;text-transform:uppercase;letter-spacing:.6px;color:#2a3a54;margin-top:2px;}
-.band{font-size:10px;color:#3b4e6a;margin-top:6px;}
-.band span{color:#9333ea;}
+.sc.col-t .sc-val{color:#38bdf8;}
+.sc.col-v .sc-val{color:#c084fc;}
+.sc.col-g .sc-val{color:#34d399;}
+.sc.col-o .sc-val{color:#fb923c;}
 .scrow{display:flex;align-items:center;gap:7px;padding:5px 0;border-bottom:1px solid #0b1424;}
 .scrow:last-child{border:none;}
 .dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;}
@@ -54,19 +63,26 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:13px;heigh
 .dist-bar{flex:1;border-radius:2px 2px 0 0;min-height:2px;}
 .dist-x{display:flex;justify-content:space-between;font-size:8px;color:#2a3a54;margin-top:2px;}
 .ubi-row{display:flex;align-items:center;gap:6px;padding:3px 0;}
-.leg{display:flex;align-items:center;gap:8px;padding:8px 13px;font-size:9px;color:#2a3a54;}
-.leg-bar{flex:1;height:5px;border-radius:3px;background:linear-gradient(90deg,#0a1428,#7c3aed,#e879f9);}
+.leg{display:flex;align-items:center;gap:8px;padding:8px 13px;font-size:9px;color:#2a3a54;border-bottom:1px solid #0d1628;}
+.leg-bar{flex:1;height:5px;border-radius:3px;}
+.alert-box{border-radius:7px;padding:9px 11px;font-size:11px;margin-bottom:6px;}
+.alert-ok{background:#0a1e0a;border:1px solid #065f46;color:#34d399;}
+.alert-warn{background:#1e150a;border:1px solid #92400e;color:#fb923c;}
+.alert-crit{background:#1e0a0a;border:1px solid #7f1d1d;color:#f87171;}
+.balance-bar-wrap{height:8px;background:#1a2844;border-radius:4px;overflow:hidden;margin-top:6px;}
+.balance-bar{height:100%;border-radius:4px;transition:width .5s;}
 </style>
 </head>
 <body>
 <div class="hdr">
   <div>
     <div class="hdr-title">🔬 Simulación · Bodega INDUCASOS</div>
-    <div class="hdr-sub">Monte Carlo · Layout 2D · Análisis de Flujo</div>
+    <div class="hdr-sub">Monte Carlo · Demanda actual · 8 operarios + 2 montacargas</div>
   </div>
   <div class="spacer"></div>
-  <span class="badge" id="badge">Sin datos</span>
-  <button class="btn-hdr" id="btn-load">Cargar datos</button>
+  <span class="badge badge-v" id="badge-pend">– pendientes</span>
+  <span class="badge badge-d" id="badge-hist" style="display:none">hist. OK</span>
+  <button class="btn-hdr" id="btn-load">▶ Cargar ahora</button>
 </div>
 <div class="main">
   <div class="canvas-area">
@@ -77,50 +93,81 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:13px;heigh
     </div>
   </div>
   <div class="sidebar">
+    <!-- View -->
     <div class="pnl">
       <div class="pnl-t">Vista</div>
       <div class="pills">
-        <div class="pill on" data-mode="heatmap">🌡 Heatmap</div>
-        <div class="pill" data-mode="animate">▶ Animación</div>
+        <div class="pill on" data-mode="heatmap">🌡 Demanda</div>
+        <div class="pill" data-mode="animate">▶ Simular</div>
       </div>
     </div>
+    <!-- Workers -->
     <div class="pnl">
-      <div class="pnl-t">Parámetros</div>
-      <div class="ctrl-lbl"><span>Simulaciones</span><span id="sl-sims-v">200</span></div>
-      <input type="range" id="sl-sims" min="100" max="2000" step="100" value="200">
-      <div class="ctrl-lbl"><span>Montacarguistas base</span><span id="sl-ag-v">2</span></div>
-      <input type="range" id="sl-ag" min="1" max="6" value="2">
-      <div class="ctrl-lbl"><span>Velocidad animación</span><span id="sl-spd-v">4</span></div>
-      <input type="range" id="sl-spd" min="1" max="15" value="4">
+      <div class="pnl-t">Fuerza de trabajo</div>
+      <div class="ctrl-lbl">
+        <span style="display:flex;align-items:center;gap:5px"><span style="width:8px;height:8px;border-radius:50%;background:#38bdf8;display:inline-block"></span>Operarios picking</span>
+        <span style="color:#38bdf8" id="sl-pick-v">8</span>
+      </div>
+      <input type="range" id="sl-pick" min="1" max="15" value="8" class="sl-teal">
+      <div class="ctrl-lbl">
+        <span style="display:flex;align-items:center;gap:5px"><span style="width:8px;height:8px;border-radius:50%;background:#a855f7;display:inline-block"></span>Montacarguistas</span>
+        <span style="color:#a855f7" id="sl-ag-v">2</span>
+      </div>
+      <input type="range" id="sl-ag" min="1" max="6" value="2" class="sl-purple">
+      <div class="ctrl-lbl" style="margin-top:2px"><span>Velocidad anim.</span><span style="color:#94a3b8" id="sl-spd-v">5</span></div>
+      <input type="range" id="sl-spd" min="1" max="20" value="5">
+      <div class="ctrl-lbl"><span>Simulaciones MC</span><span style="color:#94a3b8" id="sl-sims-v">500</span></div>
+      <input type="range" id="sl-sims" min="100" max="2000" step="100" value="500">
       <div class="btns">
         <button class="btn btn-p" id="btn-sim">⚡ Simular</button>
         <button class="btn btn-s" id="btn-rst">Reset</button>
       </div>
     </div>
+    <!-- Balance -->
     <div class="pnl">
-      <div class="pnl-t">Histórico</div>
-      <div class="sg">
-        <div class="sc"><div class="sc-val" id="st-t">–</div><div class="sc-lbl">Turnos</div></div>
-        <div class="sc"><div class="sc-val" id="st-p">–</div><div class="sc-lbl">Posiciones</div></div>
-        <div class="sc"><div class="sc-val" id="st-u">–</div><div class="sc-lbl">UBIs únicos</div></div>
-        <div class="sc"><div class="sc-val" id="st-tp">–</div><div class="sc-lbl">t/h mediana</div></div>
-      </div>
-      <div class="band">Banda P10–P90: <span id="st-band">–</span></div>
+      <div class="pnl-t">Balance oferta / demanda</div>
+      <div id="balance-box"><div style="font-size:10px;color:#2a3a54">Carga datos primero</div></div>
     </div>
+    <!-- Current demand stats -->
     <div class="pnl">
-      <div class="pnl-t">Escenarios (+montacargas)</div>
+      <div class="pnl-t">Demanda actual (en tiempo real)</div>
+      <div class="sg">
+        <div class="sc col-o"><div class="sc-val" id="st-pend">–</div><div class="sc-lbl">Turnos pend.</div></div>
+        <div class="sc col-o"><div class="sc-val" id="st-pos">–</div><div class="sc-lbl">Posiciones</div></div>
+        <div class="sc col-g"><div class="sc-val" id="st-clear50">–</div><div class="sc-lbl">min limpiar P50</div></div>
+        <div class="sc col-v"><div class="sc-val" id="st-clear90">–</div><div class="sc-lbl">min limpiar P90</div></div>
+      </div>
+    </div>
+    <!-- Escenarios montacarguistas -->
+    <div class="pnl">
+      <div class="pnl-t">Escenarios montacarguistas</div>
       <div id="scenarios"><div style="font-size:10px;color:#2a3a54">Carga datos primero</div></div>
     </div>
+    <!-- Distribution -->
     <div class="pnl">
-      <div class="pnl-t">Distribución throughput (t/h)</div>
+      <div class="pnl-t">Distribución tiempo limpieza (min)</div>
       <div class="dist-bars" id="dist-bars"></div>
-      <div class="dist-x"><span id="dx0">–</span><span style="color:#4c1d95">simulaciones</span><span id="dx1">–</span></div>
+      <div class="dist-x"><span id="dx0">–</span><span style="color:#4c1d95">minutos</span><span id="dx1">–</span></div>
     </div>
+    <!-- Top UBIs -->
     <div class="pnl">
-      <div class="pnl-t">Top 5 UBIs más activos</div>
+      <div class="pnl-t">Top UBIs con mayor carga</div>
       <div id="top-ubis"><div style="font-size:10px;color:#2a3a54">Carga datos primero</div></div>
     </div>
-    <div class="leg"><span>Baja</span><div class="leg-bar"></div><span>Alta demanda</span></div>
+    <!-- Legend -->
+    <div class="leg">
+      <span>Sin carga</span>
+      <div class="leg-bar" style="background:linear-gradient(90deg,#090f1e,#7c3aed,#f472b6)"></div>
+      <span>Alta demanda</span>
+    </div>
+    <div style="padding:8px 13px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <span style="display:flex;align-items:center;gap:4px;font-size:9px;color:#3b4e6a">
+        <span style="width:8px;height:8px;border-radius:50%;background:#38bdf8;display:inline-block"></span>Operario picking
+      </span>
+      <span style="display:flex;align-items:center;gap:4px;font-size:9px;color:#3b4e6a">
+        <span style="width:10px;height:10px;border-radius:50%;background:#a855f7;display:inline-block"></span>Montacarguista
+      </span>
+    </div>
   </div>
 </div>
 <script>
@@ -131,48 +178,52 @@ const SH={apikey:SUPA_KEY,Authorization:`Bearer ${SUPA_KEY}`};
 const CALLES=['B','C','D','E'];
 const CIDX={B:0,C:1,D:2,E:3};
 const CNOM={B:'Calle 1',C:'Calle 2',D:'Calle 3',E:'Calle 4'};
-const COLS=[
-  {main:'#a855f7',trail:'rgba(168,85,247,0.2)'},
-  {main:'#38bdf8',trail:'rgba(56,189,248,0.2)'},
-  {main:'#f472b6',trail:'rgba(244,114,182,0.2)'},
-  {main:'#34d399',trail:'rgba(52,211,153,0.2)'},
-  {main:'#fb923c',trail:'rgba(251,146,60,0.2)'},
-  {main:'#facc15',trail:'rgba(250,204,21,0.2)'},
-];
 
-const LW=58, TH=28, AH=16;
-let turnos=[], heat={}, maxMod=15, maxHeat=1;
-let agents=[], raf=null, animating=false, viewMode='heatmap', simRes=null, lastTs=0;
+// Agent color sets
+const COL_PICK={main:'#38bdf8',glow:'#0ea5e9',trail:'rgba(56,189,248,0.18)',sz:5};
+const COL_MC  ={main:'#a855f7',glow:'#7c3aed',trail:'rgba(168,85,247,0.22)',sz:8};
+
+const LW=58,TH=28,AH=14;
+let currentTurnos=[],histTurnos=[];
+let heat={},maxMod=15,maxHeat=1;
+let agents=[],raf=null,viewMode='heatmap',lastTs=0;
+let simRes=null,mcBalance=null;
 
 const canvas=document.getElementById('wh-canvas');
 const ctx=canvas.getContext('2d');
 
+// ═══ PARSE ═══
 function parseUbi(u){
   const m=/^([B-E])0?(\d{1,2})(\d)(\d)$/i.exec(String(u||'').trim());
   if(!m)return null;
   return{calle:m[1].toUpperCase(),ci:CIDX[m[1].toUpperCase()]??0,mod:parseInt(m[2]),niv:parseInt(m[3]),pos:parseInt(m[4])};
 }
 
+// ═══ CANVAS DIMS ═══
 function dims(){
-  const W=canvas.clientWidth||600, H=canvas.clientHeight||400;
-  const CW=Math.max(16,(W-LW-6)/maxMod);
-  const CH=Math.max(22,(H-TH-6-AH*(CALLES.length-1))/CALLES.length);
+  const W=canvas.clientWidth||700,H=canvas.clientHeight||400;
+  const CW=Math.max(14,(W-LW-6)/maxMod);
+  const CH=Math.max(20,(H-TH-6-AH*(CALLES.length-1))/CALLES.length);
   return{W,H,CW,CH};
 }
-
 function cy(ci,CH){return TH+ci*(CH+AH);}
-
 function ubiXY(calle,mod){
   const{CW,CH}=dims();
-  return{x:LW+(mod-1)*CW+CW/2, y:cy(CIDX[calle]??0,CH)+CH/2};
+  return{x:LW+(mod-1)*CW+CW/2,y:cy(CIDX[calle]??0,CH)+CH/2};
 }
 
+// ═══ COLOR ═══
 function heatCol(n){
-  if(n<=0)return'#090f1e';
-  const t=Math.pow(n,0.55);
-  return`rgb(${Math.round(10+t*170)},${Math.round(15+t*5)},${Math.round(38+t*214)})`;
+  if(n<=0)return'#080e1c';
+  const t=Math.pow(n,0.5);
+  // teal-ish at low → violet at mid → pink/magenta at peak
+  const r=Math.round(8  +t*230);
+  const g=Math.round(14 +t*5);
+  const b=Math.round(28 +t*200);
+  return`rgb(${r},${g},${b})`;
 }
 
+// ═══ DRAW MAP ═══
 function drawMap(){
   const{W,H,CW,CH}=dims();
   canvas.width=W*devicePixelRatio;
@@ -181,48 +232,39 @@ function drawMap(){
   ctx.fillStyle='#05080f';
   ctx.fillRect(0,0,W,H);
 
-  // module headers
-  ctx.fillStyle='#243044';
-  ctx.font='9px monospace';
-  ctx.textAlign='center';
-  const step=Math.max(1,Math.ceil(32/CW));
-  for(let m=1;m<=maxMod;m+=step){
+  // Module labels
+  ctx.fillStyle='#243044';ctx.font='9px monospace';ctx.textAlign='center';
+  const step=Math.max(1,Math.ceil(28/CW));
+  for(let m=1;m<=maxMod;m+=step)
     ctx.fillText(String(m).padStart(2,'0'),LW+(m-1)*CW+CW/2,TH-10);
-  }
-  ctx.strokeStyle='#121e32';ctx.lineWidth=0.5;
+  ctx.strokeStyle='#0f1e34';ctx.lineWidth=0.5;
   ctx.beginPath();ctx.moveTo(LW,TH-2);ctx.lineTo(W,TH-2);ctx.stroke();
 
   for(let ci=0;ci<CALLES.length;ci++){
-    const c=CALLES[ci], y0=cy(ci,CH);
-    // aisle
+    const c=CALLES[ci],y0=cy(ci,CH);
     if(ci>0){
-      ctx.fillStyle='#060b16';
+      ctx.fillStyle='#050b18';
       ctx.fillRect(LW,y0-AH,W-LW,AH);
-      ctx.strokeStyle='#111d30';ctx.lineWidth=0.8;
-      ctx.setLineDash([3,7]);
+      ctx.strokeStyle='#0f1e34';ctx.lineWidth=0.8;
+      ctx.setLineDash([3,6]);
       ctx.beginPath();ctx.moveTo(LW,y0-AH/2);ctx.lineTo(W,y0-AH/2);ctx.stroke();
       ctx.setLineDash([]);
     }
-    // label
-    ctx.fillStyle='#2e4060';
-    ctx.font='bold 9px -apple-system,sans-serif';
-    ctx.textAlign='center';
+    // Label
+    ctx.fillStyle='#2e4060';ctx.font='bold 9px -apple-system,sans-serif';ctx.textAlign='center';
     ctx.fillText(CNOM[c],LW/2,y0+CH/2-2);
     ctx.font='8px monospace';ctx.fillStyle='#182030';
     ctx.fillText(c,LW/2,y0+CH/2+10);
-
-    // cells
+    // Cells
     for(let m=1;m<=maxMod;m++){
-      const key=`${c}-${m}`, n=(heat[key]||0)/maxHeat;
+      const key=`${c}-${m}`,n=(heat[key]||0)/maxHeat;
       const x=LW+(m-1)*CW;
-      ctx.fillStyle=heatCol(n);
-      ctx.fillRect(x+0.5,y0+0.5,CW-1,CH-1);
-      ctx.strokeStyle=n>0.05?'rgba(168,85,247,0.12)':'rgba(20,32,56,0.7)';
-      ctx.lineWidth=0.5;
-      ctx.strokeRect(x+0.5,y0+0.5,CW-1,CH-1);
-      if(n>0.12&&CW>22&&heat[key]){
-        ctx.fillStyle=n>0.5?'rgba(255,255,255,0.9)':'rgba(216,180,254,0.75)';
-        ctx.font=`bold ${Math.max(7,Math.min(10,CW*0.38))}px monospace`;
+      ctx.fillStyle=heatCol(n);ctx.fillRect(x+.5,y0+.5,CW-1,CH-1);
+      ctx.strokeStyle=n>.06?'rgba(168,85,247,0.15)':'rgba(14,26,48,0.8)';
+      ctx.lineWidth=.5;ctx.strokeRect(x+.5,y0+.5,CW-1,CH-1);
+      if(n>.12&&CW>20&&heat[key]){
+        ctx.fillStyle=n>.55?'rgba(255,255,255,.9)':'rgba(216,180,254,.8)';
+        ctx.font=`bold ${Math.max(7,Math.min(10,CW*.36))}px monospace`;
         ctx.textAlign='center';
         ctx.fillText(heat[key],x+CW/2,y0+CH/2+3.5);
       }
@@ -230,19 +272,16 @@ function drawMap(){
   }
 }
 
-function drawAgents(){
-  for(const ag of agents)ag.render(ctx);
-}
-
+// ═══ DRAW FULL ═══
 function fullDraw(){
   drawMap();
-  if(viewMode==='animate')drawAgents();
+  if(viewMode==='animate')agents.forEach(a=>a.render(ctx));
 }
 
 // ═══ AGENT ═══
 class Agent{
-  constructor(id,col){
-    this.id=id;this.col=col;
+  constructor(id,col,type){
+    this.id=id;this.col=col;this.type=type;// 'pick' | 'mc'
     this.x=-1;this.y=-1;this.tx=0;this.ty=0;
     this.route=[];this.ri=0;
     this.moving=false;this.serving=false;this.stimer=0;
@@ -251,7 +290,7 @@ class Agent{
   assign(positions){
     const s=[...positions].sort((a,b)=>(a.ci||0)-(b.ci||0)||(a.mod||0)-(b.mod||0));
     this.route=[...this.route,...s];
-    if(this.x===-1&&s.length){const p=ubiXY(s[0].calle,s[0].mod);this.x=p.x-30;this.y=p.y;}
+    if(this.x===-1&&s.length){const p=ubiXY(s[0].calle,s[0].mod);this.x=p.x-40;this.y=p.y;}
     if(!this.moving&&!this.serving)this.next();
   }
   next(){
@@ -261,7 +300,7 @@ class Agent{
     this.tx=p.x;this.ty=p.y;this.moving=true;this.serving=false;
   }
   update(dt){
-    const spd=parseFloat(document.getElementById('sl-spd').value)*0.10;
+    const spd=parseFloat(document.getElementById('sl-spd').value)*(this.type==='pick'?0.14:0.09);
     if(this.serving){
       this.stimer-=dt;
       if(this.stimer<=0){this.serving=false;this.ri++;this.next();}
@@ -269,33 +308,42 @@ class Agent{
     }
     if(!this.moving)return;
     const dx=this.tx-this.x,dy=this.ty-this.y,d=Math.sqrt(dx*dx+dy*dy),step=spd*dt;
-    if(d<=step+0.5){
+    if(d<=step+.5){
       this.x=this.tx;this.y=this.ty;
       this.trail.push({x:this.x,y:this.y});
-      if(this.trail.length>25)this.trail.shift();
+      if(this.trail.length>20)this.trail.shift();
       this.moving=false;this.serving=true;
-      this.stimer=500+Math.random()*700;this.done++;
+      // Pickers are faster at each position; MCs take longer
+      this.stimer=this.type==='pick'?(300+Math.random()*500):(600+Math.random()*1000);
+      this.done++;
     }else{this.x+=dx/d*step;this.y+=dy/d*step;}
   }
   render(ctx){
     if(this.x===-1)return;
     if(this.trail.length>1){
-      ctx.beginPath();
-      ctx.moveTo(this.trail[0].x,this.trail[0].y);
+      ctx.beginPath();ctx.moveTo(this.trail[0].x,this.trail[0].y);
       this.trail.forEach(p=>ctx.lineTo(p.x,p.y));
-      ctx.strokeStyle=this.col.trail;ctx.lineWidth=1.8;ctx.stroke();
+      ctx.strokeStyle=this.col.trail;ctx.lineWidth=1.5;ctx.stroke();
     }
-    const g=ctx.createRadialGradient(this.x,this.y,0,this.x,this.y,15);
-    g.addColorStop(0,this.col.main+'55');g.addColorStop(1,'transparent');
-    ctx.beginPath();ctx.arc(this.x,this.y,15,0,Math.PI*2);ctx.fillStyle=g;ctx.fill();
-    ctx.beginPath();ctx.arc(this.x,this.y,7,0,Math.PI*2);
-    ctx.fillStyle=this.serving?'#facc15':this.col.main;ctx.fill();
+    const sz=this.col.sz;
+    // Glow
+    const g=ctx.createRadialGradient(this.x,this.y,0,this.x,this.y,sz*2.5);
+    g.addColorStop(0,this.col.main+'60');g.addColorStop(1,'transparent');
+    ctx.beginPath();ctx.arc(this.x,this.y,sz*2.5,0,Math.PI*2);ctx.fillStyle=g;ctx.fill();
+    // Dot
+    ctx.beginPath();ctx.arc(this.x,this.y,sz,0,Math.PI*2);
+    ctx.fillStyle=this.serving?'#fbbf24':this.col.main;ctx.fill();
+    // Service ring
     if(this.serving){
-      ctx.beginPath();ctx.arc(this.x,this.y,11,0,Math.PI*2);
+      ctx.beginPath();ctx.arc(this.x,this.y,sz+3,0,Math.PI*2);
       ctx.strokeStyle=this.col.main+'70';ctx.lineWidth=1.5;ctx.stroke();
     }
-    ctx.fillStyle='#fff';ctx.font='bold 6px monospace';ctx.textAlign='center';
-    ctx.fillText('M'+(this.id+1),this.x,this.y+2.5);
+    // Label
+    ctx.fillStyle='#fff';
+    ctx.font=`bold ${Math.max(6,sz-1)}px monospace`;
+    ctx.textAlign='center';
+    const lbl=this.type==='pick'?`P${this.id+1}`:`M${this.id+1}`;
+    ctx.fillText(lbl,this.x,this.y+sz*.4);
   }
 }
 
@@ -314,104 +362,233 @@ function startAnim(){
 function stopAnim(){if(raf){cancelAnimationFrame(raf);raf=null;}}
 
 function buildAgents(){
-  const nAg=parseInt(document.getElementById('sl-ag').value);
-  agents=Array.from({length:nAg},(_,i)=>new Agent(i,COLS[i%COLS.length]));
-  const sample=[...turnos].filter(t=>(t.posiciones||[]).length>0)
-    .sort(()=>Math.random()-0.5).slice(0,nAg*5);
-  sample.forEach((t,i)=>{
-    const parsed=(t.posiciones||[]).map(p=>parseUbi(p.ubi)).filter(Boolean);
-    if(parsed.length)agents[i%nAg].assign(parsed);
+  const nPick=parseInt(document.getElementById('sl-pick').value);
+  const nMC=parseInt(document.getElementById('sl-ag').value);
+  agents=[];
+
+  const source=currentTurnos.length?currentTurnos:histTurnos;
+  const sample=[...source].filter(t=>(t.posiciones||[]).length>0)
+    .sort(()=>Math.random()-.5).slice(0,Math.max(nPick,nMC)*6);
+
+  // Picker agents — teal, fast, smaller
+  for(let i=0;i<nPick;i++){
+    const ag=new Agent(i,COL_PICK,'pick');
+    const t=sample[i%sample.length];
+    if(t){
+      const p=(t.posiciones||[]).map(p=>parseUbi(p.ubi)).filter(Boolean);
+      if(p.length)ag.assign(p);
+    }
+    agents.push(ag);
+  }
+  // MC agents — purple, slow, larger
+  for(let i=0;i<nMC;i++){
+    const ag=new Agent(i,COL_MC,'mc');
+    const ti=(i+nPick)%sample.length;
+    const t=sample[ti];
+    if(t){
+      const p=(t.posiciones||[]).map(p=>parseUbi(p.ubi)).filter(Boolean);
+      if(p.length)ag.assign(p);
+    }
+    agents.push(ag);
+  }
+  // Add more routes round-robin
+  sample.slice(nPick+nMC).forEach((t,idx)=>{
+    const p=(t.posiciones||[]).map(pos=>parseUbi(pos.ubi)).filter(Boolean);
+    if(!p.length)return;
+    // alternate between picker agents
+    const ag=agents[idx%agents.length];
+    ag.route.push(...[...p].sort((a,b)=>(a.ci||0)-(b.ci||0)||(a.mod||0)-(b.mod||0)));
   });
 }
 
 // ═══ MONTE CARLO ═══
 function runMC(){
   const nSims=parseInt(document.getElementById('sl-sims').value);
-  const nBase=parseInt(document.getElementById('sl-ag').value);
-  const durs=turnos.map(t=>{
+  const nMC=parseInt(document.getElementById('sl-ag').value);
+  const nPick=parseInt(document.getElementById('sl-pick').value);
+  const N=currentTurnos.length; // current backlog
+
+  // Duration calibration from historical completed turnos
+  const durs=histTurnos.map(t=>{
     if(!t.fecha_solicitud||!t.fecha_completado)return null;
     const d=(new Date(t.fecha_completado)-new Date(t.fecha_solicitud))/60000;
-    return(d>0.5&&d<300)?d:null;
+    return(d>.5&&d<300)?d:null;
   }).filter(Boolean);
-  if(durs.length<3){renderStats();return;}
-  simRes=[nBase,nBase+1,nBase+2].map(nAg=>{
-    const tps=[];
+
+  const fallback=[12,15,18,22,25,30]; // fallback durations if no history
+
+  // Arrival rate estimation (how fast pickers generate new MC turnos)
+  let arrivalRatePerPicker=0; // turnos created per picker per hour
+  if(histTurnos.length>5){
+    const sorted=[...histTurnos]
+      .filter(t=>t.fecha_solicitud)
+      .sort((a,b)=>new Date(a.fecha_solicitud)-new Date(b.fecha_solicitud));
+    const intervals=[];
+    for(let i=1;i<Math.min(sorted.length,100);i++){
+      const d=(new Date(sorted[i].fecha_solicitud)-new Date(sorted[i-1].fecha_solicitud))/60000;
+      if(d>0&&d<120)intervals.push(d);
+    }
+    if(intervals.length>3){
+      const avgInterval=intervals.reduce((a,b)=>a+b,0)/intervals.length;
+      // avg interval between turno creations; assume historical ~4 pickers on avg
+      const histPickers=4;
+      arrivalRatePerPicker=(60/avgInterval)/histPickers; // turnos/hour/picker
+    }
+  }
+
+  // MC service rate
+  const pool=durs.length?durs:fallback;
+  const avgDur=pool.reduce((a,b)=>a+b,0)/pool.length;
+  const mcRatePerWorker=60/avgDur; // turnos/hour per montacarguista
+
+  const supplyRate=nMC*mcRatePerWorker;
+  const demandRate=arrivalRatePerPicker>0?arrivalRatePerPicker*nPick:supplyRate*0.8;
+  const netRate=supplyRate-demandRate; // positive = gaining ground
+  const balancePct=supplyRate/Math.max(demandRate,.001);
+
+  mcBalance={supplyRate,demandRate,netRate,balancePct,avgDur};
+
+  // Simulate clearance time for current backlog
+  const scenResults=[nMC,nMC+1,nMC+2].map(nW=>{
+    if(N===0)return{agents:nW,p10:0,p50:0,p90:0,all:[0]};
+    const times=[];
     for(let s=0;s<nSims;s++){
-      const ends=Array(nAg).fill(0);
-      const n=nAg*3+Math.floor(Math.random()*nAg*2);
-      for(let i=0;i<n;i++){
-        const d=durs[Math.floor(Math.random()*durs.length)]*(0.75+Math.random()*0.5);
+      const ends=Array(nW).fill(0);
+      for(let i=0;i<N;i++){
+        const d=pool[Math.floor(Math.random()*pool.length)]*(0.75+Math.random()*.5);
         const mi=ends.indexOf(Math.min(...ends));ends[mi]+=d;
       }
-      tps.push((n/Math.max(...ends))*60);
+      times.push(Math.max(...ends));
     }
-    tps.sort((a,b)=>a-b);
-    return{agents:nAg,p10:tps[Math.floor(nSims*.1)],p50:tps[Math.floor(nSims*.5)],p90:tps[Math.floor(nSims*.9)],all:tps};
+    times.sort((a,b)=>a-b);
+    return{agents:nW,p10:times[Math.floor(nSims*.1)],p50:times[Math.floor(nSims*.5)],p90:times[Math.floor(nSims*.9)],all:times};
   });
-  renderStats();renderDist();
+
+  simRes=scenResults;
+  renderBalance();
+  renderStats();
+  renderDist();
+}
+
+// ═══ BALANCE ═══
+function renderBalance(){
+  if(!mcBalance){return;}
+  const{supplyRate,demandRate,netRate,balancePct,avgDur}=mcBalance;
+  const pct=Math.min(100,Math.round(balancePct*100));
+  const ok=balancePct>=1.0,warn=balancePct>=0.7;
+  const cls=ok?'alert-ok':warn?'alert-warn':'alert-crit';
+  const icon=ok?'✅':warn?'⚠️':'🔴';
+  const msg=ok?`Oferta cubre demanda (${pct}% capacidad)`
+    :warn?`Demanda supera oferta — acumulando backlog`
+    :`Crítico: montacarguistas muy por debajo de la demanda`;
+  const barCol=ok?'#34d399':warn?'#fb923c':'#f87171';
+
+  document.getElementById('balance-box').innerHTML=`
+    <div class="alert-box ${cls}">${icon} ${msg}</div>
+    <div style="display:flex;justify-content:space-between;font-size:9px;color:#4b5e7a;margin-bottom:3px">
+      <span>🟦 MC oferta <b style="color:#a855f7">${supplyRate.toFixed(1)} t/h</b></span>
+      <span>🟢 Demanda <b style="color:#38bdf8">${demandRate.toFixed(1)} t/h</b></span>
+    </div>
+    <div class="balance-bar-wrap">
+      <div class="balance-bar" style="width:${Math.min(100,pct)}%;background:${barCol}"></div>
+    </div>
+    <div style="font-size:9px;color:#3b4e6a;margin-top:4px">
+      Duración media turno: <b style="color:#c084fc">${avgDur.toFixed(0)} min</b>
+      &nbsp;·&nbsp; ${netRate>0?`ganando <b style="color:#34d399">${netRate.toFixed(1)} t/h</b>`:`perdiendo <b style="color:#f87171">${Math.abs(netRate).toFixed(1)} t/h</b>`}
+    </div>`;
 }
 
 // ═══ STATS ═══
 function renderStats(){
-  document.getElementById('st-t').textContent=turnos.length||'–';
-  const pos=turnos.reduce((s,t)=>s+(t.posiciones||[]).length,0);
-  document.getElementById('st-p').textContent=pos||'–';
-  const ubis=new Set();
-  turnos.forEach(t=>(t.posiciones||[]).forEach(p=>{if(p.ubi)ubis.add(p.ubi);}));
-  document.getElementById('st-u').textContent=ubis.size||'–';
-  document.getElementById('badge').textContent=`${turnos.length} turnos hist.`;
-  if(!simRes){document.getElementById('st-tp').textContent='–';document.getElementById('st-band').textContent='–';return;}
-  const b=simRes[0];
-  document.getElementById('st-tp').textContent=b.p50.toFixed(1);
-  document.getElementById('st-band').innerHTML=`<span>${b.p10.toFixed(1)} – ${b.p90.toFixed(1)}</span>`;
-  document.getElementById('scenarios').innerHTML=simRes.map((r,i)=>`
-    <div class="scrow">
-      <div class="dot" style="background:${COLS[i].main}"></div>
-      <span style="font-size:10px;color:#7a8fa8;flex:1">${r.agents} montacarguista${r.agents>1?'s':''}</span>
-      <div style="text-align:right">
-        <div style="font-size:12px;font-weight:800;color:${COLS[i].main}">${r.p50.toFixed(1)} <span style="font-size:8px;color:#3b4e6a;font-weight:400">t/h</span></div>
-        <div style="font-size:8px;color:#2a3a54">${r.p10.toFixed(1)}–${r.p90.toFixed(1)}</div>
-      </div>
-    </div>`).join('');
-  const top=Object.entries(heat).sort((a,b)=>b[1]-a[1]).slice(0,5);
-  document.getElementById('top-ubis').innerHTML=top.map(([k,c],i)=>`
+  const N=currentTurnos.length;
+  const totalPos=currentTurnos.reduce((s,t)=>s+(t.posiciones||[]).length,0);
+  document.getElementById('st-pend').textContent=N||'0';
+  document.getElementById('st-pos').textContent=totalPos||'0';
+  document.getElementById('badge-pend').textContent=`${N} pendientes`;
+
+  if(simRes&&simRes.length){
+    const b=simRes[0];
+    document.getElementById('st-clear50').textContent=N?b.p50.toFixed(0):'0';
+    document.getElementById('st-clear90').textContent=N?b.p90.toFixed(0):'0';
+
+    document.getElementById('scenarios').innerHTML=simRes.map((r,i)=>{
+      const COLS=['#a855f7','#38bdf8','#34d399'];
+      return`<div class="scrow">
+        <div class="dot" style="background:${COLS[i]}"></div>
+        <span style="font-size:10px;color:#7a8fa8;flex:1">${r.agents} MC · ${parseInt(document.getElementById('sl-pick').value)} picks</span>
+        <div style="text-align:right">
+          <div style="font-size:12px;font-weight:800;color:${COLS[i]}">${r.p50.toFixed(0)} <span style="font-size:8px;color:#3b4e6a;font-weight:400">min</span></div>
+          <div style="font-size:8px;color:#2a3a54">P10 ${r.p10.toFixed(0)} – P90 ${r.p90.toFixed(0)}</div>
+        </div></div>`;
+    }).join('');
+  }
+
+  // Top UBIs from current demand
+  const top=Object.entries(heat).sort((a,b)=>b[1]-a[1]).slice(0,6);
+  document.getElementById('top-ubis').innerHTML=top.length?top.map(([k,c],i)=>`
     <div class="ubi-row">
       <span style="font-size:8px;color:#2a3a54;width:10px">${i+1}</span>
       <span style="font-size:10px;font-family:monospace;color:#d8b4fe;flex:1">${k}</span>
-      <div style="width:${Math.round(c/maxHeat*50)}px;height:3px;background:#7c3aed;border-radius:1px;margin-right:4px"></div>
+      <div style="width:${Math.round(c/maxHeat*48)}px;height:3px;background:#7c3aed;border-radius:1px;margin-right:4px"></div>
       <span style="font-size:9px;color:#64748b">${c}</span>
-    </div>`).join('');
+    </div>`).join('')
+    :'<div style="font-size:10px;color:#2a3a54">Sin posiciones pendientes 🎉</div>';
 }
 
 function renderDist(){
   if(!simRes)return;
-  const all=simRes[0].all, mn=all[0], mx=all[all.length-1], B=18;
-  const w=(mx-mn)/B, bins=Array(B).fill(0);
+  const all=simRes[0].all;
+  const mn=all[0],mx=all[all.length-1];
+  if(mn===mx){
+    document.getElementById('dist-bars').innerHTML='<div style="font-size:10px;color:#2a3a54;align-self:center;flex:1;text-align:center">Sin backlog</div>';
+    document.getElementById('dx0').textContent='0';document.getElementById('dx1').textContent='0';return;
+  }
+  const B=18,w=(mx-mn)/B,bins=Array(B).fill(0);
   all.forEach(v=>bins[Math.min(B-1,Math.floor((v-mn)/w))]++);
   const mb=Math.max(...bins);
   document.getElementById('dist-bars').innerHTML=bins.map((c,i)=>{
-    const h=Math.max(2,(c/mb)*50), t=i/(B-1);
-    return`<div class="dist-bar" style="height:${h}px;background:hsl(${270-t*50},65%,${40+t*22}%)"></div>`;
+    const h=Math.max(2,(c/mb)*50),t=i/(B-1);
+    return`<div class="dist-bar" style="height:${h}px;background:hsl(${280-t*40},65%,${42+t*20}%)"></div>`;
   }).join('');
-  document.getElementById('dx0').textContent=mn.toFixed(1);
-  document.getElementById('dx1').textContent=mx.toFixed(1);
+  document.getElementById('dx0').textContent=mn.toFixed(0);
+  document.getElementById('dx1').textContent=mx.toFixed(0);
 }
 
-// ═══ LOAD ═══
+// ═══ DATA LOAD ═══
 async function loadData(){
   document.getElementById('loading').style.display='flex';
-  document.getElementById('ltxt').textContent='Cargando histórico de turnos...';
+  document.getElementById('ltxt').textContent='Cargando demanda actual (pendiente + en proceso)...';
   try{
-    const r=await fetch(`${SUPA_URL}/rest/v1/turnos?estado=eq.completado&select=id,posiciones,fecha_solicitud,fecha_completado,montacarguista&order=fecha_completado.desc&limit=500`,{headers:SH});
-    turnos=await r.json();
-    if(!Array.isArray(turnos))turnos=[];
+    // 1. Current demand
+    const rCurr=await fetch(
+      `${SUPA_URL}/rest/v1/turnos?estado=in.(pendiente,en_proceso)&select=id,posiciones,fecha_solicitud,montacarguista,operario_solicitante&order=fecha_solicitud.asc`,
+      {headers:SH});
+    currentTurnos=await rCurr.json();
+    if(!Array.isArray(currentTurnos))currentTurnos=[];
+
+    document.getElementById('ltxt').textContent='Cargando histórico para calibrar Monte Carlo...';
+
+    // 2. Historical for calibration
+    const rHist=await fetch(
+      `${SUPA_URL}/rest/v1/turnos?estado=eq.completado&select=id,posiciones,fecha_solicitud,fecha_completado&order=fecha_completado.desc&limit=400`,
+      {headers:SH});
+    histTurnos=await rHist.json();
+    if(!Array.isArray(histTurnos))histTurnos=[];
+
+    document.getElementById('badge-hist').style.display='inline';
+    document.getElementById('badge-hist').textContent=`${histTurnos.length} hist.`;
+
+    // Build heatmap from CURRENT demand
     heat={};maxMod=12;
-    turnos.forEach(t=>(t.posiciones||[]).forEach(p=>{
+    currentTurnos.forEach(t=>(t.posiciones||[]).forEach(p=>{
       const u=parseUbi(p.ubi);if(!u)return;
       const k=`${u.calle}-${u.mod}`;heat[k]=(heat[k]||0)+1;
       if(u.mod>maxMod)maxMod=u.mod;
     }));
+    // Pad a bit so map looks complete
+    maxMod=Math.max(maxMod,12);
     maxHeat=Math.max(1,...Object.values(heat));
+
     document.getElementById('ltxt').textContent='Ejecutando Monte Carlo...';
     setTimeout(()=>{
       runMC();
@@ -420,7 +597,7 @@ async function loadData(){
     },60);
   }catch(e){
     document.getElementById('loading').style.display='none';
-    document.getElementById('badge').textContent='Error al cargar';
+    document.getElementById('badge-pend').textContent='Error de red';
     console.error(e);
   }
 }
@@ -429,22 +606,23 @@ async function loadData(){
 function setMode(m){
   viewMode=m;
   document.querySelectorAll('.pill').forEach(p=>p.classList.toggle('on',p.dataset.mode===m));
-  if(m==='animate'&&turnos.length)startAnim();
+  if(m==='animate'&&(currentTurnos.length||histTurnos.length))startAnim();
   else{stopAnim();fullDraw();}
 }
 
-// ═══ RESIZE ═══
-window.addEventListener('resize',()=>fullDraw());
-new ResizeObserver(()=>fullDraw()).observe(document.querySelector('.canvas-area'));
-
 // ═══ EVENTS ═══
 document.getElementById('btn-load').onclick=loadData;
-document.getElementById('btn-sim').onclick=()=>{runMC();if(viewMode==='animate'&&turnos.length){stopAnim();startAnim();}};
+document.getElementById('btn-sim').onclick=()=>{
+  runMC();
+  if(viewMode==='animate'&&(currentTurnos.length||histTurnos.length)){stopAnim();startAnim();}
+};
 document.getElementById('btn-rst').onclick=()=>{stopAnim();agents=[];setMode('heatmap');};
-['sl-sims','sl-ag','sl-spd'].forEach(id=>{
-  document.getElementById(id).oninput=function(){document.getElementById(id+'-v').textContent=this.value;};
+
+[['sl-pick','sl-pick-v'],['sl-ag','sl-ag-v'],['sl-spd','sl-spd-v'],['sl-sims','sl-sims-v']].forEach(([id,vid])=>{
+  document.getElementById(id).oninput=function(){document.getElementById(vid).textContent=this.value;};
 });
 document.querySelectorAll('.pill').forEach(p=>p.onclick=()=>setMode(p.dataset.mode));
+new ResizeObserver(()=>fullDraw()).observe(document.querySelector('.canvas-area'));
 
 fullDraw();
 </script>
