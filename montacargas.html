@@ -6,7 +6,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>INDUCASOS · Montacargas v7</title>
+<title>INDUCASOS · Montacargas v8</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
@@ -267,7 +267,10 @@ function MontacargasApp(){
   if(!operario)return(
     <LoginForm onLogin={async(nombre)=>{
       setOperario(nombre);
-      try{await sb.from("usuarios").insert({nombre,rol:"montacarguista",activo:true,fecha_login:new Date().toISOString()});}catch(e){}
+      try{
+        await _go(`${SUPA_URL}/rest/v1/usuarios?nombre=eq.${encodeURIComponent(nombre)}&rol=eq.montacarguista`,{method:"DELETE",headers:{..._H,Prefer:"return=minimal"}});
+        await sb.from("usuarios").insert({nombre,rol:"montacarguista",activo:true,fecha_login:new Date().toISOString()});
+      }catch(e){}
     }}/>
   );
 
@@ -290,7 +293,7 @@ function MontacargasApp(){
             <div style={{fontWeight:800,fontSize:15}}>MONTACARGAS</div>
             <div style={{color:C.t3,fontSize:10}}>CEDI ITAGUÍ · {operario}{ultimaAct?` · act. ${fmtHora(ultimaAct)}`:""}</div>
           </div>
-          <button onClick={refrescar} style={{background:C.bg3,border:`1px solid ${C.b0}`,color:C.t3,borderRadius:8,padding:"7px 11px",fontSize:13}}>↻</button>
+          <button onClick={refrescar} style={{background:C.bg3,border:`1px solid ${C.b0}`,color:C.t3,borderRadius:8,padding:"7px 11px",fontSize:13,cursor:"pointer"}}>↻</button>
           <button onClick={()=>{setOperario(null);setTurnos([]);prevPendRef.current=0;misEnProcesoRef.current=new Set();}} style={{background:C.bg3,border:`1px solid ${C.b0}`,color:C.t3,borderRadius:8,padding:"7px 10px",fontSize:11}}>⇦</button>
         </div>
         <div style={{display:"flex",gap:4}}>

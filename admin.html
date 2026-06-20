@@ -6,7 +6,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>INDUCASOS · Admin v7</title>
+<title>INDUCASOS · Admin v8</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
@@ -161,18 +161,21 @@ function AdminApp(){
   const operariosActivos=(()=>{
     const map={};
     asigs.filter(a=>a.estado==="en_proceso").forEach(a=>{
-      if(!map[a.operario])map[a.operario]={nombre:a.operario,pedidos:[],turnosPend:0};
-      map[a.operario].pedidos.push(a);
+      const key=(a.operario||"").toLowerCase().trim();
+      if(!map[key])map[key]={nombre:a.operario,pedidos:[],turnosPend:0};
+      map[key].pedidos.push(a);
     });
     turnos.filter(t=>t.estado==="pendiente").forEach(t=>{
-      if(map[t.operario_solicitante])map[t.operario_solicitante].turnosPend++;
+      const key=(t.operario_solicitante||"").toLowerCase().trim();
+      if(map[key])map[key].turnosPend++;
     });
     const recientes=usuarios.filter(u=>{
       const diff=(new Date()-new Date(u.fecha_login))/1000/60;
       return u.rol==="operario"&&diff<240;
     });
     recientes.forEach(u=>{
-      if(!map[u.nombre])map[u.nombre]={nombre:u.nombre,pedidos:[],turnosPend:0,soloLogin:true};
+      const key=(u.nombre||"").toLowerCase().trim();
+      if(!map[key])map[key]={nombre:u.nombre,pedidos:[],turnosPend:0,soloLogin:true};
     });
     return Object.values(map).sort((a,b)=>b.pedidos.length-a.pedidos.length);
   })();
@@ -183,7 +186,8 @@ function AdminApp(){
       if(u.rol!=="montacarguista")return;
       const diff=(new Date()-new Date(u.fecha_login))/1000/60;
       if(diff>=240)return;
-      if(!map[u.nombre]||new Date(u.fecha_login)>new Date(map[u.nombre].fecha_login))map[u.nombre]=u;
+      const key=(u.nombre||"").toLowerCase().trim();
+      if(!map[key]||new Date(u.fecha_login)>new Date(map[key].fecha_login))map[key]=u;
     });
     return Object.values(map);
   })();
@@ -308,7 +312,7 @@ function AdminApp(){
                           const lastAction=pos.map(p=>p.bajada_ts||p.fallo_ts).filter(Boolean).sort().pop();
                           const esUBI=(t.picking||"").startsWith("UBI-");
                           return(
-                            <div key={t.id} style={{marginTop:ti===0?2:4,background:C.bg3,borderRadius:8,padding:"6px 9px",border:`1px solid ${C.b0}`}}>
+                            <div key={t.id} onClick={e=>{e.stopPropagation();setTab("turnos");setExpandido(o=>({...o,[`t-${t.id}`]:true}));}} style={{marginTop:ti===0?2:4,background:C.bg3,borderRadius:8,padding:"6px 9px",border:`1px solid ${C.b0}`,cursor:"pointer"}}>
                               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
                                 <div style={{display:"flex",alignItems:"center",gap:5,minWidth:0,flex:1}}>
                                   {esUBI&&<span style={{background:`${C.purple}20`,color:C.purple,borderRadius:3,padding:"0 4px",fontSize:7,fontWeight:800,flexShrink:0}}>UBI</span>}
