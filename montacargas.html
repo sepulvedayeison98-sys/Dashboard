@@ -6,7 +6,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>INDUCASOS · Montacargas v11</title>
+<title>INDUCASOS · Montacargas v12</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
@@ -71,9 +71,9 @@ const CALLE_ORD={B:1,C:2,D:3,E:4};
 const esMDE=c=>{const x=String(c||"").toUpperCase().trim();return x==="MDE"||x.includes("MEDELL")||x==="ITAGUI"||x==="ITAGÜI"||x.includes("ITAGU");};
 const fmtHora=ts=>{if(!ts)return"";const d=new Date(ts);return d.toLocaleTimeString("es-CO",{hour:"2-digit",minute:"2-digit"});};
 const ordenarPos=arr=>[...(arr||[])].sort((a,b)=>(CALLE_ORD[a.calleLetra]||9)-(CALLE_ORD[b.calleLetra]||9)||(a.modulo||0)-(b.modulo||0));
-// Familia: primeros dígitos del ref, quitando los últimos 3 (ej: "211117"→"211", "3110005"→"3110", "501002"→"501")
-const familiaRef=ref=>{const d=String(ref||"").replace(/\D/g,"");return d.length>3?d.slice(0,d.length-3):d;};
-const familiasDePos=skus=>[...new Set((skus||[]).map(s=>familiaRef(s.ref)).filter(Boolean))];
+// Familia del casco: extraída del campo desc con el mismo patrón que usa "En curso" (ej: "CSC-3110"→"3110", "CEC-102"→"102")
+const familiasDePos=skus=>[...new Set((skus||[]).map(s=>(s.desc||"").match(/[A-Z]{2,5}-(\w+)/i)?.[1]||"").filter(Boolean))];
+// Tipo de producto: campo tipo o segunda palabra del desc ("altura", "cueros", etc.)
 const tipoDeSkus=skus=>[...new Set((skus||[]).map(s=>s.tipo||((s.desc||"").split(" ")[1]||"")).filter(Boolean))];
 
 const beep=()=>{try{const ctx=new(window.AudioContext||window.webkitAudioContext)();const o=ctx.createOscillator();const g=ctx.createGain();o.connect(g);g.connect(ctx.destination);o.frequency.value=880;g.gain.setValueAtTime(0.3,ctx.currentTime);g.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+0.4);o.start();o.stop(ctx.currentTime+0.4);}catch(e){}};
