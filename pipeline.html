@@ -6,7 +6,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>INDUCASOS · Picking Móvil v8</title>
+<title>INDUCASOS · Picking Móvil v9</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -502,7 +502,7 @@ function LoginForm({
       fontSize: 12,
       marginTop: 4
     }
-  }, "Picking Móvil · CEDI ITAGUÍ · v8")), /*#__PURE__*/React.createElement("div", {
+  }, "Picking Móvil · CEDI ITAGUÍ · v9")), /*#__PURE__*/React.createElement("div", {
     style: {
       background: C.bg2,
       borderRadius: 16,
@@ -1590,7 +1590,7 @@ function PickingApp() {
       const textColor = listo ? C.green : nBajadas > 0 ? C.orange : C.purple;
       const icon = listo ? "✅" : nBajadas > 0 ? "⬇️" : "🏗️";
       const titulo = listo ? `¡Todo en piso! ${montacarguista ? `· ${montacarguista}` : ""}` : nBajadas > 0 ? `${montacarguista || "Montacargas"} bajando... ${nBajadas}/${nAlturaTotal}` : montacarguista ? `${montacarguista} en camino` : "Turno en cola";
-      const pct = nAlturaTotal > 0 ? Math.round(nBajadas / nAlturaTotal * 100) : 0;
+      const pct = listo ? 100 : (nAlturaTotal > 0 ? Math.round(nBajadas / nAlturaTotal * 100) : 0);
       const barCol = listo ? C.green : C.orange;
       return /*#__PURE__*/React.createElement("div", {
         style: {
@@ -1773,7 +1773,7 @@ function PickingApp() {
     })(), (() => {
       const listaP = modo === "piso" ? recorrido.piso : viajesAltura;
       const total = listaP.length;
-      const hechosCnt = modo === "altura" ? bajadas.size : listaP.filter((_, i) => hechos[`piso-${i}`]).length;
+      const hechosCnt = modo === "altura" ? (turnoActivo?.estado === "completado" ? total : bajadas.size) : listaP.filter((_, i) => hechos[`piso-${i}`]).length;
       const pct = total > 0 ? Math.round(hechosCnt / total * 100) : 0;
       const col = modo === "piso" ? C.green : C.purple;
       const done = hechosCnt === total && total > 0;

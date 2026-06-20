@@ -6,7 +6,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>INDUCASOS · Montacargas v6</title>
+<title>INDUCASOS · Montacargas v7</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
@@ -167,7 +167,14 @@ function MontacargasApp(){
 
   const completarTurno=async(id)=>{
     setProcesando(p=>({...p,[id]:true}));
-    await sb.from("turnos").update({estado:"completado",montacarguista:operario,fecha_completado:new Date().toISOString()}).eq("id",id);
+    const turno=turnos.find(t=>t.id===id);
+    const ts=new Date().toISOString();
+    if(turno){
+      const nuevasPos=turno.posiciones.map(p=>p.bajada?p:{...p,bajada:true,bajada_ts:ts});
+      await sb.from("turnos").update({posiciones:nuevasPos,estado:"completado",montacarguista:operario,fecha_completado:ts}).eq("id",id);
+    } else {
+      await sb.from("turnos").update({estado:"completado",montacarguista:operario,fecha_completado:ts}).eq("id",id);
+    }
     await refrescar();
     setProcesando(p=>({...p,[id]:false}));
   };
