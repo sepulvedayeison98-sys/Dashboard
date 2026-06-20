@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
+<title>INDUCASOS · Simulación Bodega</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+html,body{height:100%;overflow:hidden;}
+body{background:#05080f;color:#e8edf5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;display:flex;flex-direction:column;}
+.hdr{display:flex;align-items:center;gap:10px;padding:9px 14px;background:#080d1a;border-bottom:1px solid #0f1d35;flex-shrink:0;}
+.hdr-title{font-size:14px;font-weight:700;color:#c084fc;}
+.hdr-sub{font-size:9px;color:#4b5e7a;margin-top:1px;}
+.spacer{flex:1;}
+.badge{font-size:10px;font-weight:700;padding:3px 9px;border-radius:20px;background:#1a0a3b;color:#c084fc;border:1px solid #4c1d95;white-space:nowrap;}
+.btn-hdr{padding:7px 14px;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;background:linear-gradient(135deg,#7c3aed,#a855f7);color:#fff;transition:all .15s;flex-shrink:0;}
+.btn-hdr:active{transform:scale(.96);}
+.main{display:flex;flex:1;min-height:0;}
+.canvas-area{flex:1;position:relative;min-width:0;}
+canvas{position:absolute;inset:0;display:block;width:100%;height:100%;}
+.loading{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;background:rgba(5,8,15,.92);z-index:10;}
+.spinner{width:28px;height:28px;border:3px solid #1e2d4a;border-top-color:#a855f7;border-radius:50%;animation:spin .7s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg)}}
+.loading-txt{font-size:11px;color:#4b5e7a;}
+.sidebar{width:242px;flex-shrink:0;background:#080d1a;border-left:1px solid #0f1d35;overflow-y:auto;display:flex;flex-direction:column;}
+.sidebar::-webkit-scrollbar{width:3px;}
+.sidebar::-webkit-scrollbar-thumb{background:#1e2d4a;border-radius:2px;}
+.pnl{padding:11px 13px;border-bottom:1px solid #0d1628;}
+.pnl-t{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:1.2px;color:#2a3a54;margin-bottom:9px;}
+.pills{display:flex;gap:4px;}
+.pill{flex:1;text-align:center;padding:6px 0;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer;color:#3b4e6a;background:#0d1628;border:1px solid #1a2844;transition:all .15s;}
+.pill.on{background:#2a1060;color:#d8b4fe;border-color:#6d28d9;}
+.pill:active{transform:scale(.97);}
+.ctrl-lbl{display:flex;align-items:center;margin-bottom:4px;}
+.ctrl-lbl span:first-child{font-size:11px;color:#7a8fa8;flex:1;}
+.ctrl-lbl span:last-child{font-size:12px;font-weight:700;color:#c084fc;}
+input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:3px;background:#1a2844;border-radius:2px;outline:none;margin-bottom:9px;}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;background:#a855f7;border-radius:50%;cursor:pointer;}
+.btns{display:flex;gap:6px;margin-top:8px;}
+.btn{flex:1;padding:8px;border:none;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer;transition:all .15s;}
+.btn:active{transform:scale(.97);}
+.btn-p{background:linear-gradient(135deg,#6d28d9,#9333ea);color:#fff;}
+.btn-s{background:#0d1628;color:#64748b;border:1px solid #1a2844;}
+.sg{display:grid;grid-template-columns:1fr 1fr;gap:6px;}
+.sc{background:#0d1628;border:1px solid #1a2844;border-radius:7px;padding:8px 10px;}
+.sc-val{font-size:18px;font-weight:800;color:#c084fc;line-height:1;}
+.sc-lbl{font-size:8px;text-transform:uppercase;letter-spacing:.6px;color:#2a3a54;margin-top:2px;}
+.band{font-size:10px;color:#3b4e6a;margin-top:6px;}
+.band span{color:#9333ea;}
+.scrow{display:flex;align-items:center;gap:7px;padding:5px 0;border-bottom:1px solid #0b1424;}
+.scrow:last-child{border:none;}
+.dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;}
+.dist-bars{display:flex;align-items:flex-end;gap:1.5px;height:52px;margin-top:6px;}
+.dist-bar{flex:1;border-radius:2px 2px 0 0;min-height:2px;}
+.dist-x{display:flex;justify-content:space-between;font-size:8px;color:#2a3a54;margin-top:2px;}
+.ubi-row{display:flex;align-items:center;gap:6px;padding:3px 0;}
+.leg{display:flex;align-items:center;gap:8px;padding:8px 13px;font-size:9px;color:#2a3a54;}
+.leg-bar{flex:1;height:5px;border-radius:3px;background:linear-gradient(90deg,#0a1428,#7c3aed,#e879f9);}
+</style>
+</head>
+<body>
+<div class="hdr">
+  <div>
+    <div class="hdr-title">🔬 Simulación · Bodega INDUCASOS</div>
+    <div class="hdr-sub">Monte Carlo · Layout 2D · Análisis de Flujo</div>
+  </div>
+  <div class="spacer"></div>
+  <span class="badge" id="badge">Sin datos</span>
+  <button class="btn-hdr" id="btn-load">Cargar datos</button>
+</div>
+<div class="main">
+  <div class="canvas-area">
+    <canvas id="wh-canvas"></canvas>
+    <div id="loading" class="loading" style="display:none">
+      <div class="spinner"></div>
+      <div class="loading-txt" id="ltxt">Cargando...</div>
+    </div>
+  </div>
+  <div class="sidebar">
+    <div class="pnl">
+      <div class="pnl-t">Vista</div>
+      <div class="pills">
+        <div class="pill on" data-mode="heatmap">🌡 Heatmap</div>
+        <div class="pill" data-mode="animate">▶ Animación</div>
+      </div>
+    </div>
+    <div class="pnl">
+      <div class="pnl-t">Parámetros</div>
+      <div class="ctrl-lbl"><span>Simulaciones</span><span id="sl-sims-v">200</span></div>
+      <input type="range" id="sl-sims" min="100" max="2000" step="100" value="200">
+      <div class="ctrl-lbl"><span>Montacarguistas base</span><span id="sl-ag-v">2</span></div>
+      <input type="range" id="sl-ag" min="1" max="6" value="2">
+      <div class="ctrl-lbl"><span>Velocidad animación</span><span id="sl-spd-v">4</span></div>
+      <input type="range" id="sl-spd" min="1" max="15" value="4">
+      <div class="btns">
+        <button class="btn btn-p" id="btn-sim">⚡ Simular</button>
+        <button class="btn btn-s" id="btn-rst">Reset</button>
+      </div>
+    </div>
+    <div class="pnl">
+      <div class="pnl-t">Histórico</div>
+      <div class="sg">
+        <div class="sc"><div class="sc-val" id="st-t">–</div><div class="sc-lbl">Turnos</div></div>
+        <div class="sc"><div class="sc-val" id="st-p">–</div><div class="sc-lbl">Posiciones</div></div>
+        <div class="sc"><div class="sc-val" id="st-u">–</div><div class="sc-lbl">UBIs únicos</div></div>
+        <div class="sc"><div class="sc-val" id="st-tp">–</div><div class="sc-lbl">t/h mediana</div></div>
+      </div>
+      <div class="band">Banda P10–P90: <span id="st-band">–</span></div>
+    </div>
+    <div class="pnl">
+      <div class="pnl-t">Escenarios (+montacargas)</div>
+      <div id="scenarios"><div style="font-size:10px;color:#2a3a54">Carga datos primero</div></div>
+    </div>
+    <div class="pnl">
+      <div class="pnl-t">Distribución throughput (t/h)</div>
+      <div class="dist-bars" id="dist-bars"></div>
+      <div class="dist-x"><span id="dx0">–</span><span style="color:#4c1d95">simulaciones</span><span id="dx1">–</span></div>
+    </div>
+    <div class="pnl">
+      <div class="pnl-t">Top 5 UBIs más activos</div>
+      <div id="top-ubis"><div style="font-size:10px;color:#2a3a54">Carga datos primero</div></div>
+    </div>
+    <div class="leg"><span>Baja</span><div class="leg-bar"></div><span>Alta demanda</span></div>
+  </div>
+</div>
+<script>
+const SUPA_URL="https://rfysmwpdzlxmadobdvzh.supabase.co";
+const SUPA_KEY="sb_publishable_LHZWmeFFmnua2j3y8dqqdw_rx0u3vad";
+const SH={apikey:SUPA_KEY,Authorization:`Bearer ${SUPA_KEY}`};
+
+const CALLES=['B','C','D','E'];
+const CIDX={B:0,C:1,D:2,E:3};
+const CNOM={B:'Calle 1',C:'Calle 2',D:'Calle 3',E:'Calle 4'};
+const COLS=[
+  {main:'#a855f7',trail:'rgba(168,85,247,0.2)'},
+  {main:'#38bdf8',trail:'rgba(56,189,248,0.2)'},
+  {main:'#f472b6',trail:'rgba(244,114,182,0.2)'},
+  {main:'#34d399',trail:'rgba(52,211,153,0.2)'},
+  {main:'#fb923c',trail:'rgba(251,146,60,0.2)'},
+  {main:'#facc15',trail:'rgba(250,204,21,0.2)'},
+];
+
+const LW=58, TH=28, AH=16;
+let turnos=[], heat={}, maxMod=15, maxHeat=1;
+let agents=[], raf=null, animating=false, viewMode='heatmap', simRes=null, lastTs=0;
+
+const canvas=document.getElementById('wh-canvas');
+const ctx=canvas.getContext('2d');
+
+function parseUbi(u){
+  const m=/^([B-E])0?(\d{1,2})(\d)(\d)$/i.exec(String(u||'').trim());
+  if(!m)return null;
+  return{calle:m[1].toUpperCase(),ci:CIDX[m[1].toUpperCase()]??0,mod:parseInt(m[2]),niv:parseInt(m[3]),pos:parseInt(m[4])};
+}
+
+function dims(){
+  const W=canvas.clientWidth||600, H=canvas.clientHeight||400;
+  const CW=Math.max(16,(W-LW-6)/maxMod);
+  const CH=Math.max(22,(H-TH-6-AH*(CALLES.length-1))/CALLES.length);
+  return{W,H,CW,CH};
+}
+
+function cy(ci,CH){return TH+ci*(CH+AH);}
+
+function ubiXY(calle,mod){
+  const{CW,CH}=dims();
+  return{x:LW+(mod-1)*CW+CW/2, y:cy(CIDX[calle]??0,CH)+CH/2};
+}
+
+function heatCol(n){
+  if(n<=0)return'#090f1e';
+  const t=Math.pow(n,0.55);
+  return`rgb(${Math.round(10+t*170)},${Math.round(15+t*5)},${Math.round(38+t*214)})`;
+}
+
+function drawMap(){
+  const{W,H,CW,CH}=dims();
+  canvas.width=W*devicePixelRatio;
+  canvas.height=H*devicePixelRatio;
+  ctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);
+  ctx.fillStyle='#05080f';
+  ctx.fillRect(0,0,W,H);
+
+  // module headers
+  ctx.fillStyle='#243044';
+  ctx.font='9px monospace';
+  ctx.textAlign='center';
+  const step=Math.max(1,Math.ceil(32/CW));
+  for(let m=1;m<=maxMod;m+=step){
+    ctx.fillText(String(m).padStart(2,'0'),LW+(m-1)*CW+CW/2,TH-10);
+  }
+  ctx.strokeStyle='#121e32';ctx.lineWidth=0.5;
+  ctx.beginPath();ctx.moveTo(LW,TH-2);ctx.lineTo(W,TH-2);ctx.stroke();
+
+  for(let ci=0;ci<CALLES.length;ci++){
+    const c=CALLES[ci], y0=cy(ci,CH);
+    // aisle
+    if(ci>0){
+      ctx.fillStyle='#060b16';
+      ctx.fillRect(LW,y0-AH,W-LW,AH);
+      ctx.strokeStyle='#111d30';ctx.lineWidth=0.8;
+      ctx.setLineDash([3,7]);
+      ctx.beginPath();ctx.moveTo(LW,y0-AH/2);ctx.lineTo(W,y0-AH/2);ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    // label
+    ctx.fillStyle='#2e4060';
+    ctx.font='bold 9px -apple-system,sans-serif';
+    ctx.textAlign='center';
+    ctx.fillText(CNOM[c],LW/2,y0+CH/2-2);
+    ctx.font='8px monospace';ctx.fillStyle='#182030';
+    ctx.fillText(c,LW/2,y0+CH/2+10);
+
+    // cells
+    for(let m=1;m<=maxMod;m++){
+      const key=`${c}-${m}`, n=(heat[key]||0)/maxHeat;
+      const x=LW+(m-1)*CW;
+      ctx.fillStyle=heatCol(n);
+      ctx.fillRect(x+0.5,y0+0.5,CW-1,CH-1);
+      ctx.strokeStyle=n>0.05?'rgba(168,85,247,0.12)':'rgba(20,32,56,0.7)';
+      ctx.lineWidth=0.5;
+      ctx.strokeRect(x+0.5,y0+0.5,CW-1,CH-1);
+      if(n>0.12&&CW>22&&heat[key]){
+        ctx.fillStyle=n>0.5?'rgba(255,255,255,0.9)':'rgba(216,180,254,0.75)';
+        ctx.font=`bold ${Math.max(7,Math.min(10,CW*0.38))}px monospace`;
+        ctx.textAlign='center';
+        ctx.fillText(heat[key],x+CW/2,y0+CH/2+3.5);
+      }
+    }
+  }
+}
+
+function drawAgents(){
+  for(const ag of agents)ag.render(ctx);
+}
+
+function fullDraw(){
+  drawMap();
+  if(viewMode==='animate')drawAgents();
+}
+
+// ═══ AGENT ═══
+class Agent{
+  constructor(id,col){
+    this.id=id;this.col=col;
+    this.x=-1;this.y=-1;this.tx=0;this.ty=0;
+    this.route=[];this.ri=0;
+    this.moving=false;this.serving=false;this.stimer=0;
+    this.trail=[];this.done=0;
+  }
+  assign(positions){
+    const s=[...positions].sort((a,b)=>(a.ci||0)-(b.ci||0)||(a.mod||0)-(b.mod||0));
+    this.route=[...this.route,...s];
+    if(this.x===-1&&s.length){const p=ubiXY(s[0].calle,s[0].mod);this.x=p.x-30;this.y=p.y;}
+    if(!this.moving&&!this.serving)this.next();
+  }
+  next(){
+    if(this.ri>=this.route.length){this.moving=false;return;}
+    const r=this.route[this.ri];
+    const p=ubiXY(r.calle,r.mod);
+    this.tx=p.x;this.ty=p.y;this.moving=true;this.serving=false;
+  }
+  update(dt){
+    const spd=parseFloat(document.getElementById('sl-spd').value)*0.10;
+    if(this.serving){
+      this.stimer-=dt;
+      if(this.stimer<=0){this.serving=false;this.ri++;this.next();}
+      return;
+    }
+    if(!this.moving)return;
+    const dx=this.tx-this.x,dy=this.ty-this.y,d=Math.sqrt(dx*dx+dy*dy),step=spd*dt;
+    if(d<=step+0.5){
+      this.x=this.tx;this.y=this.ty;
+      this.trail.push({x:this.x,y:this.y});
+      if(this.trail.length>25)this.trail.shift();
+      this.moving=false;this.serving=true;
+      this.stimer=500+Math.random()*700;this.done++;
+    }else{this.x+=dx/d*step;this.y+=dy/d*step;}
+  }
+  render(ctx){
+    if(this.x===-1)return;
+    if(this.trail.length>1){
+      ctx.beginPath();
+      ctx.moveTo(this.trail[0].x,this.trail[0].y);
+      this.trail.forEach(p=>ctx.lineTo(p.x,p.y));
+      ctx.strokeStyle=this.col.trail;ctx.lineWidth=1.8;ctx.stroke();
+    }
+    const g=ctx.createRadialGradient(this.x,this.y,0,this.x,this.y,15);
+    g.addColorStop(0,this.col.main+'55');g.addColorStop(1,'transparent');
+    ctx.beginPath();ctx.arc(this.x,this.y,15,0,Math.PI*2);ctx.fillStyle=g;ctx.fill();
+    ctx.beginPath();ctx.arc(this.x,this.y,7,0,Math.PI*2);
+    ctx.fillStyle=this.serving?'#facc15':this.col.main;ctx.fill();
+    if(this.serving){
+      ctx.beginPath();ctx.arc(this.x,this.y,11,0,Math.PI*2);
+      ctx.strokeStyle=this.col.main+'70';ctx.lineWidth=1.5;ctx.stroke();
+    }
+    ctx.fillStyle='#fff';ctx.font='bold 6px monospace';ctx.textAlign='center';
+    ctx.fillText('M'+(this.id+1),this.x,this.y+2.5);
+  }
+}
+
+// ═══ ANIMATION ═══
+function animLoop(ts){
+  const dt=Math.min(ts-lastTs,80);lastTs=ts;
+  agents.forEach(a=>a.update(dt));
+  fullDraw();
+  raf=requestAnimationFrame(animLoop);
+}
+function startAnim(){
+  if(raf)cancelAnimationFrame(raf);
+  buildAgents();lastTs=performance.now();
+  raf=requestAnimationFrame(animLoop);
+}
+function stopAnim(){if(raf){cancelAnimationFrame(raf);raf=null;}}
+
+function buildAgents(){
+  const nAg=parseInt(document.getElementById('sl-ag').value);
+  agents=Array.from({length:nAg},(_,i)=>new Agent(i,COLS[i%COLS.length]));
+  const sample=[...turnos].filter(t=>(t.posiciones||[]).length>0)
+    .sort(()=>Math.random()-0.5).slice(0,nAg*5);
+  sample.forEach((t,i)=>{
+    const parsed=(t.posiciones||[]).map(p=>parseUbi(p.ubi)).filter(Boolean);
+    if(parsed.length)agents[i%nAg].assign(parsed);
+  });
+}
+
+// ═══ MONTE CARLO ═══
+function runMC(){
+  const nSims=parseInt(document.getElementById('sl-sims').value);
+  const nBase=parseInt(document.getElementById('sl-ag').value);
+  const durs=turnos.map(t=>{
+    if(!t.fecha_solicitud||!t.fecha_completado)return null;
+    const d=(new Date(t.fecha_completado)-new Date(t.fecha_solicitud))/60000;
+    return(d>0.5&&d<300)?d:null;
+  }).filter(Boolean);
+  if(durs.length<3){renderStats();return;}
+  simRes=[nBase,nBase+1,nBase+2].map(nAg=>{
+    const tps=[];
+    for(let s=0;s<nSims;s++){
+      const ends=Array(nAg).fill(0);
+      const n=nAg*3+Math.floor(Math.random()*nAg*2);
+      for(let i=0;i<n;i++){
+        const d=durs[Math.floor(Math.random()*durs.length)]*(0.75+Math.random()*0.5);
+        const mi=ends.indexOf(Math.min(...ends));ends[mi]+=d;
+      }
+      tps.push((n/Math.max(...ends))*60);
+    }
+    tps.sort((a,b)=>a-b);
+    return{agents:nAg,p10:tps[Math.floor(nSims*.1)],p50:tps[Math.floor(nSims*.5)],p90:tps[Math.floor(nSims*.9)],all:tps};
+  });
+  renderStats();renderDist();
+}
+
+// ═══ STATS ═══
+function renderStats(){
+  document.getElementById('st-t').textContent=turnos.length||'–';
+  const pos=turnos.reduce((s,t)=>s+(t.posiciones||[]).length,0);
+  document.getElementById('st-p').textContent=pos||'–';
+  const ubis=new Set();
+  turnos.forEach(t=>(t.posiciones||[]).forEach(p=>{if(p.ubi)ubis.add(p.ubi);}));
+  document.getElementById('st-u').textContent=ubis.size||'–';
+  document.getElementById('badge').textContent=`${turnos.length} turnos hist.`;
+  if(!simRes){document.getElementById('st-tp').textContent='–';document.getElementById('st-band').textContent='–';return;}
+  const b=simRes[0];
+  document.getElementById('st-tp').textContent=b.p50.toFixed(1);
+  document.getElementById('st-band').innerHTML=`<span>${b.p10.toFixed(1)} – ${b.p90.toFixed(1)}</span>`;
+  document.getElementById('scenarios').innerHTML=simRes.map((r,i)=>`
+    <div class="scrow">
+      <div class="dot" style="background:${COLS[i].main}"></div>
+      <span style="font-size:10px;color:#7a8fa8;flex:1">${r.agents} montacarguista${r.agents>1?'s':''}</span>
+      <div style="text-align:right">
+        <div style="font-size:12px;font-weight:800;color:${COLS[i].main}">${r.p50.toFixed(1)} <span style="font-size:8px;color:#3b4e6a;font-weight:400">t/h</span></div>
+        <div style="font-size:8px;color:#2a3a54">${r.p10.toFixed(1)}–${r.p90.toFixed(1)}</div>
+      </div>
+    </div>`).join('');
+  const top=Object.entries(heat).sort((a,b)=>b[1]-a[1]).slice(0,5);
+  document.getElementById('top-ubis').innerHTML=top.map(([k,c],i)=>`
+    <div class="ubi-row">
+      <span style="font-size:8px;color:#2a3a54;width:10px">${i+1}</span>
+      <span style="font-size:10px;font-family:monospace;color:#d8b4fe;flex:1">${k}</span>
+      <div style="width:${Math.round(c/maxHeat*50)}px;height:3px;background:#7c3aed;border-radius:1px;margin-right:4px"></div>
+      <span style="font-size:9px;color:#64748b">${c}</span>
+    </div>`).join('');
+}
+
+function renderDist(){
+  if(!simRes)return;
+  const all=simRes[0].all, mn=all[0], mx=all[all.length-1], B=18;
+  const w=(mx-mn)/B, bins=Array(B).fill(0);
+  all.forEach(v=>bins[Math.min(B-1,Math.floor((v-mn)/w))]++);
+  const mb=Math.max(...bins);
+  document.getElementById('dist-bars').innerHTML=bins.map((c,i)=>{
+    const h=Math.max(2,(c/mb)*50), t=i/(B-1);
+    return`<div class="dist-bar" style="height:${h}px;background:hsl(${270-t*50},65%,${40+t*22}%)"></div>`;
+  }).join('');
+  document.getElementById('dx0').textContent=mn.toFixed(1);
+  document.getElementById('dx1').textContent=mx.toFixed(1);
+}
+
+// ═══ LOAD ═══
+async function loadData(){
+  document.getElementById('loading').style.display='flex';
+  document.getElementById('ltxt').textContent='Cargando histórico de turnos...';
+  try{
+    const r=await fetch(`${SUPA_URL}/rest/v1/turnos?estado=eq.completado&select=id,posiciones,fecha_solicitud,fecha_completado,montacarguista&order=fecha_completado.desc&limit=500`,{headers:SH});
+    turnos=await r.json();
+    if(!Array.isArray(turnos))turnos=[];
+    heat={};maxMod=12;
+    turnos.forEach(t=>(t.posiciones||[]).forEach(p=>{
+      const u=parseUbi(p.ubi);if(!u)return;
+      const k=`${u.calle}-${u.mod}`;heat[k]=(heat[k]||0)+1;
+      if(u.mod>maxMod)maxMod=u.mod;
+    }));
+    maxHeat=Math.max(1,...Object.values(heat));
+    document.getElementById('ltxt').textContent='Ejecutando Monte Carlo...';
+    setTimeout(()=>{
+      runMC();
+      document.getElementById('loading').style.display='none';
+      fullDraw();
+    },60);
+  }catch(e){
+    document.getElementById('loading').style.display='none';
+    document.getElementById('badge').textContent='Error al cargar';
+    console.error(e);
+  }
+}
+
+// ═══ MODE ═══
+function setMode(m){
+  viewMode=m;
+  document.querySelectorAll('.pill').forEach(p=>p.classList.toggle('on',p.dataset.mode===m));
+  if(m==='animate'&&turnos.length)startAnim();
+  else{stopAnim();fullDraw();}
+}
+
+// ═══ RESIZE ═══
+window.addEventListener('resize',()=>fullDraw());
+new ResizeObserver(()=>fullDraw()).observe(document.querySelector('.canvas-area'));
+
+// ═══ EVENTS ═══
+document.getElementById('btn-load').onclick=loadData;
+document.getElementById('btn-sim').onclick=()=>{runMC();if(viewMode==='animate'&&turnos.length){stopAnim();startAnim();}};
+document.getElementById('btn-rst').onclick=()=>{stopAnim();agents=[];setMode('heatmap');};
+['sl-sims','sl-ag','sl-spd'].forEach(id=>{
+  document.getElementById(id).oninput=function(){document.getElementById(id+'-v').textContent=this.value;};
+});
+document.querySelectorAll('.pill').forEach(p=>p.onclick=()=>setMode(p.dataset.mode));
+
+fullDraw();
+</script>
+</body>
+</html>
