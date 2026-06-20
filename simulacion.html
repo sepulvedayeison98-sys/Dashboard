@@ -210,7 +210,7 @@ const COL_PICK={main:'#38bdf8',glow:'#0ea5e9',trail:'rgba(56,189,248,0.28)',sz:7
 const COL_MC  ={main:'#c084fc',glow:'#9333ea',trail:'rgba(192,132,252,0.35)',sz:11};
 
 const LW=58,TH=28,AH=14;
-let currentTurnos=[],histTurnos=[],bandejaPedidos=[];
+let currentTurnos=[],histTurnos=[],bandejaPedidos=[],invPositions=[];
 let heat={},maxMod=15,maxHeat=1;
 let agents=[],raf=null,viewMode='heatmap',lastTs=0;
 let simRes=null,mcBalance=null;
@@ -440,51 +440,83 @@ function buildAgents(){
   const nPick=parseInt(document.getElementById('sl-pick').value);
   const nMC=parseInt(document.getElementById('sl-ag').value);
   agents=[];
+  const {CW,CH}=dims();
 
-  const source=currentTurnos.length?currentTurnos:histTurnos;
-  const sample=[...source].filter(t=>(t.posiciones||[]).length>0)
-    .sort(()=>Math.random()-.5).slice(0,Math.max(nPick,nMC)*8);
+  if(invPositions.length>0){
+    // Build unique (calle,mod) waypoints in serpentine picking order
+    const seen=new Set();
+    const uniq=[];
+    invPositions.forEach(u=>{
+      const k=`${u.calle}-${u.mod}`;
+      if(!seen.has(k)){seen.add(k);uniq.push(u);}
+    });
+    // Serpentine: B left→right, C right→left, D left→right, E right→left
+    uniq.sort((a,b)=>{
+      if(a.ci!==b.ci)return a.ci-b.ci;
+      return a.ci%2===0?a.mod-b.mod:b.mod-a.mod;
+    });
 
-  function routeFrom(turno){
-    return(turno.posiciones||[]).map(p=>parseUbi(p.ubi)).filter(Boolean);
-  }
-
-  // Picker agents — teal, fast, small
-  for(let i=0;i<nPick;i++){
-    const ag=new Agent(i,COL_PICK,'pick');
-    const t=sample.length?sample[i%sample.length]:null;
-    const route=t?routeFrom(t):demoRoute(i);
-    if(route.length){
-      // Spread initial y positions across calles
-      const startCalle=CALLES[i%CALLES.length];
-      const {CW,CH}=dims();
-      ag.x=LW+4; ag.y=cy(CIDX[startCalle],CH)+CH/2;
-      ag.assign(route);
+    // Each picker covers a zone (segment of the serpentine)
+    // Sample ~18 stops per picker so the route loops visibly
+    const perPick=Math.ceil(uniq.length/nPick);
+    for(let i=0;i<nPick;i++){
+      const ag=new Agent(i,COL_PICK,'pick');
+      const zone=uniq.slice(i*perPick,(i+1)*perPick);
+      const step=Math.max(1,Math.floor(zone.length/18));
+      const route=zone.filter((_,j)=>j%step===0);
+      if(route.length){
+        ag.x=LW+4; ag.y=cy(route[0].ci,CH)+CH/2;
+        ag.assign(route);
+      }
+      agents.push(ag);
     }
-    agents.push(ag);
-  }
-  // MC agents — purple, slow, large
-  for(let i=0;i<nMC;i++){
-    const ag=new Agent(i,COL_MC,'mc');
-    const tIdx=sample.length?(i+nPick)%sample.length:-1;
-    const t=tIdx>=0?sample[tIdx]:null;
-    const route=t?routeFrom(t):demoRoute(i+10);
-    if(route.length){
-      const startCalle=CALLES[(i*2)%CALLES.length];
-      const {CW,CH}=dims();
-      ag.x=LW+4; ag.y=cy(CIDX[startCalle],CH)+CH/2;
-      ag.assign(route);
+
+    // MC agents cross all calles (they restock): one stop per calle per pass
+    for(let i=0;i<nMC;i++){
+      const ag=new Agent(i,COL_MC,'mc');
+      const route=CALLES.flatMap(c=>{
+        const pos=uniq.filter(p=>p.calle===c);
+        // Pick 5 evenly-spaced positions from this calle
+        const s=Math.max(1,Math.floor(pos.length/5));
+        return pos.filter((_,j)=>j%s===0).slice(0,5);
+      });
+      if(route.length){
+        ag.x=LW+4; ag.y=cy(i%CALLES.length,CH)+CH/2;
+        ag.assign(route);
+      }
+      agents.push(ag);
     }
-    agents.push(ag);
+  }else{
+    // Fallback: demo routes when inventory not loaded
+    const source=currentTurnos.length?currentTurnos:histTurnos;
+    const sample=[...source].filter(t=>(t.posiciones||[]).length>0)
+      .sort(()=>Math.random()-.5).slice(0,Math.max(nPick,nMC)*8);
+    const routeFrom=turno=>(turno.posiciones||[]).map(p=>parseUbi(p.ubi)).filter(Boolean);
+
+    for(let i=0;i<nPick;i++){
+      const ag=new Agent(i,COL_PICK,'pick');
+      const t=sample.length?sample[i%sample.length]:null;
+      const route=t?routeFrom(t):demoRoute(i);
+      if(route.length){
+        const sc=CALLES[i%CALLES.length];
+        ag.x=LW+4; ag.y=cy(CIDX[sc],CH)+CH/2;
+        ag.assign(route);
+      }
+      agents.push(ag);
+    }
+    for(let i=0;i<nMC;i++){
+      const ag=new Agent(i,COL_MC,'mc');
+      const tIdx=sample.length?(i+nPick)%sample.length:-1;
+      const t=tIdx>=0?sample[tIdx]:null;
+      const route=t?routeFrom(t):demoRoute(i+10);
+      if(route.length){
+        const sc=CALLES[(i*2)%CALLES.length];
+        ag.x=LW+4; ag.y=cy(CIDX[sc],CH)+CH/2;
+        ag.assign(route);
+      }
+      agents.push(ag);
+    }
   }
-  // Distribute extra routes round-robin across all agents
-  sample.slice(nPick+nMC).forEach((t,idx)=>{
-    const route=routeFrom(t);
-    if(!route.length)return;
-    agents[idx%agents.length].route.push(
-      ...[...route].sort((a,b)=>(a.ci||0)-(b.ci||0)||(a.mod||0)-(b.mod||0))
-    );
-  });
 }
 
 // ═══ MONTE CARLO ═══
@@ -702,6 +734,35 @@ async function loadData(){
         }
       }
     }catch(ex){ console.warn('Bandeja Excel no disponible:',ex); }
+
+    // Load full inventory positions from Inventario.xlsx → real heatmap + agent routes
+    document.getElementById('ltxt').textContent='Cargando inventario bodega (45 k posiciones)...';
+    try{
+      const iRes=await fetch('./Inventario.xlsx',{cache:'reload'});
+      if(iRes.ok){
+        const iBuf=await iRes.arrayBuffer();
+        const iwb=XLSX.read(iBuf,{type:'array'});
+        const iws=iwb.Sheets['InvxUbiMULTI']||iwb.Sheets[iwb.SheetNames[0]];
+        if(iws){
+          const irows=XLSX.utils.sheet_to_json(iws,{range:5,defval:''});
+          invPositions=irows.map(r=>parseUbi(String(r['ubicacion']||'').trim())).filter(Boolean);
+          // Rebuild heatmap from real inventory density
+          if(invPositions.length>0){
+            heat={};maxMod=12;
+            invPositions.forEach(u=>{
+              const k=`${u.calle}-${u.mod}`;
+              heat[k]=(heat[k]||0)+1;
+              if(u.mod>maxMod)maxMod=u.mod;
+            });
+            maxMod=Math.max(maxMod,12);
+            maxHeat=Math.max(1,...Object.values(heat));
+            heatIsHistorical=false;
+            document.getElementById('badge-hist').style.display='none';
+            document.getElementById('badge-pend').textContent=`${invPositions.length.toLocaleString()} posiciones`;
+          }
+        }
+      }
+    }catch(ex){ console.warn('Inventario no disponible:',ex); }
 
     document.getElementById('ltxt').textContent='Ejecutando Monte Carlo...';
     setTimeout(()=>{
