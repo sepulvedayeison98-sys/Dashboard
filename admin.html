@@ -6,7 +6,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>INDUCASOS · Admin v6</title>
+<title>INDUCASOS · Admin v7</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
@@ -14,7 +14,7 @@
   *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
   body{background:#070b14;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#e8edf5;overflow-x:hidden;}
   #root{min-height:100vh;}
-  input,select{font-family:inherit;}
+  input,select{font-family:inherit;outline:none;}
   ::-webkit-scrollbar{width:0;height:0;}
   @keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
   @keyframes spin{to{transform:rotate(360deg)}}
@@ -25,7 +25,6 @@
 <script type="text/babel" data-presets="react">
 const { useState, useEffect, useCallback, useRef } = React;
 
-// ═══════════ PALETA ═══════════
 const C={
   bg0:"#070b14",bg1:"#0d1320",bg2:"#131b2e",bg3:"#1a2438",
   b0:"#1f2b42",b1:"#2a3854",
@@ -34,11 +33,10 @@ const C={
   orange:"#f97316",red:"#ef4444",purple:"#a855f7",
 };
 
-// ═══════════ SUPABASE ═══════════
-const SUPA_URL = "https://rfysmwpdzlxmadobdvzh.supabase.co";
-const SUPA_KEY = "sb_publishable_LHZWmeFFmnua2j3y8dqqdw_rx0u3vad";
-const _H = { apikey:SUPA_KEY, Authorization:`Bearer ${SUPA_KEY}`, "Content-Type":"application/json" };
-const _go = async (url, opts={}) => {
+const SUPA_URL="https://rfysmwpdzlxmadobdvzh.supabase.co";
+const SUPA_KEY="sb_publishable_LHZWmeFFmnua2j3y8dqqdw_rx0u3vad";
+const _H={apikey:SUPA_KEY,Authorization:`Bearer ${SUPA_KEY}`,"Content-Type":"application/json"};
+const _go=async(url,opts={})=>{
   for(let i=0;i<3;i++){
     try{
       const res=await fetch(url,{headers:_H,...opts});
@@ -53,27 +51,32 @@ const _go = async (url, opts={}) => {
   }
 };
 
-const api = {
-  turnos:    ()=> _go(`${SUPA_URL}/rest/v1/turnos?order=fecha_solicitud.desc`,{headers:_H}),
-  asigs:     ()=> _go(`${SUPA_URL}/rest/v1/asignaciones?order=fecha_asignacion.desc`,{headers:_H}),
-  usuarios:  ()=> _go(`${SUPA_URL}/rest/v1/usuarios?order=fecha_login.desc`,{headers:_H}),
-  patchTurno:(id,body)=> _go(`${SUPA_URL}/rest/v1/turnos?id=eq.${id}`,{method:"PATCH",headers:{..._H,Prefer:"return=minimal"},body:JSON.stringify(body)}),
-  patchAsig: (id,body)=> _go(`${SUPA_URL}/rest/v1/asignaciones?id=eq.${id}`,{method:"PATCH",headers:{..._H,Prefer:"return=minimal"},body:JSON.stringify(body)}),
+const api={
+  turnos:    ()=>_go(`${SUPA_URL}/rest/v1/turnos?order=fecha_solicitud.desc`,{headers:_H}),
+  asigs:     ()=>_go(`${SUPA_URL}/rest/v1/asignaciones?order=fecha_asignacion.desc`,{headers:_H}),
+  usuarios:  ()=>_go(`${SUPA_URL}/rest/v1/usuarios?order=fecha_login.desc`,{headers:_H}),
+  patchTurno:(id,body)=>_go(`${SUPA_URL}/rest/v1/turnos?id=eq.${id}`,{method:"PATCH",headers:{..._H,Prefer:"return=minimal"},body:JSON.stringify(body)}),
+  deleteTurno:(id)=>_go(`${SUPA_URL}/rest/v1/turnos?id=eq.${id}`,{method:"DELETE",headers:{..._H,Prefer:"return=minimal"}}),
+  patchAsig: (id,body)=>_go(`${SUPA_URL}/rest/v1/asignaciones?id=eq.${id}`,{method:"PATCH",headers:{..._H,Prefer:"return=minimal"},body:JSON.stringify(body)}),
 };
 
-// ═══════════ HELPERS ═══════════
 const CALLE_ORD={B:1,C:2,D:3,E:4};
 const CALLE_NOM={B:"Calle 1",C:"Calle 2",D:"Calle 3",E:"Calle 4"};
 const ordenarPos=arr=>[...(arr||[])].sort((a,b)=>(CALLE_ORD[a.calleLetra]||9)-(CALLE_ORD[b.calleLetra]||9)||(a.modulo||0)-(b.modulo||0));
 const fmtHora=ts=>{if(!ts)return"—";const d=new Date(ts);return d.toLocaleTimeString("es-CO",{hour:"2-digit",minute:"2-digit"});};
-const fmtFecha=ts=>{if(!ts)return"—";const d=new Date(ts);return `${d.getDate()}/${d.getMonth()+1} ${fmtHora(ts)}`;};
+const fmtFecha=ts=>{if(!ts)return"—";const d=new Date(ts);return`${d.getDate()}/${d.getMonth()+1} ${fmtHora(ts)}`;};
 const hoy=()=>{const d=new Date();d.setHours(0,0,0,0);return d;};
+const transcurrido=ts=>{
+  if(!ts)return"";
+  const m=Math.round((new Date()-new Date(ts))/60000);
+  if(m<1)return"<1m";
+  if(m<60)return`${m}m`;
+  const h=Math.floor(m/60);return`${h}h${m%60>0?` ${m%60}m`:""}`;
+};
 
-const clasifCol={despachable:"#22c55e",parcial:"#eab308",reabasto:"#f97316",ruptura:"#ef4444"};
 const estadoCol={pendiente:C.yellow,en_proceso:C.orange,completado:C.green,liberado:C.t3,fallido:C.red};
 const estadoLbl={pendiente:"PEND",en_proceso:"EN PROC",completado:"COMP",liberado:"LIBRE",fallido:"FALLO"};
 
-// ═══════════ COMPONENTE PRINCIPAL ═══════════
 function AdminApp(){
   const [tab,setTab]=useState("operarios");
   const [turnos,setTurnos]=useState([]);
@@ -82,8 +85,9 @@ function AdminApp(){
   const [cargando,setCargando]=useState(true);
   const [ultimaAct,setUltimaAct]=useState(null);
   const [expandido,setExpandido]=useState({});
-  const [editando,setEditando]=useState(null); // id del turno/asig en edición
+  const [editando,setEditando]=useState(null);
   const [procesando,setProcesando]=useState({});
+  const [busca,setBusca]=useState("");
   const timerRef=useRef(null);
 
   const refrescar=useCallback(async()=>{
@@ -101,14 +105,14 @@ function AdminApp(){
     return()=>clearInterval(timerRef.current);
   },[refrescar]);
 
-  // KPIs
   const hoyCut=hoy();
   const nOperariosActivos=new Set(asigs.filter(a=>a.estado==="en_proceso").map(a=>a.operario)).size;
   const nPedidosEnCurso=asigs.filter(a=>a.estado==="en_proceso").length;
-  const nTurnosPend=turnos.filter(t=>t.estado==="pendiente").length;
+  const nTurnosPend=turnos.filter(t=>t.estado==="pendiente"&&!(t.picking||"").startsWith("UBI-")).length;
   const nCompletadosHoy=turnos.filter(t=>t.estado==="completado"&&t.fecha_completado&&new Date(t.fecha_completado)>=hoyCut).length;
+  const nFallidos=turnos.filter(t=>t.estado==="fallido").length;
+  const nUBI=turnos.filter(t=>(t.picking||"").startsWith("UBI-")&&(t.estado==="pendiente"||t.estado==="en_proceso")).length;
 
-  // Acciones turnos
   const priorizarTurno=async(id)=>{
     setProcesando(p=>({...p,[id]:true}));
     await api.patchTurno(id,{prioridad:"urgente",es_mde:true});
@@ -122,11 +126,23 @@ function AdminApp(){
     await refrescar();
     setProcesando(p=>({...p,[id]:false}));
   };
+  const eliminarTurno=async(id)=>{
+    if(!window.confirm("¿Eliminar este turno permanentemente?"))return;
+    setProcesando(p=>({...p,[id]:true}));
+    await api.deleteTurno(id);
+    await refrescar();
+    setProcesando(p=>({...p,[id]:false}));
+  };
   const reintentarTurno=async(id)=>{
     setProcesando(p=>({...p,[id]:true}));
     await api.patchTurno(id,{estado:"pendiente",motivo_fallo:null,fecha_completado:null,montacarguista:null});
     await refrescar();
     setProcesando(p=>({...p,[id]:false}));
+  };
+  const limpiarTodo=async()=>{
+    if(!window.confirm("¿Eliminar todos los turnos completados y fallidos?\nEsta acción no se puede deshacer."))return;
+    await _go(`${SUPA_URL}/rest/v1/turnos?estado=in.(completado,fallido)`,{method:"DELETE",headers:{..._H,Prefer:"return=minimal"}});
+    await refrescar();
   };
   const liberarPedido=async(id)=>{
     setProcesando(p=>({...p,[id]:true}));
@@ -142,21 +158,18 @@ function AdminApp(){
     setProcesando(p=>({...p,[id]:false}));
   };
 
-  // Vista operarios activos consolidada
   const operariosActivos=(()=>{
     const map={};
     asigs.filter(a=>a.estado==="en_proceso").forEach(a=>{
       if(!map[a.operario])map[a.operario]={nombre:a.operario,pedidos:[],turnosPend:0};
       map[a.operario].pedidos.push(a);
     });
-    // Agregar conteo de turnos pendientes por operario
     turnos.filter(t=>t.estado==="pendiente").forEach(t=>{
       if(map[t.operario_solicitante])map[t.operario_solicitante].turnosPend++;
     });
-    // Operarios con solo login (sin pedido asignado)
     const recientes=usuarios.filter(u=>{
-      const diff=(new Date()-new Date(u.fecha_login))/1000/60; // minutos
-      return u.rol==="operario"&&diff<240; // activo últimas 4h
+      const diff=(new Date()-new Date(u.fecha_login))/1000/60;
+      return u.rol==="operario"&&diff<240;
     });
     recientes.forEach(u=>{
       if(!map[u.nombre])map[u.nombre]={nombre:u.nombre,pedidos:[],turnosPend:0,soloLogin:true};
@@ -164,15 +177,13 @@ function AdminApp(){
     return Object.values(map).sort((a,b)=>b.pedidos.length-a.pedidos.length);
   })();
 
-  // Deduplicar montacarguistas: solo la entrada más reciente por nombre
   const montacarguistasActivos=(()=>{
     const map={};
     usuarios.forEach(u=>{
       if(u.rol!=="montacarguista")return;
       const diff=(new Date()-new Date(u.fecha_login))/1000/60;
       if(diff>=240)return;
-      if(!map[u.nombre]||new Date(u.fecha_login)>new Date(map[u.nombre].fecha_login))
-        map[u.nombre]=u;
+      if(!map[u.nombre]||new Date(u.fecha_login)>new Date(map[u.nombre].fecha_login))map[u.nombre]=u;
     });
     return Object.values(map);
   })();
@@ -186,7 +197,8 @@ function AdminApp(){
 
   return(
     <div style={{minHeight:"100vh",paddingBottom:24}}>
-      {/* Header */}
+
+      {/* ── Header ── */}
       <div style={{position:"sticky",top:0,zIndex:10,background:C.bg1,borderBottom:`1px solid ${C.b0}`,padding:"12px 14px"}}>
         <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
           <div style={{width:34,height:34,borderRadius:9,background:"linear-gradient(135deg,#3b82f6,#2dd4bf)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18}}>⚙️</div>
@@ -194,19 +206,32 @@ function AdminApp(){
             <div style={{fontWeight:800,fontSize:15}}>PANEL ADMIN</div>
             <div style={{color:C.t3,fontSize:10}}>INDUCASOS · CEDI ITAGUÍ{ultimaAct?` · act. ${fmtHora(ultimaAct)}`:""}</div>
           </div>
-          <button onClick={refrescar} style={{background:C.bg3,border:`1px solid ${C.b0}`,color:C.t3,borderRadius:8,padding:"7px 11px",fontSize:13}}>↻</button>
+          <button onClick={limpiarTodo} title="Eliminar completados y fallidos" style={{background:`${C.red}12`,border:`1px solid ${C.red}30`,color:C.red,borderRadius:8,padding:"7px 10px",fontSize:13,cursor:"pointer"}}>🗑</button>
+          <button onClick={refrescar} style={{background:C.bg3,border:`1px solid ${C.b0}`,color:C.t3,borderRadius:8,padding:"7px 11px",fontSize:13,cursor:"pointer"}}>↻</button>
         </div>
 
-        {/* KPIs */}
-        <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:5,marginBottom:10}}>
+        {/* KPIs — 2 filas de 3 */}
+        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:5,marginBottom:5}}>
           {[
             {l:"Operarios",v:nOperariosActivos,c:C.teal,ico:"👷"},
             {l:"Pedidos",v:nPedidosEnCurso,c:C.accent,ico:"📦"},
-            {l:"Turnos pend.",v:nTurnosPend,c:C.yellow,ico:"⏳"},
-            {l:"Comp. hoy",v:nCompletadosHoy,c:C.green,ico:"✅"},
+            {l:"T. Pend.",v:nTurnosPend,c:nTurnosPend>0?C.yellow:C.t4,ico:"⏳"},
           ].map(k=>(
             <div key={k.l} style={{background:C.bg2,borderRadius:9,padding:"8px 4px",textAlign:"center",border:`1px solid ${C.b0}`}}>
-              <div style={{fontSize:14}}>{k.ico}</div>
+              <div style={{fontSize:13}}>{k.ico}</div>
+              <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:20,fontWeight:800,color:k.c,lineHeight:1.1}}>{k.v}</div>
+              <div style={{fontSize:7,color:C.t4,fontWeight:700,textTransform:"uppercase",marginTop:2}}>{k.l}</div>
+            </div>
+          ))}
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:5,marginBottom:10}}>
+          {[
+            {l:"Comp. Hoy",v:nCompletadosHoy,c:C.green,ico:"✅"},
+            {l:"Fallidos",v:nFallidos,c:nFallidos>0?C.red:C.t4,ico:"⚠️"},
+            {l:"UBI activas",v:nUBI,c:nUBI>0?C.purple:C.t4,ico:"⬇"},
+          ].map(k=>(
+            <div key={k.l} style={{background:C.bg2,borderRadius:9,padding:"8px 4px",textAlign:"center",border:`1px solid ${k.v>0?k.c+"30":C.b0}`}}>
+              <div style={{fontSize:13}}>{k.ico}</div>
               <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:20,fontWeight:800,color:k.c,lineHeight:1.1}}>{k.v}</div>
               <div style={{fontSize:7,color:C.t4,fontWeight:700,textTransform:"uppercase",marginTop:2}}>{k.l}</div>
             </div>
@@ -220,7 +245,7 @@ function AdminApp(){
             {key:"turnos",lbl:"🏗️ Turnos"},
             {key:"asignaciones",lbl:"📋 Pedidos"},
           ].map(t=>(
-            <button key={t.key} onClick={()=>setTab(t.key)} style={{flex:1,padding:"8px 4px",borderRadius:9,border:`1px solid ${tab===t.key?C.accent:C.b0}`,background:tab===t.key?`${C.accent}18`:C.bg2,color:tab===t.key?C.accent:C.t3,fontWeight:700,fontSize:10}}>
+            <button key={t.key} onClick={()=>setTab(t.key)} style={{flex:1,padding:"8px 4px",borderRadius:9,border:`1px solid ${tab===t.key?C.accent:C.b0}`,background:tab===t.key?`${C.accent}18`:C.bg2,color:tab===t.key?C.accent:C.t3,fontWeight:700,fontSize:10,cursor:"pointer"}}>
               {t.lbl}
             </button>
           ))}
@@ -232,35 +257,32 @@ function AdminApp(){
         {/* ── TAB OPERARIOS ── */}
         {tab==="operarios"&&(
           <div>
-            {/* Montacarguistas */}
             {montacarguistasActivos.length>0&&(
               <div style={{marginBottom:14}}>
                 <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:7}}>
                   <div style={{fontSize:10,color:C.purple,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>🏗️ Montacarguistas activos</div>
                   <div style={{fontSize:9,color:C.t4}}>{montacarguistasActivos.length} conectado{montacarguistasActivos.length!==1?"s":""}</div>
                 </div>
-                {montacarguistasActivos.map((u)=>{
+                {montacarguistasActivos.map(u=>{
                   const nombre=u.nombre;
-                  const enProceso=turnos.filter(t=>t.montacarguista===nombre&&t.estado==="en_proceso")
-                    .sort((a,b)=>(b.es_mde?1:0)-(a.es_mde?1:0));
+                  const enProceso=turnos.filter(t=>t.montacarguista===nombre&&t.estado==="en_proceso").sort((a,b)=>(b.es_mde?1:0)-(a.es_mde?1:0));
                   const completadosHoy=turnos.filter(t=>t.montacarguista===nombre&&t.estado==="completado"&&t.fecha_completado&&new Date(t.fecha_completado)>=hoyCut);
-                  const pendientes=turnos.filter(t=>t.operario_solicitante===nombre&&t.estado==="pendiente");
-                  const minutos=Math.round((new Date()-new Date(u.fecha_login))/60000);
-                  const tiempoLabel=minutos<1?"ahora":minutos<60?`hace ${minutos}min`:`hace ${Math.floor(minutos/60)}h${minutos%60>0?` ${minutos%60}min`:""}`;
                   const libre=enProceso.length===0;
                   const accentCol=libre?C.green:C.orange;
                   const expKey=`mc-${nombre}`;
                   const exp=!!expandido[expKey];
                   return(
                     <div key={nombre} style={{background:C.bg2,borderRadius:13,marginBottom:8,border:`1px solid ${libre?C.b0:C.orange+"30"}`,borderLeft:`4px solid ${accentCol}`,animation:"fadeUp .2s ease both"}}>
-                      {/* Cabecera */}
                       <div onClick={()=>setExpandido(o=>({...o,[expKey]:!o[expKey]}))} style={{padding:"11px 13px",cursor:"pointer"}}>
                         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:enProceso.length>0?8:0}}>
                           <div style={{display:"flex",alignItems:"center",gap:9}}>
                             <div style={{width:36,height:36,borderRadius:"50%",background:"linear-gradient(135deg,#a855f7,#3b82f6)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:17,flexShrink:0}}>🏗️</div>
                             <div>
                               <div style={{fontWeight:800,fontSize:14,color:C.t1,textTransform:"capitalize"}}>{nombre}</div>
-                              <div style={{fontSize:9,color:C.t3}}>{libre?"Libre":enProceso.length===1?"1 turno activo":`${enProceso.length} turnos activos`} · {tiempoLabel}</div>
+                              <div style={{fontSize:9,color:C.t3}}>
+                                {libre?"Libre":enProceso.length===1?"1 turno activo":`${enProceso.length} turnos activos`}
+                                {" · hace "}{transcurrido(u.fecha_login)}
+                              </div>
                             </div>
                           </div>
                           <div style={{display:"flex",alignItems:"center",gap:5}}>
@@ -276,34 +298,34 @@ function AdminApp(){
                               <span style={{color:C.t3,fontSize:13,transform:exp?"rotate(90deg)":"none",transition:"transform .2s"}}>▶</span>}
                           </div>
                         </div>
-                        {/* Mini barras de progreso por turno activo */}
                         {enProceso.map((t,ti)=>{
                           const pos=t.posiciones||[];
                           const nBaj=pos.filter(p=>p.bajada).length;
                           const nFallo=pos.filter(p=>p.fallo).length;
                           const nHecho=nBaj+nFallo;
                           const pct=pos.length>0?Math.round(nHecho/pos.length*100):0;
-                          const col=pct===100?C.green:nFallo>0?C.orange:C.orange;
+                          const col=pct===100?C.green:C.orange;
                           const lastAction=pos.map(p=>p.bajada_ts||p.fallo_ts).filter(Boolean).sort().pop();
+                          const esUBI=(t.picking||"").startsWith("UBI-");
                           return(
                             <div key={t.id} style={{marginTop:ti===0?2:4,background:C.bg3,borderRadius:8,padding:"6px 9px",border:`1px solid ${C.b0}`}}>
                               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
                                 <div style={{display:"flex",alignItems:"center",gap:5,minWidth:0,flex:1}}>
-                                  <span style={{fontFamily:"'JetBrains Mono',monospace",color:C.teal,fontSize:11,fontWeight:800,flexShrink:0}}>{t.picking}</span>
+                                  {esUBI&&<span style={{background:`${C.purple}20`,color:C.purple,borderRadius:3,padding:"0 4px",fontSize:7,fontWeight:800,flexShrink:0}}>UBI</span>}
+                                  <span style={{fontFamily:"'JetBrains Mono',monospace",color:esUBI?C.purple:C.teal,fontSize:11,fontWeight:800,flexShrink:0}}>{t.picking}</span>
                                   {(t.es_mde||t.prioridad==="urgente")&&<span style={{background:`${C.red}20`,color:C.red,borderRadius:3,padding:"0 4px",fontSize:7,fontWeight:800,flexShrink:0}}>🚨</span>}
-                                  <span style={{color:C.t4,fontSize:9,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{(t.cliente||"").slice(0,16)}</span>
+                                  <span style={{color:C.t4,fontSize:9,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{(t.cliente||"").slice(0,18)}</span>
                                 </div>
                                 <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
-                                  {lastAction&&<span style={{color:C.t4,fontSize:8}}>{fmtHora(lastAction)}</span>}
+                                  <span style={{color:C.t4,fontSize:8}}>{lastAction?fmtHora(lastAction):transcurrido(t.fecha_solicitud)}</span>
                                   <span style={{fontFamily:"'JetBrains Mono',monospace",color:col,fontSize:12,fontWeight:800}}>{pct}%</span>
                                 </div>
                               </div>
                               <div style={{height:5,background:C.b0,borderRadius:3,overflow:"hidden",marginBottom:3}}>
-                                <div style={{height:"100%",width:`${pct}%`,background:pct===100?col:`linear-gradient(90deg,${col}80,${col})`,borderRadius:3,transition:"width .5s cubic-bezier(.4,0,.2,1)",boxShadow:pct>0?`0 0 6px ${col}50`:"none"}}/>
+                                <div style={{height:"100%",width:`${pct}%`,background:pct===100?col:`linear-gradient(90deg,${col}80,${col})`,borderRadius:3,transition:"width .5s",boxShadow:pct>0?`0 0 6px ${col}50`:"none"}}/>
                               </div>
-                              <div style={{display:"flex",justifyContent:"space-between",fontSize:8,color:C.t4}}>
-                                <span>{nBaj} bajada{nBaj!==1?"s":""}{nFallo>0?` · ${nFallo} fallo${nFallo!==1?"s":""}`:""}  /  {pos.length} posiciones</span>
-                                {pendientes.length>0&&<span style={{color:C.yellow}}>+{pendientes.length} en cola</span>}
+                              <div style={{fontSize:8,color:C.t4}}>
+                                {nBaj} bajada{nBaj!==1?"s":""}{nFallo>0?` · ${nFallo} fallo${nFallo!==1?"s":""}`:""}  /  {pos.length} pos.
                               </div>
                             </div>
                           );
@@ -312,23 +334,20 @@ function AdminApp(){
                           <div style={{marginTop:4,fontSize:9,color:C.green,fontWeight:600}}>✓ Completó {completadosHoy.length} turno{completadosHoy.length!==1?"s":""} hoy</div>
                         )}
                       </div>
-                      {/* Expandido: historial del día */}
                       {exp&&completadosHoy.length>0&&(
                         <div style={{borderTop:`1px solid ${C.b0}`,padding:"7px 13px 10px"}}>
                           <div style={{fontSize:8,color:C.green,fontWeight:700,textTransform:"uppercase",letterSpacing:".5px",marginBottom:6}}>✅ Completados hoy</div>
                           {completadosHoy.map(t=>{
-                            const pos=t.posiciones||[];
-                            const nFallo=pos.filter(p=>p.fallo).length;
+                            const nFallo=(t.posiciones||[]).filter(p=>p.fallo).length;
+                            const esUBI=(t.picking||"").startsWith("UBI-");
                             return(
                               <div key={t.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"4px 0",borderBottom:`1px solid ${C.b0}`}}>
-                                <div style={{display:"flex",alignItems:"center",gap:6}}>
-                                  <span style={{fontFamily:"'JetBrains Mono',monospace",color:C.teal,fontSize:10,fontWeight:700}}>{t.picking}</span>
+                                <div style={{display:"flex",alignItems:"center",gap:5}}>
+                                  {esUBI&&<span style={{background:`${C.purple}20`,color:C.purple,borderRadius:3,padding:"0 4px",fontSize:7,fontWeight:800}}>UBI</span>}
+                                  <span style={{fontFamily:"'JetBrains Mono',monospace",color:esUBI?C.purple:C.teal,fontSize:10,fontWeight:700}}>{t.picking}</span>
                                   {nFallo>0&&<span style={{background:`${C.orange}20`,color:C.orange,borderRadius:3,padding:"0 4px",fontSize:7,fontWeight:700}}>{nFallo} fallo{nFallo!==1?"s":""}</span>}
                                 </div>
-                                <div style={{display:"flex",gap:8,fontSize:9,color:C.t4}}>
-                                  <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:80}}>{(t.cliente||"").slice(0,14)}</span>
-                                  <span style={{flexShrink:0}}>{fmtHora(t.fecha_completado)}</span>
-                                </div>
+                                <span style={{fontSize:9,color:C.t4,flexShrink:0}}>{fmtHora(t.fecha_completado)}</span>
                               </div>
                             );
                           })}
@@ -340,7 +359,6 @@ function AdminApp(){
               </div>
             )}
 
-            {/* Operarios de picking */}
             <div style={{fontSize:10,color:C.teal,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:6}}>👷 Operarios de picking</div>
             {operariosActivos.length===0&&(
               <div style={{textAlign:"center",color:C.t3,padding:"30px 20px"}}>
@@ -368,34 +386,28 @@ function AdminApp(){
                       {op.pedidos.length>0&&<span style={{color:C.t3,fontSize:14,transform:expandido[`op-${op.nombre}`]?"rotate(90deg)":"none",transition:"transform .2s"}}>▶</span>}
                     </div>
                   </div>
-                  {/* Chips de pickings */}
                   {op.pedidos.length>0&&<div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
                     {op.pedidos.map((a,ai)=>(
                       <span key={ai} style={{fontFamily:"'JetBrains Mono',monospace",background:C.bg3,border:`1px solid ${C.b0}`,borderRadius:4,padding:"2px 7px",fontSize:9,color:C.teal}}>{a.picking}</span>
                     ))}
                   </div>}
                 </div>
-                {/* Detalle expandido */}
                 {expandido[`op-${op.nombre}`]&&op.pedidos.map((a,ai)=>(
                   <div key={ai} style={{borderTop:`1px solid ${C.b0}`,padding:"8px 13px"}}>
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:3}}>
                       <span style={{fontFamily:"'JetBrains Mono',monospace",color:C.teal,fontWeight:700,fontSize:12}}>{a.picking}</span>
-                      <span style={{fontSize:10,color:C.t3}}>desde {fmtHora(a.fecha_asignacion)}</span>
+                      <span style={{fontSize:10,color:C.t3}}>desde {fmtHora(a.fecha_asignacion)} · {transcurrido(a.fecha_asignacion)}</span>
                     </div>
                     <div style={{color:C.t2,fontSize:11,marginBottom:6,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{a.cliente}</div>
                     <div style={{display:"flex",gap:6}}>
-                      <button onClick={()=>setEditando(`asig-${a.id}`)} style={{flex:1,padding:"6px",background:C.bg3,border:`1px solid ${C.b0}`,borderRadius:7,color:C.t2,fontSize:11,fontWeight:700,cursor:"pointer"}}>
-                        ✏️ Reasignar
-                      </button>
-                      <button onClick={()=>liberarPedido(a.id)} disabled={!!procesando[a.id]} style={{flex:1,padding:"6px",background:`${C.orange}15`,border:`1px solid ${C.orange}30`,borderRadius:7,color:C.orange,fontSize:11,fontWeight:700,cursor:"pointer"}}>
-                        🔓 Liberar
-                      </button>
+                      <button onClick={()=>setEditando(`asig-${a.id}`)} style={{flex:1,padding:"6px",background:C.bg3,border:`1px solid ${C.b0}`,borderRadius:7,color:C.t2,fontSize:11,fontWeight:700,cursor:"pointer"}}>✏️ Reasignar</button>
+                      <button onClick={()=>liberarPedido(a.id)} disabled={!!procesando[a.id]} style={{flex:1,padding:"6px",background:`${C.orange}15`,border:`1px solid ${C.orange}30`,borderRadius:7,color:C.orange,fontSize:11,fontWeight:700,cursor:"pointer"}}>🔓 Liberar</button>
                     </div>
                     {editando===`asig-${a.id}`&&(
                       <ReasignarForm
                         operarioActual={a.operario}
                         operariosDisp={[...new Set([...operariosActivos.map(o=>o.nombre),...usuarios.filter(u=>u.rol==="operario").map(u=>u.nombre)])].filter(Boolean).sort()}
-                        onGuardar={nuevoNombre=>reasignarPedido(a.id,nuevoNombre)}
+                        onGuardar={n=>reasignarPedido(a.id,n)}
                         onCancelar={()=>setEditando(null)}
                       />
                     )}
@@ -409,12 +421,78 @@ function AdminApp(){
         {/* ── TAB TURNOS ── */}
         {tab==="turnos"&&(
           <div>
+            <input value={busca} onChange={e=>setBusca(e.target.value)}
+              placeholder="🔍 Buscar por picking, cliente u operario..."
+              style={{width:"100%",background:C.bg3,color:C.t1,border:`1px solid ${C.b1}`,borderRadius:11,padding:"11px 13px",fontSize:13,marginBottom:10}}
+            />
+
+            {/* Bajadas UBI */}
+            {(()=>{
+              const q=busca.trim().toLowerCase();
+              const ubiTurnos=turnos
+                .filter(t=>(t.picking||"").startsWith("UBI-"))
+                .filter(t=>!q||(t.picking||"").toLowerCase().includes(q)||(t.cliente||"").toLowerCase().includes(q)||(t.operario_solicitante||"").toLowerCase().includes(q))
+                .sort((a,b)=>new Date(b.fecha_solicitud)-new Date(a.fecha_solicitud));
+              if(ubiTurnos.length===0)return null;
+              const activas=ubiTurnos.filter(t=>t.estado==="pendiente"||t.estado==="en_proceso");
+              return(
+                <div style={{marginBottom:16}}>
+                  <div style={{display:"flex",alignItems:"center",gap:7,marginBottom:7}}>
+                    <span style={{fontSize:10,color:C.purple,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>⬇ Bajadas UBI</span>
+                    {activas.length>0&&<span style={{background:`${C.purple}20`,color:C.purple,borderRadius:10,padding:"1px 7px",fontSize:9,fontWeight:700}}>{activas.length} activa{activas.length!==1?"s":""}</span>}
+                  </div>
+                  {ubiTurnos.map(t=>{
+                    const col={pendiente:C.yellow,en_proceso:C.orange,completado:C.green,fallido:C.red}[t.estado]||C.t3;
+                    const ubi=(t.picking||"").replace("UBI-","");
+                    const skus=((t.posiciones||[])[0]||{}).skus||[];
+                    const elapsed=transcurrido(t.fecha_solicitud);
+                    const demorado=t.estado==="pendiente"&&(new Date()-new Date(t.fecha_solicitud))/60000>20;
+                    const lbl={pendiente:"⏳ Pendiente",en_proceso:"🔄 En proceso",completado:"✅ Listo",fallido:"⚠ Fallo"}[t.estado]||t.estado;
+                    return(
+                      <div key={t.id} style={{background:C.bg2,borderRadius:10,marginBottom:6,border:`1px solid ${demorado?C.red+"40":col+"25"}`,borderLeft:`4px solid ${demorado?C.red:col}`,animation:"fadeUp .2s ease both",padding:"9px 12px"}}>
+                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:5}}>
+                          <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+                            <span style={{fontFamily:"'JetBrains Mono',monospace",color:C.purple,fontWeight:800,fontSize:15}}>{ubi}</span>
+                            <span style={{background:`${col}20`,color:col,borderRadius:4,padding:"1px 6px",fontSize:8,fontWeight:700,border:`1px solid ${col}40`}}>{lbl}</span>
+                            {demorado&&<span style={{background:`${C.red}20`,color:C.red,borderRadius:4,padding:"1px 5px",fontSize:7,fontWeight:800}}>DEMORADO</span>}
+                          </div>
+                          <div style={{textAlign:"right",flexShrink:0,marginLeft:8}}>
+                            <div style={{fontSize:9,color:demorado?C.red:C.t4}}>{elapsed}</div>
+                            {t.montacarguista&&<div style={{fontSize:9,color:C.purple,marginTop:1}}>🏗️ {t.montacarguista}</div>}
+                          </div>
+                        </div>
+                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:skus.length?5:0}}>
+                          <span style={{fontSize:9,color:C.t3}}>👷 {t.operario_solicitante||"—"}</span>
+                          <div style={{display:"flex",gap:3,flexWrap:"wrap",justifyContent:"flex-end"}}>
+                            {skus.slice(0,4).map((s,si)=>(
+                              <span key={si} style={{fontFamily:"'JetBrains Mono',monospace",background:C.bg3,border:`1px solid ${C.b0}`,borderRadius:4,padding:"1px 5px",fontSize:8,color:C.accent}}>{s.ref}</span>
+                            ))}
+                            {skus.length>4&&<span style={{fontSize:8,color:C.t4}}>+{skus.length-4}</span>}
+                          </div>
+                        </div>
+                        <div style={{display:"flex",gap:5,marginTop:6}}>
+                          {t.estado==="fallido"&&<button onClick={()=>reintentarTurno(t.id)} disabled={!!procesando[t.id]} style={{flex:1,padding:"6px",background:`${C.green}15`,border:`1px solid ${C.green}30`,borderRadius:7,color:C.green,fontSize:10,fontWeight:700,cursor:"pointer"}}>↻ Reintentar</button>}
+                          {t.estado==="pendiente"&&<button onClick={()=>cancelarTurno(t.id)} disabled={!!procesando[t.id]} style={{flex:1,padding:"6px",background:`${C.t4}10`,border:`1px solid ${C.b0}`,borderRadius:7,color:C.t3,fontSize:10,fontWeight:700,cursor:"pointer"}}>✕ Cancelar</button>}
+                          {(t.estado==="completado"||t.estado==="fallido")&&<button onClick={()=>eliminarTurno(t.id)} disabled={!!procesando[t.id]} style={{flex:1,padding:"6px",background:`${C.red}10`,border:`1px solid ${C.red}25`,borderRadius:7,color:C.red,fontSize:10,fontWeight:700,cursor:"pointer"}}>🗑 Eliminar</button>}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+
+            {/* Turnos picking normales */}
             {["pendiente","en_proceso","fallido","completado"].map(est=>{
-              const lista=turnos.filter(t=>t.estado===est).sort((a,b)=>{
-                const au=a.es_mde?1:0,bu=b.es_mde?1:0;
-                if(au!==bu)return bu-au;
-                return new Date(b.fecha_solicitud)-new Date(a.fecha_solicitud);
-              });
+              const q=busca.trim().toLowerCase();
+              const lista=turnos
+                .filter(t=>t.estado===est&&!(t.picking||"").startsWith("UBI-"))
+                .filter(t=>!q||(t.picking||"").toLowerCase().includes(q)||(t.cliente||"").toLowerCase().includes(q)||(t.operario_solicitante||"").toLowerCase().includes(q)||(t.montacarguista||"").toLowerCase().includes(q))
+                .sort((a,b)=>{
+                  const au=a.es_mde?1:0,bu=b.es_mde?1:0;
+                  if(au!==bu)return bu-au;
+                  return new Date(b.fecha_solicitud)-new Date(a.fecha_solicitud);
+                });
               if(lista.length===0)return null;
               const col={pendiente:C.yellow,en_proceso:C.orange,fallido:C.red,completado:C.green}[est];
               const lbl={pendiente:"⏳ Pendientes",en_proceso:"🔄 En proceso",fallido:"⚠️ Fallidos",completado:"✅ Completados"}[est];
@@ -424,18 +502,21 @@ function AdminApp(){
                     <span style={{fontSize:10,color:col,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>{lbl}</span>
                     <span style={{background:`${col}20`,color:col,borderRadius:10,padding:"1px 7px",fontSize:9,fontWeight:700}}>{lista.length}</span>
                   </div>
-                  {lista.map((t,ti)=>{
+                  {lista.map(t=>{
                     const posiciones=ordenarPos(t.posiciones);
                     const exp=!!expandido[`t-${t.id}`];
                     const urgente=t.es_mde||t.prioridad==="urgente";
                     const totalUnids=posiciones.reduce((s,p)=>(p.skus||[]).reduce((u,k)=>u+k.cant,s),0);
+                    const elapsed=transcurrido(t.fecha_solicitud);
+                    const demorado=est==="pendiente"&&(new Date()-new Date(t.fecha_solicitud))/60000>15;
                     return(
-                      <div key={t.id} style={{background:C.bg2,borderRadius:11,marginBottom:6,border:`1px solid ${urgente?C.red+"40":C.b0}`,borderLeft:`4px solid ${urgente?C.red:col}`,animation:"fadeUp .2s ease both"}}>
+                      <div key={t.id} style={{background:C.bg2,borderRadius:11,marginBottom:6,border:`1px solid ${urgente||demorado?C.red+"40":C.b0}`,borderLeft:`4px solid ${urgente||demorado?C.red:col}`,animation:"fadeUp .2s ease both"}}>
                         <div onClick={()=>setExpandido(o=>({...o,[`t-${t.id}`]:!o[`t-${t.id}`]}))} style={{padding:"10px 13px",cursor:"pointer"}}>
                           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
                             <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
                               <span style={{fontFamily:"'JetBrains Mono',monospace",color:C.teal,fontWeight:800,fontSize:13}}>{t.picking}</span>
                               {urgente&&<span style={{background:`${C.red}20`,color:C.red,borderRadius:4,padding:"1px 5px",fontSize:8,fontWeight:800}}>🚨</span>}
+                              {demorado&&<span style={{background:`${C.red}15`,color:C.red,borderRadius:4,padding:"1px 5px",fontSize:7,fontWeight:800}}>DEMORADO</span>}
                               <span style={{background:`${col}18`,color:col,borderRadius:4,padding:"1px 5px",fontSize:8,fontWeight:700}}>{posiciones.length} pos</span>
                             </div>
                             <div style={{display:"flex",alignItems:"center",gap:8}}>
@@ -445,9 +526,8 @@ function AdminApp(){
                           </div>
                           <div style={{display:"flex",gap:8,fontSize:10,color:C.t3,flexWrap:"wrap"}}>
                             <span>👷 {t.operario_solicitante}</span>
-                            <span>📍 {t.ciudad}</span>
-                            <span>🕐 {fmtFecha(t.fecha_solicitud)}</span>
                             {t.montacarguista&&<span style={{color:C.purple}}>🏗️ {t.montacarguista}</span>}
+                            <span style={{color:demorado?C.red:C.t4}}>⏱ {elapsed}</span>
                           </div>
                           {!exp&&<div style={{display:"flex",gap:3,flexWrap:"wrap",marginTop:5}}>
                             {posiciones.map((p,pi)=>(
@@ -471,23 +551,13 @@ function AdminApp(){
                                 ))}
                               </div>
                             ))}
-                            {/* Acciones admin */}
-                            {est!=="completado"&&(
-                              <div style={{display:"flex",gap:5,marginTop:6}}>
-                                {!urgente&&est==="pendiente"&&(
-                                  <button onClick={()=>priorizarTurno(t.id)} disabled={!!procesando[t.id]} style={{flex:1,padding:"7px",background:`${C.red}15`,border:`1px solid ${C.red}30`,borderRadius:7,color:C.red,fontSize:11,fontWeight:700,cursor:"pointer"}}>
-                                    🚨 Priorizar
-                                  </button>
-                                )}
-                                {est==="fallido"&&(
-                                  <button onClick={()=>reintentarTurno(t.id)} disabled={!!procesando[t.id]} style={{flex:1,padding:"7px",background:`${C.green}15`,border:`1px solid ${C.green}30`,borderRadius:7,color:C.green,fontSize:11,fontWeight:700,cursor:"pointer"}}>
-                                    ↻ Reintentar
-                                  </button>
-                                )}
-                                {t.motivo_fallo&&<div style={{flex:1,padding:"5px 8px",background:`${C.orange}10`,borderRadius:7,color:C.orange,fontSize:10}}>{t.motivo_fallo}</div>}
-                                {est!=="fallido"&&<button onClick={()=>cancelarTurno(t.id)} disabled={!!procesando[t.id]} style={{flex:1,padding:"7px",background:`${C.t4}15`,border:`1px solid ${C.b0}`,borderRadius:7,color:C.t3,fontSize:11,fontWeight:700,cursor:"pointer"}}>✕ Cancelar</button>}
-                              </div>
-                            )}
+                            <div style={{display:"flex",gap:5,marginTop:6}}>
+                              {!urgente&&est==="pendiente"&&<button onClick={()=>priorizarTurno(t.id)} disabled={!!procesando[t.id]} style={{flex:1,padding:"7px",background:`${C.red}15`,border:`1px solid ${C.red}30`,borderRadius:7,color:C.red,fontSize:11,fontWeight:700,cursor:"pointer"}}>🚨 Priorizar</button>}
+                              {est==="fallido"&&<button onClick={()=>reintentarTurno(t.id)} disabled={!!procesando[t.id]} style={{flex:1,padding:"7px",background:`${C.green}15`,border:`1px solid ${C.green}30`,borderRadius:7,color:C.green,fontSize:11,fontWeight:700,cursor:"pointer"}}>↻ Reintentar</button>}
+                              {t.motivo_fallo&&<div style={{flex:2,padding:"5px 8px",background:`${C.orange}10`,borderRadius:7,color:C.orange,fontSize:10}}>{t.motivo_fallo}</div>}
+                              {est!=="completado"&&est!=="fallido"&&<button onClick={()=>cancelarTurno(t.id)} disabled={!!procesando[t.id]} style={{flex:1,padding:"7px",background:`${C.t4}15`,border:`1px solid ${C.b0}`,borderRadius:7,color:C.t3,fontSize:11,fontWeight:700,cursor:"pointer"}}>✕ Cancelar</button>}
+                              {(est==="completado"||est==="fallido")&&<button onClick={()=>eliminarTurno(t.id)} disabled={!!procesando[t.id]} style={{flex:1,padding:"7px",background:`${C.red}10`,border:`1px solid ${C.red}25`,borderRadius:7,color:C.red,fontSize:11,fontWeight:700,cursor:"pointer"}}>🗑 Eliminar</button>}
+                            </div>
                           </div>
                         )}
                       </div>
@@ -496,10 +566,10 @@ function AdminApp(){
                 </div>
               );
             })}
-            {turnos.length===0&&(
+            {turnos.filter(t=>!(t.picking||"").startsWith("UBI-")).length===0&&!busca&&(
               <div style={{textAlign:"center",color:C.t3,padding:"40px 20px"}}>
                 <div style={{fontSize:36,marginBottom:10}}>🎉</div>
-                <div style={{fontSize:13}}>Sin turnos registrados</div>
+                <div style={{fontSize:13}}>Sin turnos de picking registrados</div>
               </div>
             )}
           </div>
@@ -519,7 +589,7 @@ function AdminApp(){
                     <span style={{fontSize:10,color:col,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>{lbl}</span>
                     <span style={{background:`${col}20`,color:col,borderRadius:10,padding:"1px 7px",fontSize:9,fontWeight:700}}>{lista.length}</span>
                   </div>
-                  {lista.map((a,ai)=>(
+                  {lista.map((a)=>(
                     <div key={a.id} style={{background:C.bg2,borderRadius:11,marginBottom:6,border:`1px solid ${C.b0}`,borderLeft:`4px solid ${col}`,animation:"fadeUp .2s ease both",padding:"10px 13px"}}>
                       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:4}}>
                         <div>
@@ -533,13 +603,14 @@ function AdminApp(){
                         <span>👷 {a.operario}</span>
                         <span>📍 {a.ciudad}</span>
                         <span>🕐 {fmtFecha(a.fecha_asignacion)}</span>
+                        {est==="en_proceso"&&<span style={{color:C.t4}}>⏱ {transcurrido(a.fecha_asignacion)}</span>}
                       </div>
                       {est==="en_proceso"&&(
                         editando===`asig-${a.id}`
                           ?<ReasignarForm
                               operarioActual={a.operario}
                               operariosDisp={[...new Set([...operariosActivos.map(o=>o.nombre),...usuarios.filter(u=>u.rol==="operario").map(u=>u.nombre)])].filter(Boolean).sort()}
-                              onGuardar={nuevoNombre=>reasignarPedido(a.id,nuevoNombre)}
+                              onGuardar={n=>reasignarPedido(a.id,n)}
                               onCancelar={()=>setEditando(null)}
                             />
                           :<div style={{display:"flex",gap:5}}>
@@ -565,7 +636,6 @@ function AdminApp(){
   );
 }
 
-// ═══════════ REASIGNAR FORM ═══════════
 function ReasignarForm({operarioActual,operariosDisp,onGuardar,onCancelar}){
   const [nombre,setNombre]=useState(operarioActual);
   const todos=[...new Set([operarioActual,...operariosDisp])].filter(Boolean);
@@ -573,7 +643,7 @@ function ReasignarForm({operarioActual,operariosDisp,onGuardar,onCancelar}){
     <div style={{background:C.bg3,borderRadius:9,padding:"10px",marginTop:6,border:`1px solid ${C.b1}`}}>
       <div style={{color:C.t3,fontSize:10,marginBottom:6}}>Reasignar a:</div>
       <input value={nombre} onChange={e=>setNombre(e.target.value)} placeholder="Nombre del operario..."
-        style={{width:"100%",background:C.bg0,border:`1px solid ${C.b1}`,borderRadius:7,padding:"8px 10px",fontSize:13,color:C.t1,outline:"none",marginBottom:6}}/>
+        style={{width:"100%",background:C.bg0,border:`1px solid ${C.b1}`,borderRadius:7,padding:"8px 10px",fontSize:13,color:C.t1,marginBottom:6}}/>
       {todos.length>1&&<div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:7}}>
         {todos.map(n=>(
           <button key={n} onClick={()=>setNombre(n)} style={{padding:"3px 9px",background:nombre===n?`${C.accent}25`:C.bg2,border:`1px solid ${nombre===n?C.accent:C.b0}`,borderRadius:5,color:nombre===n?C.accent:C.t3,fontSize:10,cursor:"pointer"}}>
