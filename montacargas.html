@@ -6,7 +6,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>INDUCASOS · Montacargas v10</title>
+<title>INDUCASOS · Montacargas v11</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
@@ -71,9 +71,10 @@ const CALLE_ORD={B:1,C:2,D:3,E:4};
 const esMDE=c=>{const x=String(c||"").toUpperCase().trim();return x==="MDE"||x.includes("MEDELL")||x==="ITAGUI"||x==="ITAGÜI"||x.includes("ITAGU");};
 const fmtHora=ts=>{if(!ts)return"";const d=new Date(ts);return d.toLocaleTimeString("es-CO",{hour:"2-digit",minute:"2-digit"});};
 const ordenarPos=arr=>[...(arr||[])].sort((a,b)=>(CALLE_ORD[a.calleLetra]||9)-(CALLE_ORD[b.calleLetra]||9)||(a.modulo||0)-(b.modulo||0));
-// Extrae la familia del casco desde la referencia del SKU (prefijo numérico: 501, 3110, 3120…)
-const familiaRef=ref=>{const m=String(ref||"").match(/^(\d+)/);return m?m[1]:"";};
+// Familia: primeros dígitos del ref, quitando los últimos 3 (ej: "211117"→"211", "3110005"→"3110", "501002"→"501")
+const familiaRef=ref=>{const d=String(ref||"").replace(/\D/g,"");return d.length>3?d.slice(0,d.length-3):d;};
 const familiasDePos=skus=>[...new Set((skus||[]).map(s=>familiaRef(s.ref)).filter(Boolean))];
+const tipoDeSkus=skus=>[...new Set((skus||[]).map(s=>s.tipo||((s.desc||"").split(" ")[1]||"")).filter(Boolean))];
 
 const beep=()=>{try{const ctx=new(window.AudioContext||window.webkitAudioContext)();const o=ctx.createOscillator();const g=ctx.createGain();o.connect(g);g.connect(ctx.destination);o.frequency.value=880;g.gain.setValueAtTime(0.3,ctx.currentTime);g.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+0.4);o.start();o.stop(ctx.currentTime+0.4);}catch(e){}};
 
@@ -631,28 +632,28 @@ function MontacargasApp(){
                 return(
                   <div>
                     {/* Resumen de ruta */}
-                    <div style={{background:C.bg2,borderRadius:13,padding:"13px 14px",marginBottom:10,border:`1px solid ${C.purple}30`}}>
-                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10}}>
+                    <div style={{background:C.bg2,borderRadius:13,padding:"14px 15px",marginBottom:12,border:`1px solid ${C.purple}35`}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:11}}>
                         <div>
-                          <div style={{fontWeight:800,fontSize:13,color:C.purple}}>🗺 Tu ruta</div>
-                          <div style={{fontSize:9,color:C.t3,marginTop:2}}>{misTurnosActivos.length} turno{misTurnosActivos.length!==1?"s":""} activo{misTurnosActivos.length!==1?"s":""} · {nPendUBI} posición{nPendUBI!==1?"es":""} pendiente{nPendUBI!==1?"s":""}</div>
+                          <div style={{fontWeight:900,fontSize:17,color:C.purple}}>🗺 Tu ruta</div>
+                          <div style={{fontSize:12,color:C.t2,marginTop:3,fontWeight:600}}>{misTurnosActivos.length} turno{misTurnosActivos.length!==1?"s":""} · {nPendUBI} posición{nPendUBI!==1?"es":""} pendiente{nPendUBI!==1?"s":""}</div>
                         </div>
                         <div style={{textAlign:"right"}}>
-                          <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:24,fontWeight:900,color:pct===100?C.green:C.orange,lineHeight:1}}>{pct}<span style={{fontSize:11,fontWeight:600,color:C.t3}}>%</span></div>
-                          <div style={{fontSize:8,color:C.t4}}>{bajadas}/{totalPos} bajadas</div>
+                          <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:32,fontWeight:900,color:pct===100?C.green:C.orange,lineHeight:1}}>{pct}<span style={{fontSize:14,fontWeight:600,color:C.t3}}>%</span></div>
+                          <div style={{fontSize:11,color:C.t3,marginTop:2}}>{bajadas}/{totalPos} bajadas</div>
                         </div>
                       </div>
-                      <div style={{height:6,background:C.b0,borderRadius:4,overflow:"hidden",marginBottom:10}}>
-                        <div style={{height:"100%",width:`${pct}%`,background:pct===100?C.green:`linear-gradient(90deg,${C.purple},${C.teal})`,borderRadius:4,transition:"width .5s cubic-bezier(.4,0,.2,1)",boxShadow:pct>0?`0 0 8px ${C.purple}50`:"none"}}/>
+                      <div style={{height:8,background:C.b0,borderRadius:5,overflow:"hidden",marginBottom:11}}>
+                        <div style={{height:"100%",width:`${pct}%`,background:pct===100?C.green:`linear-gradient(90deg,${C.purple},${C.teal})`,borderRadius:5,transition:"width .5s cubic-bezier(.4,0,.2,1)",boxShadow:pct>0?`0 0 10px ${C.purple}60`:"none"}}/>
                       </div>
                       {/* Chips por turno */}
-                      <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                      <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
                         {misTurnosActivos.map(t=>{
                           const nB=(t.posiciones||[]).filter(p=>p.bajada).length;
                           const nT=(t.posiciones||[]).length;
                           const done=nB===nT;
                           return(
-                            <span key={t.id} style={{fontFamily:"'JetBrains Mono',monospace",background:done?`${C.green}15`:C.bg3,border:`1px solid ${done?C.green+"40":C.b0}`,borderRadius:5,padding:"2px 8px",fontSize:9,color:done?C.green:C.teal}}>
+                            <span key={t.id} style={{fontFamily:"'JetBrains Mono',monospace",background:done?`${C.green}15`:C.bg3,border:`1px solid ${done?C.green+"40":C.b0}`,borderRadius:6,padding:"3px 10px",fontSize:11,color:done?C.green:C.teal,fontWeight:700}}>
                               {t.picking} {done?"✓":`${nB}/${nT}`}
                             </span>
                           );
@@ -702,18 +703,20 @@ function MontacargasApp(){
                                 </div>
                               </div>
                               {!allDone&&!exp&&(
-                                <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                                <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
                                   {pendPos.map((p,i)=>{
                                     const fams=familiasDePos(p.skus);
+                                    const tipos=tipoDeSkus(p.skus);
                                     return(
-                                      <div key={i} style={{background:p.urgente?`${C.red}12`:C.bg3,border:`1px solid ${p.urgente?C.red+"40":C.b0}`,borderRadius:6,padding:"3px 8px",display:"inline-flex",flexDirection:"column",gap:2}}>
-                                        <div style={{display:"flex",alignItems:"center",gap:4}}>
-                                          {p.urgente&&<span style={{color:C.red,fontSize:8}}>🚨</span>}
-                                          <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:9,color:p.urgente?C.red:C.teal,fontWeight:700}}>{p.picking}</span>
+                                      <div key={i} style={{background:p.urgente?`${C.red}12`:C.bg3,border:`1px solid ${p.urgente?C.red+"40":C.b0}`,borderRadius:7,padding:"5px 9px",display:"inline-flex",flexDirection:"column",gap:3}}>
+                                        <div style={{display:"flex",alignItems:"center",gap:5}}>
+                                          {p.urgente&&<span style={{color:C.red,fontSize:10}}>🚨</span>}
+                                          <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:11,color:p.urgente?C.red:C.teal,fontWeight:800}}>{p.picking}</span>
                                         </div>
-                                        <div style={{display:"flex",gap:3,alignItems:"center",flexWrap:"wrap"}}>
-                                          {p.operario&&<span style={{fontSize:7,color:C.t2}}>👷 {p.operario}</span>}
-                                          {fams.map(f=><span key={f} style={{fontSize:7,background:`${C.accent}18`,color:C.accent,borderRadius:2,padding:"0 3px",fontWeight:800}}>{f}</span>)}
+                                        <div style={{display:"flex",gap:4,alignItems:"center",flexWrap:"wrap"}}>
+                                          {p.operario&&<span style={{fontSize:10,color:C.t2,fontWeight:600}}>👷 {p.operario}</span>}
+                                          {fams.map(f=><span key={f} style={{fontSize:9,background:`${C.accent}18`,color:C.accent,borderRadius:3,padding:"1px 5px",fontWeight:800}}>{f}</span>)}
+                                          {tipos.map(t=><span key={t} style={{fontSize:9,background:`${C.purple}18`,color:C.purple,borderRadius:3,padding:"1px 5px",fontWeight:700}}>{t}</span>)}
                                         </div>
                                       </div>
                                     );
@@ -722,39 +725,75 @@ function MontacargasApp(){
                               )}
                             </div>
                             {exp&&(
-                              <div style={{borderTop:`1px solid ${C.b0}`,padding:"7px 13px 9px"}}>
+                              <div style={{borderTop:`1px solid ${C.b0}`,padding:"8px 13px 10px"}}>
                                 {ubiEntry.posiciones.map((p,i)=>{
                                   const fams=familiasDePos(p.skus);
+                                  const tipos=tipoDeSkus(p.skus);
                                   const borderCol=p.bajada?C.green:p.fallo?C.red:p.urgente?C.red:C.teal;
+                                  const keyRep=`rep-ruta-${p.turnoId}-${p.posIdx}`;
+                                  const reportandoEste=!!reportandoPos[keyRep];
+                                  const procEste=!!procesando[keyRep];
                                   return(
-                                    <div key={i} style={{background:p.bajada?`${C.green}08`:p.fallo?`${C.red}08`:C.bg3,borderRadius:8,padding:"7px 10px",marginBottom:4,borderLeft:`3px solid ${borderCol}`,opacity:p.bajada||p.fallo?0.65:1}}>
-                                      {/* Fila 1: picking + estado */}
-                                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:3}}>
-                                        <div style={{display:"flex",alignItems:"center",gap:5}}>
-                                          {p.urgente&&!p.bajada&&<span style={{fontSize:8,color:C.red}}>🚨</span>}
-                                          <span style={{fontFamily:"'JetBrains Mono',monospace",color:p.bajada?C.green:p.fallo?C.red:C.teal,fontWeight:800,fontSize:12}}>{p.picking}</span>
-                                          {p.bajada&&<span style={{color:C.green,fontSize:9,fontWeight:700}}>✓</span>}
-                                          {p.fallo&&<span style={{color:C.red,fontSize:8}}>⚠ {p.motivo_fallo||"fallo"}</span>}
+                                    <div key={i} style={{background:p.bajada?`${C.green}08`:p.fallo?`${C.red}08`:C.bg3,borderRadius:10,padding:"9px 11px",marginBottom:5,borderLeft:`3px solid ${borderCol}`,opacity:p.bajada||p.fallo?0.65:1}}>
+                                      {/* Fila 1: picking + estado + botón ⚠ */}
+                                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+                                        <div style={{display:"flex",alignItems:"center",gap:6,flex:1,minWidth:0}}>
+                                          {p.urgente&&!p.bajada&&<span style={{fontSize:10,color:C.red,flexShrink:0}}>🚨</span>}
+                                          <span style={{fontFamily:"'JetBrains Mono',monospace",color:p.bajada?C.green:p.fallo?C.red:C.teal,fontWeight:800,fontSize:14}}>{p.picking}</span>
+                                          {p.bajada&&<span style={{color:C.green,fontSize:11,fontWeight:700}}>✓ bajado</span>}
+                                          {p.fallo&&<span style={{color:C.red,fontSize:10}}>⚠ {p.motivo_fallo||"fallo"}</span>}
                                         </div>
-                                        <span style={{fontSize:8,color:C.t3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:90}}>{p.cliente}</span>
+                                        {!p.bajada&&!p.fallo&&!reportandoEste&&(
+                                          <button onClick={()=>setReportandoPos(r=>({...r,[keyRep]:true}))}
+                                            style={{padding:"4px 8px",background:`${C.red}15`,border:`1px solid ${C.red}30`,borderRadius:6,color:C.red,fontSize:14,cursor:"pointer",fontFamily:"inherit",flexShrink:0}}>
+                                            ⚠
+                                          </button>
+                                        )}
                                       </div>
-                                      {/* Fila 2: operario + familias */}
-                                      <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:!p.bajada&&!p.fallo&&p.skus.length>0?5:0,flexWrap:"wrap"}}>
-                                        {p.operario&&<span style={{fontSize:9,color:C.t2,fontWeight:600}}>👷 {p.operario}</span>}
+                                      {/* Fila 2: operario + familias + tipo */}
+                                      <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:4,flexWrap:"wrap"}}>
+                                        {p.operario&&<span style={{fontSize:11,color:C.t2,fontWeight:600}}>👷 {p.operario}</span>}
                                         {fams.map(f=>(
-                                          <span key={f} style={{background:`${C.accent}18`,color:C.accent,borderRadius:3,padding:"1px 5px",fontSize:8,fontWeight:800,fontFamily:"'JetBrains Mono',monospace"}}>{f}</span>
+                                          <span key={f} style={{background:`${C.accent}18`,color:C.accent,borderRadius:3,padding:"2px 6px",fontSize:10,fontWeight:800,fontFamily:"'JetBrains Mono',monospace"}}>{f}</span>
+                                        ))}
+                                        {tipos.map(t=>(
+                                          <span key={t} style={{background:`${C.purple}18`,color:C.purple,borderRadius:3,padding:"2px 6px",fontSize:10,fontWeight:700}}>{t}</span>
                                         ))}
                                       </div>
-                                      {/* Fila 3: SKUs (solo si pendiente) */}
-                                      {!p.bajada&&!p.fallo&&p.skus.map((s,si)=>(
-                                        <div key={si} style={{display:"flex",justifyContent:"space-between",padding:"2px 0",borderTop:si>0?`1px solid ${C.b0}`:"none"}}>
-                                          <div style={{display:"flex",alignItems:"center",gap:4}}>
-                                            <span style={{fontSize:7,background:`${C.accent}20`,color:C.accent,borderRadius:2,padding:"0 3px",fontWeight:800}}>SKU</span>
-                                            <span style={{fontFamily:"'JetBrains Mono',monospace",color:C.accent,fontSize:10}}>{s.ref}</span>
+                                      {/* Fila 3: cliente */}
+                                      {p.cliente&&<div style={{fontSize:10,color:C.t3,marginBottom:!p.bajada&&!p.fallo&&p.skus.length>0?5:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.cliente}</div>}
+                                      {/* Fila 4: SKUs */}
+                                      {!p.bajada&&!p.fallo&&!reportandoEste&&p.skus.map((s,si)=>{
+                                        const tipo2=s.tipo||((s.desc||"").split(" ")[1]||"");
+                                        return(
+                                          <div key={si} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"3px 0",borderTop:si>0?`1px solid ${C.b0}`:"none"}}>
+                                            <div style={{display:"flex",alignItems:"center",gap:5,flexWrap:"wrap"}}>
+                                              <span style={{fontSize:8,background:`${C.accent}20`,color:C.accent,borderRadius:2,padding:"0 4px",fontWeight:800}}>SKU</span>
+                                              <span style={{fontFamily:"'JetBrains Mono',monospace",color:C.accent,fontSize:11,fontWeight:700}}>{s.ref}</span>
+                                              {tipo2&&<span style={{fontSize:9,background:`${C.purple}18`,color:C.purple,borderRadius:3,padding:"1px 5px",fontWeight:700}}>{tipo2}</span>}
+                                            </div>
+                                            <span style={{fontFamily:"'JetBrains Mono',monospace",color:C.yellow,fontSize:11,fontWeight:700}}>{s.cant}u</span>
                                           </div>
-                                          <span style={{fontFamily:"'JetBrains Mono',monospace",color:C.yellow,fontSize:10,fontWeight:700}}>{s.cant}u</span>
+                                        );
+                                      })}
+                                      {/* Selector motivo obstáculo/problema */}
+                                      {reportandoEste&&(
+                                        <div style={{background:`${C.red}10`,borderRadius:8,padding:"8px 10px",marginTop:4,border:`1px solid ${C.red}20`}}>
+                                          <div style={{fontSize:10,color:C.red,fontWeight:700,marginBottom:7}}>¿Qué pasó en {ubiEntry.ubi}?</div>
+                                          <div style={{display:"flex",flexDirection:"column",gap:4}}>
+                                            {["Caja no encontrada","Posición vacía","Caja dañada / mojada","Acceso bloqueado","Cantidad incorrecta","Otro"].map(m=>(
+                                              <button key={m} onClick={()=>{marcarFalloPosicion(p.turnoId,p.posIdx,m);setReportandoPos(r=>({...r,[keyRep]:false}));}} disabled={procEste}
+                                                style={{padding:"8px 10px",background:`${C.red}12`,border:`1px solid ${C.red}30`,borderRadius:7,color:C.red,fontSize:12,fontWeight:600,cursor:"pointer",textAlign:"left",fontFamily:"inherit"}}>
+                                                {m}
+                                              </button>
+                                            ))}
+                                            <button onClick={()=>setReportandoPos(r=>({...r,[keyRep]:false}))}
+                                              style={{padding:"7px",background:C.bg3,border:`1px solid ${C.b0}`,borderRadius:7,color:C.t3,fontSize:11,cursor:"pointer",fontFamily:"inherit",marginTop:2}}>
+                                              Cancelar
+                                            </button>
+                                          </div>
                                         </div>
-                                      ))}
+                                      )}
                                     </div>
                                   );
                                 })}
