@@ -75,6 +75,12 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:13px;heigh
 .alert-crit{background:#1e0a0a;border:1px solid #7f1d1d;color:#f87171;}
 .balance-bar-wrap{height:8px;background:#1a2844;border-radius:4px;overflow:hidden;margin-top:6px;}
 .balance-bar{height:100%;border-radius:4px;transition:width .5s;}
+.rec-num{font-size:52px;font-weight:900;color:#34d399;line-height:1;text-align:center;text-shadow:0 0 20px rgba(52,211,153,0.4);}
+.rec-lbl{font-size:11px;color:#4b5e7a;text-align:center;margin-top:4px;}
+.rec-conf{font-size:10px;color:#34d399;text-align:center;font-weight:700;margin-top:2px;}
+.prob-row{display:flex;align-items:center;gap:6px;padding:2px 0;}
+.prob-bar-bg{flex:1;height:10px;background:#0d1628;border-radius:5px;overflow:hidden;}
+.prob-bar{height:100%;border-radius:5px;transition:width .4s;}
 </style>
 </head>
 <body>
@@ -105,6 +111,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:13px;heigh
       <div class="pills">
         <div class="pill on" data-mode="heatmap">🌡 Demanda</div>
         <div class="pill" data-mode="animate">▶ Simular</div>
+        <div class="pill" data-mode="analisis">📊 Análisis</div>
       </div>
     </div>
     <!-- Workers -->
@@ -127,6 +134,18 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:13px;heigh
       <div class="btns">
         <button class="btn btn-p" id="btn-sim">⚡ Simular</button>
         <button class="btn btn-s" id="btn-rst">Reset</button>
+      </div>
+    </div>
+    <!-- Capacity analysis inputs (shown in analisis mode) -->
+    <div class="pnl" id="cap-pnl" style="display:none">
+      <div class="pnl-t">📊 ¿Cuántos operarios necesito?</div>
+      <div class="ctrl-lbl"><span>Tiempo por pedido</span><span style="color:#34d399" id="sl-tped-v">30 min</span></div>
+      <input type="range" id="sl-tped" min="10" max="90" step="5" value="30">
+      <div class="ctrl-lbl"><span>Horas de jornada</span><span style="color:#34d399" id="sl-jorn-v">8 h</span></div>
+      <input type="range" id="sl-jorn" min="6" max="12" step="1" value="8">
+      <button class="btn btn-p" id="btn-cap" style="width:100%;margin-top:6px">⚡ Calcular</button>
+      <div id="cap-result" style="margin-top:10px">
+        <div style="font-size:10px;color:#2a3a54">Carga datos y presiona Calcular</div>
       </div>
     </div>
     <!-- Balance -->
@@ -679,8 +698,152 @@ async function loadData(){
 function setMode(m){
   viewMode=m;
   document.querySelectorAll('.pill').forEach(p=>p.classList.toggle('on',p.dataset.mode===m));
-  if(m==='animate'&&(currentTurnos.length||histTurnos.length))startAnim();
+  document.getElementById('cap-pnl').style.display=m==='analisis'?'block':'none';
+  if(m==='animate'&&(currentTurnos.length||histTurnos.length)){startAnim();}
+  else if(m==='analisis'){stopAnim();if(histTurnos.length||currentTurnos.length)runCapacityMC();else drawAnalysis();}
   else{stopAnim();fullDraw();}
+}
+
+// ═══ CAPACITY ANALYSIS ═══
+let capResults=null; // [{n, prob}]
+
+function runCapacityMC(){
+  const tPed=parseInt(document.getElementById('sl-tped').value); // min per pedido
+  const tVar=tPed*0.35; // ±35% variance
+  const jornadaMin=parseInt(document.getElementById('sl-jorn').value)*60;
+  const nSims=600;
+
+  // Daily volume from histTurnos grouped by date
+  const byDate={};
+  histTurnos.forEach(t=>{
+    if(!t.fecha_solicitud)return;
+    const d=t.fecha_solicitud.slice(0,10);
+    byDate[d]=(byDate[d]||0)+1;
+  });
+  const dailyCounts=Object.values(byDate).filter(n=>n>=3); // skip near-empty days
+  if(dailyCounts.length<2){
+    // fallback: use currentTurnos count or a default
+    const fallback=Math.max(currentTurnos.length,15);
+    dailyCounts.push(fallback,fallback,Math.round(fallback*1.2));
+  }
+
+  const results=[];
+  for(let N=1;N<=16;N++){
+    let done=0;
+    for(let s=0;s<nSims;s++){
+      const vol=dailyCounts[Math.floor(Math.random()*dailyCounts.length)];
+      const ends=Array(N).fill(0);
+      for(let i=0;i<vol;i++){
+        const t=tPed-tVar+Math.random()*tVar*2;
+        const mi=ends.indexOf(Math.min(...ends));
+        ends[mi]+=Math.max(5,t);
+      }
+      if(Math.max(...ends)<=jornadaMin)done++;
+    }
+    results.push({n:N,prob:done/nSims});
+  }
+  capResults=results;
+
+  // Recommendation: first N with P >= 90%
+  const rec=results.find(r=>r.prob>=0.90)||results[results.length-1];
+  const rec80=results.find(r=>r.prob>=0.80)||rec;
+  const avgVol=dailyCounts.length?Math.round(dailyCounts.reduce((a,b)=>a+b,0)/dailyCounts.length):0;
+
+  document.getElementById('cap-result').innerHTML=`
+    <div class="rec-num">${rec.n}</div>
+    <div class="rec-lbl">operarios para terminar en el día</div>
+    <div class="rec-conf">${(rec.prob*100).toFixed(0)}% de confianza · jornada ${document.getElementById('sl-jorn').value}h</div>
+    <div style="margin-top:8px;font-size:9px;color:#3b4e6a;text-align:center">
+      Promedio histórico: <b style="color:#c084fc">${avgVol} pedidos/día</b>
+      · ${document.getElementById('sl-tped').value} min/pedido
+    </div>
+    <div style="margin-top:6px;font-size:9px;color:#2a3a54">
+      Con ${rec80.n} operarios → ${(rec80.prob*100).toFixed(0)}% probabilidad
+    </div>`;
+
+  drawAnalysis();
+}
+
+function drawAnalysis(){
+  if(!capResults)return;
+  const{W,H}=dims();
+  canvas.width=W*devicePixelRatio;
+  canvas.height=H*devicePixelRatio;
+  ctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);
+
+  ctx.fillStyle='#05080f';ctx.fillRect(0,0,W,H);
+
+  const PAD={l:58,r:30,t:50,b:60};
+  const cW=W-PAD.l-PAD.r, cH=H-PAD.t-PAD.b;
+  const N=capResults.length;
+  const barW=Math.floor(cW/N)-4;
+
+  // Title
+  ctx.fillStyle='#c084fc';ctx.font='bold 14px -apple-system,sans-serif';ctx.textAlign='center';
+  ctx.fillText('Probabilidad de terminar todos los pedidos en el día',W/2,22);
+  ctx.fillStyle='#4b5e7a';ctx.font='11px -apple-system,sans-serif';
+  ctx.fillText(`${document.getElementById('sl-tped').value} min/pedido · jornada ${document.getElementById('sl-jorn').value}h`,W/2,38);
+
+  // Y axis lines
+  [0,25,50,75,90,100].forEach(pct=>{
+    const y=PAD.t+cH*(1-pct/100);
+    ctx.strokeStyle=pct===90?'rgba(52,211,153,0.3)':'rgba(30,45,74,0.5)';
+    ctx.lineWidth=pct===90?1.5:0.5;
+    ctx.setLineDash(pct===90?[4,4]:[]);
+    ctx.beginPath();ctx.moveTo(PAD.l,y);ctx.lineTo(PAD.l+cW,y);ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle=pct===90?'#34d399':'#2a3a54';
+    ctx.font=pct===90?'bold 9px monospace':'9px monospace';
+    ctx.textAlign='right';
+    ctx.fillText(pct+'%',PAD.l-6,y+3.5);
+  });
+
+  // 90% threshold label
+  const y90=PAD.t+cH*(1-0.9);
+  ctx.fillStyle='#34d399';ctx.font='bold 9px -apple-system,sans-serif';ctx.textAlign='left';
+  ctx.fillText('90% objetivo',PAD.l+4,y90-4);
+
+  // Bars
+  capResults.forEach((r,i)=>{
+    const x=PAD.l+i*(barW+4)+2;
+    const ph=r.prob*cH;
+    const y=PAD.t+cH-ph;
+    const isRec=r.prob>=0.90&&(i===0||capResults[i-1].prob<0.90);
+    const color=r.prob>=0.90?'#34d399':r.prob>=0.70?'#fbbf24':'#f87171';
+
+    // Bar shadow
+    ctx.fillStyle=color+'18';
+    ctx.fillRect(x-1,y-1,barW+2,ph+2);
+    // Bar fill
+    const g=ctx.createLinearGradient(x,y,x,y+ph);
+    g.addColorStop(0,color);g.addColorStop(1,color+'60');
+    ctx.fillStyle=g;ctx.fillRect(x,y,barW,ph);
+
+    // Highlight recommended
+    if(isRec){
+      ctx.strokeStyle='#34d399';ctx.lineWidth=2;
+      ctx.strokeRect(x-2,PAD.t,barW+4,cH);
+      ctx.fillStyle='#34d399';ctx.font='bold 10px -apple-system,sans-serif';ctx.textAlign='center';
+      ctx.fillText('★',x+barW/2,y-8);
+    }
+
+    // % label on bar
+    if(ph>18){
+      ctx.fillStyle='rgba(255,255,255,0.9)';ctx.font=`bold ${Math.min(10,barW*.45)}px monospace`;
+      ctx.textAlign='center';
+      ctx.fillText(Math.round(r.prob*100)+'%',x+barW/2,y+Math.min(ph-5,16));
+    }
+
+    // N label below
+    ctx.fillStyle=isRec?'#34d399':'#3b4e6a';
+    ctx.font=isRec?'bold 11px -apple-system,sans-serif':'9px monospace';
+    ctx.textAlign='center';
+    ctx.fillText(r.n,x+barW/2,PAD.t+cH+16);
+  });
+
+  // X axis label
+  ctx.fillStyle='#4b5e7a';ctx.font='10px -apple-system,sans-serif';ctx.textAlign='center';
+  ctx.fillText('Número de operarios de picking',W/2,H-8);
 }
 
 // ═══ SIDEBAR TOGGLE ═══
@@ -701,6 +864,11 @@ document.getElementById('btn-sim').onclick=()=>{
   if(viewMode==='animate'&&(currentTurnos.length||histTurnos.length)){stopAnim();startAnim();}
 };
 document.getElementById('btn-rst').onclick=()=>{stopAnim();agents=[];setMode('heatmap');};
+document.getElementById('btn-cap').onclick=runCapacityMC;
+
+[['sl-tped','sl-tped-v','min'],['sl-jorn','sl-jorn-v','h']].forEach(([id,vid,u])=>{
+  document.getElementById(id).oninput=function(){document.getElementById(vid).textContent=this.value+' '+u;};
+});
 
 [['sl-pick','sl-pick-v'],['sl-ag','sl-ag-v'],['sl-spd','sl-spd-v'],['sl-sims','sl-sims-v']].forEach(([id,vid])=>{
   document.getElementById(id).oninput=function(){document.getElementById(vid).textContent=this.value;};
