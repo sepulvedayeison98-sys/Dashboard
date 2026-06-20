@@ -6,7 +6,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>INDUCASOS · Montacargas v9</title>
+<title>INDUCASOS · Montacargas v10</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
@@ -71,6 +71,10 @@ const CALLE_ORD={B:1,C:2,D:3,E:4};
 const esMDE=c=>{const x=String(c||"").toUpperCase().trim();return x==="MDE"||x.includes("MEDELL")||x==="ITAGUI"||x==="ITAGÜI"||x.includes("ITAGU");};
 const fmtHora=ts=>{if(!ts)return"";const d=new Date(ts);return d.toLocaleTimeString("es-CO",{hour:"2-digit",minute:"2-digit"});};
 const ordenarPos=arr=>[...(arr||[])].sort((a,b)=>(CALLE_ORD[a.calleLetra]||9)-(CALLE_ORD[b.calleLetra]||9)||(a.modulo||0)-(b.modulo||0));
+// Extrae la familia del casco desde la referencia del SKU (prefijo numérico: 501, 3110, 3120…)
+const familiaRef=ref=>{const m=String(ref||"").match(/^(\d+)/);return m?m[1]:"";};
+const familiasDePos=skus=>[...new Set((skus||[]).map(s=>familiaRef(s.ref)).filter(Boolean))];
+
 const beep=()=>{try{const ctx=new(window.AudioContext||window.webkitAudioContext)();const o=ctx.createOscillator();const g=ctx.createGain();o.connect(g);g.connect(ctx.destination);o.frequency.value=880;g.gain.setValueAtTime(0.3,ctx.currentTime);g.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+0.4);o.start();o.stop(ctx.currentTime+0.4);}catch(e){}};
 
 // ═══════════ LOGIN ═══════════
@@ -286,6 +290,7 @@ function MontacargasApp(){
         if(!map[pos.ubi])map[pos.ubi]={ubi:pos.ubi,calleLetra:pos.calleLetra,modulo:pos.modulo,nivel:pos.nivel,posiciones:[]};
         map[pos.ubi].posiciones.push({
           turnoId:t.id,posIdx:i,picking:t.picking,cliente:t.cliente,
+          operario:t.operario_solicitante||"",
           urgente:t.es_mde||t.prioridad==="urgente",
           skus:pos.skus||[],totalSaldo:pos.totalSaldo,
           bajada:pos.bajada||false,fallo:pos.fallo||false,
@@ -697,37 +702,62 @@ function MontacargasApp(){
                                 </div>
                               </div>
                               {!allDone&&!exp&&(
-                                <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
-                                  {pendPos.map((p,i)=>(
-                                    <span key={i} style={{fontFamily:"'JetBrains Mono',monospace",background:p.urgente?`${C.red}15`:C.bg3,border:`1px solid ${p.urgente?C.red+"40":C.b0}`,borderRadius:4,padding:"1px 6px",fontSize:9,color:p.urgente?C.red:C.teal}}>{p.picking}</span>
-                                  ))}
+                                <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                                  {pendPos.map((p,i)=>{
+                                    const fams=familiasDePos(p.skus);
+                                    return(
+                                      <div key={i} style={{background:p.urgente?`${C.red}12`:C.bg3,border:`1px solid ${p.urgente?C.red+"40":C.b0}`,borderRadius:6,padding:"3px 8px",display:"inline-flex",flexDirection:"column",gap:2}}>
+                                        <div style={{display:"flex",alignItems:"center",gap:4}}>
+                                          {p.urgente&&<span style={{color:C.red,fontSize:8}}>🚨</span>}
+                                          <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:9,color:p.urgente?C.red:C.teal,fontWeight:700}}>{p.picking}</span>
+                                        </div>
+                                        <div style={{display:"flex",gap:3,alignItems:"center",flexWrap:"wrap"}}>
+                                          {p.operario&&<span style={{fontSize:7,color:C.t2}}>👷 {p.operario}</span>}
+                                          {fams.map(f=><span key={f} style={{fontSize:7,background:`${C.accent}18`,color:C.accent,borderRadius:2,padding:"0 3px",fontWeight:800}}>{f}</span>)}
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
                                 </div>
                               )}
                             </div>
                             {exp&&(
                               <div style={{borderTop:`1px solid ${C.b0}`,padding:"7px 13px 9px"}}>
-                                {ubiEntry.posiciones.map((p,i)=>(
-                                  <div key={i} style={{background:p.bajada?`${C.green}08`:p.fallo?`${C.red}08`:C.bg3,borderRadius:8,padding:"6px 9px",marginBottom:4,borderLeft:`3px solid ${p.bajada?C.green:p.fallo?C.red:p.urgente?C.red:C.teal}`,opacity:p.bajada||p.fallo?0.65:1}}>
-                                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:p.skus.length>0&&!p.bajada&&!p.fallo?4:0}}>
-                                      <div style={{display:"flex",alignItems:"center",gap:5}}>
-                                        {p.urgente&&!p.bajada&&<span style={{fontSize:8,color:C.red}}>🚨</span>}
-                                        <span style={{fontFamily:"'JetBrains Mono',monospace",color:p.bajada?C.green:p.fallo?C.red:C.teal,fontWeight:700,fontSize:11}}>{p.picking}</span>
-                                        {p.bajada&&<span style={{color:C.green,fontSize:9,fontWeight:700}}> ✓ bajado</span>}
-                                        {p.fallo&&<span style={{color:C.red,fontSize:8}}> ⚠ {p.motivo_fallo||"fallo"}</span>}
-                                      </div>
-                                      <span style={{color:C.t3,fontSize:9,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:100}}>{p.cliente}</span>
-                                    </div>
-                                    {!p.bajada&&!p.fallo&&p.skus.map((s,si)=>(
-                                      <div key={si} style={{display:"flex",justifyContent:"space-between",padding:"2px 0",borderTop:si>0?`1px solid ${C.b0}`:"none"}}>
-                                        <div style={{display:"flex",alignItems:"center",gap:4}}>
-                                          <span style={{fontSize:7,background:`${C.accent}20`,color:C.accent,borderRadius:2,padding:"0 3px",fontWeight:800}}>SKU</span>
-                                          <span style={{fontFamily:"'JetBrains Mono',monospace",color:C.accent,fontSize:10}}>{s.ref}</span>
+                                {ubiEntry.posiciones.map((p,i)=>{
+                                  const fams=familiasDePos(p.skus);
+                                  const borderCol=p.bajada?C.green:p.fallo?C.red:p.urgente?C.red:C.teal;
+                                  return(
+                                    <div key={i} style={{background:p.bajada?`${C.green}08`:p.fallo?`${C.red}08`:C.bg3,borderRadius:8,padding:"7px 10px",marginBottom:4,borderLeft:`3px solid ${borderCol}`,opacity:p.bajada||p.fallo?0.65:1}}>
+                                      {/* Fila 1: picking + estado */}
+                                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:3}}>
+                                        <div style={{display:"flex",alignItems:"center",gap:5}}>
+                                          {p.urgente&&!p.bajada&&<span style={{fontSize:8,color:C.red}}>🚨</span>}
+                                          <span style={{fontFamily:"'JetBrains Mono',monospace",color:p.bajada?C.green:p.fallo?C.red:C.teal,fontWeight:800,fontSize:12}}>{p.picking}</span>
+                                          {p.bajada&&<span style={{color:C.green,fontSize:9,fontWeight:700}}>✓</span>}
+                                          {p.fallo&&<span style={{color:C.red,fontSize:8}}>⚠ {p.motivo_fallo||"fallo"}</span>}
                                         </div>
-                                        <span style={{fontFamily:"'JetBrains Mono',monospace",color:C.yellow,fontSize:10,fontWeight:700}}>{s.cant}u</span>
+                                        <span style={{fontSize:8,color:C.t3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:90}}>{p.cliente}</span>
                                       </div>
-                                    ))}
-                                  </div>
-                                ))}
+                                      {/* Fila 2: operario + familias */}
+                                      <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:!p.bajada&&!p.fallo&&p.skus.length>0?5:0,flexWrap:"wrap"}}>
+                                        {p.operario&&<span style={{fontSize:9,color:C.t2,fontWeight:600}}>👷 {p.operario}</span>}
+                                        {fams.map(f=>(
+                                          <span key={f} style={{background:`${C.accent}18`,color:C.accent,borderRadius:3,padding:"1px 5px",fontSize:8,fontWeight:800,fontFamily:"'JetBrains Mono',monospace"}}>{f}</span>
+                                        ))}
+                                      </div>
+                                      {/* Fila 3: SKUs (solo si pendiente) */}
+                                      {!p.bajada&&!p.fallo&&p.skus.map((s,si)=>(
+                                        <div key={si} style={{display:"flex",justifyContent:"space-between",padding:"2px 0",borderTop:si>0?`1px solid ${C.b0}`:"none"}}>
+                                          <div style={{display:"flex",alignItems:"center",gap:4}}>
+                                            <span style={{fontSize:7,background:`${C.accent}20`,color:C.accent,borderRadius:2,padding:"0 3px",fontWeight:800}}>SKU</span>
+                                            <span style={{fontFamily:"'JetBrains Mono',monospace",color:C.accent,fontSize:10}}>{s.ref}</span>
+                                          </div>
+                                          <span style={{fontFamily:"'JetBrains Mono',monospace",color:C.yellow,fontSize:10,fontWeight:700}}>{s.cant}u</span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  );
+                                })}
                               </div>
                             )}
                             {!allDone&&(
