@@ -180,8 +180,8 @@ const CIDX={B:0,C:1,D:2,E:3};
 const CNOM={B:'Calle 1',C:'Calle 2',D:'Calle 3',E:'Calle 4'};
 
 // Agent color sets
-const COL_PICK={main:'#38bdf8',glow:'#0ea5e9',trail:'rgba(56,189,248,0.18)',sz:5};
-const COL_MC  ={main:'#a855f7',glow:'#7c3aed',trail:'rgba(168,85,247,0.22)',sz:8};
+const COL_PICK={main:'#38bdf8',glow:'#0ea5e9',trail:'rgba(56,189,248,0.28)',sz:7};
+const COL_MC  ={main:'#c084fc',glow:'#9333ea',trail:'rgba(192,132,252,0.35)',sz:11};
 
 const LW=58,TH=28,AH=14;
 let currentTurnos=[],histTurnos=[];
@@ -294,7 +294,10 @@ class Agent{
     if(!this.moving&&!this.serving)this.next();
   }
   next(){
-    if(this.ri>=this.route.length){this.moving=false;return;}
+    if(this.ri>=this.route.length){
+      if(this.route.length===0){this.moving=false;return;}
+      this.ri=0; // loop route indefinitely
+    }
     const r=this.route[this.ri];
     const p=ubiXY(r.calle,r.mod);
     this.tx=p.x;this.ty=p.y;this.moving=true;this.serving=false;
@@ -320,30 +323,48 @@ class Agent{
   }
   render(ctx){
     if(this.x===-1)return;
+    const sz=this.col.sz;
+    // Dotted line to target
+    if(this.moving){
+      ctx.save();
+      ctx.setLineDash([4,5]);
+      ctx.strokeStyle=this.col.main+'40';
+      ctx.lineWidth=1.2;
+      ctx.beginPath();ctx.moveTo(this.x,this.y);ctx.lineTo(this.tx,this.ty);ctx.stroke();
+      ctx.restore();
+      // Target mark
+      ctx.beginPath();ctx.arc(this.tx,this.ty,3,0,Math.PI*2);
+      ctx.fillStyle=this.col.main+'60';ctx.fill();
+    }
+    // Trail
     if(this.trail.length>1){
       ctx.beginPath();ctx.moveTo(this.trail[0].x,this.trail[0].y);
       this.trail.forEach(p=>ctx.lineTo(p.x,p.y));
-      ctx.strokeStyle=this.col.trail;ctx.lineWidth=1.5;ctx.stroke();
+      ctx.strokeStyle=this.col.trail;ctx.lineWidth=2.5;ctx.stroke();
     }
-    const sz=this.col.sz;
-    // Glow
-    const g=ctx.createRadialGradient(this.x,this.y,0,this.x,this.y,sz*2.5);
-    g.addColorStop(0,this.col.main+'60');g.addColorStop(1,'transparent');
-    ctx.beginPath();ctx.arc(this.x,this.y,sz*2.5,0,Math.PI*2);ctx.fillStyle=g;ctx.fill();
+    // Outer glow
+    const g=ctx.createRadialGradient(this.x,this.y,0,this.x,this.y,sz*3);
+    g.addColorStop(0,this.col.main+'70');g.addColorStop(1,'transparent');
+    ctx.beginPath();ctx.arc(this.x,this.y,sz*3,0,Math.PI*2);ctx.fillStyle=g;ctx.fill();
     // Dot
     ctx.beginPath();ctx.arc(this.x,this.y,sz,0,Math.PI*2);
     ctx.fillStyle=this.serving?'#fbbf24':this.col.main;ctx.fill();
-    // Service ring
+    // Inner white core
+    ctx.beginPath();ctx.arc(this.x,this.y,sz*.35,0,Math.PI*2);
+    ctx.fillStyle='rgba(255,255,255,0.85)';ctx.fill();
+    // Service pulse ring
     if(this.serving){
-      ctx.beginPath();ctx.arc(this.x,this.y,sz+3,0,Math.PI*2);
-      ctx.strokeStyle=this.col.main+'70';ctx.lineWidth=1.5;ctx.stroke();
+      ctx.beginPath();ctx.arc(this.x,this.y,sz+5,0,Math.PI*2);
+      ctx.strokeStyle=this.col.main+'90';ctx.lineWidth=2;ctx.stroke();
+      ctx.beginPath();ctx.arc(this.x,this.y,sz+10,0,Math.PI*2);
+      ctx.strokeStyle=this.col.main+'30';ctx.lineWidth=1;ctx.stroke();
     }
-    // Label
+    // Label above dot
     ctx.fillStyle='#fff';
-    ctx.font=`bold ${Math.max(6,sz-1)}px monospace`;
+    ctx.font=`bold ${sz+1}px -apple-system,sans-serif`;
     ctx.textAlign='center';
     const lbl=this.type==='pick'?`P${this.id+1}`:`M${this.id+1}`;
-    ctx.fillText(lbl,this.x,this.y+sz*.4);
+    ctx.fillText(lbl,this.x,this.y-sz-4);
   }
 }
 
@@ -361,6 +382,20 @@ function startAnim(){
 }
 function stopAnim(){if(raf){cancelAnimationFrame(raf);raf=null;}}
 
+function demoRoute(seed){
+  // Generate a synthetic route spanning the warehouse for demo/fallback
+  const calles=CALLES;
+  const mods=Array.from({length:Math.min(maxMod,12)},(_,i)=>i+1);
+  const route=[];
+  // Pick ~6 random UBIs spread across calles
+  for(let i=0;i<6;i++){
+    const c=calles[(seed*3+i*7)%calles.length];
+    const m=mods[(seed*5+i*11)%mods.length];
+    route.push({calle:c,ci:CIDX[c],mod:m,niv:1,pos:1});
+  }
+  return route.sort((a,b)=>(a.ci||0)-(b.ci||0)||(a.mod||0)-(b.mod||0));
+}
+
 function buildAgents(){
   const nPick=parseInt(document.getElementById('sl-pick').value);
   const nMC=parseInt(document.getElementById('sl-ag').value);
@@ -368,36 +403,47 @@ function buildAgents(){
 
   const source=currentTurnos.length?currentTurnos:histTurnos;
   const sample=[...source].filter(t=>(t.posiciones||[]).length>0)
-    .sort(()=>Math.random()-.5).slice(0,Math.max(nPick,nMC)*6);
+    .sort(()=>Math.random()-.5).slice(0,Math.max(nPick,nMC)*8);
 
-  // Picker agents — teal, fast, smaller
+  function routeFrom(turno){
+    return(turno.posiciones||[]).map(p=>parseUbi(p.ubi)).filter(Boolean);
+  }
+
+  // Picker agents — teal, fast, small
   for(let i=0;i<nPick;i++){
     const ag=new Agent(i,COL_PICK,'pick');
-    const t=sample[i%sample.length];
-    if(t){
-      const p=(t.posiciones||[]).map(p=>parseUbi(p.ubi)).filter(Boolean);
-      if(p.length)ag.assign(p);
+    const t=sample.length?sample[i%sample.length]:null;
+    const route=t?routeFrom(t):demoRoute(i);
+    if(route.length){
+      // Spread initial y positions across calles
+      const startCalle=CALLES[i%CALLES.length];
+      const {CW,CH}=dims();
+      ag.x=LW+4; ag.y=cy(CIDX[startCalle],CH)+CH/2;
+      ag.assign(route);
     }
     agents.push(ag);
   }
-  // MC agents — purple, slow, larger
+  // MC agents — purple, slow, large
   for(let i=0;i<nMC;i++){
     const ag=new Agent(i,COL_MC,'mc');
-    const ti=(i+nPick)%sample.length;
-    const t=sample[ti];
-    if(t){
-      const p=(t.posiciones||[]).map(p=>parseUbi(p.ubi)).filter(Boolean);
-      if(p.length)ag.assign(p);
+    const tIdx=sample.length?(i+nPick)%sample.length:-1;
+    const t=tIdx>=0?sample[tIdx]:null;
+    const route=t?routeFrom(t):demoRoute(i+10);
+    if(route.length){
+      const startCalle=CALLES[(i*2)%CALLES.length];
+      const {CW,CH}=dims();
+      ag.x=LW+4; ag.y=cy(CIDX[startCalle],CH)+CH/2;
+      ag.assign(route);
     }
     agents.push(ag);
   }
-  // Add more routes round-robin
+  // Distribute extra routes round-robin across all agents
   sample.slice(nPick+nMC).forEach((t,idx)=>{
-    const p=(t.posiciones||[]).map(pos=>parseUbi(pos.ubi)).filter(Boolean);
-    if(!p.length)return;
-    // alternate between picker agents
-    const ag=agents[idx%agents.length];
-    ag.route.push(...[...p].sort((a,b)=>(a.ci||0)-(b.ci||0)||(a.mod||0)-(b.mod||0)));
+    const route=routeFrom(t);
+    if(!route.length)return;
+    agents[idx%agents.length].route.push(
+      ...[...route].sort((a,b)=>(a.ci||0)-(b.ci||0)||(a.mod||0)-(b.mod||0))
+    );
   });
 }
 
@@ -593,7 +639,7 @@ async function loadData(){
     setTimeout(()=>{
       runMC();
       document.getElementById('loading').style.display='none';
-      fullDraw();
+      setMode('animate'); // auto-start animation after load
     },60);
   }catch(e){
     document.getElementById('loading').style.display='none';
