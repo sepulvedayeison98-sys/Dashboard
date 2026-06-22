@@ -58,13 +58,10 @@ const _H = {
   Authorization: `Bearer ${SUPA_KEY}`,
   "Content-Type": "application/json"
 };
-const _bust = url => `${url}${url.includes('?') ? '&' : '?'}_cb=${Date.now()}`;
 const _go = async (url, opts = {}) => {
-  const isGet = !opts.method || opts.method.toUpperCase() === 'GET';
-  const reqUrl = isGet ? _bust(url) : url;
   for (let i = 0; i < 3; i++) {
     try {
-      const res = await fetch(reqUrl, {
+      const res = await fetch(url, {
         cache: 'no-cache',
         headers: _H,
         ...opts

@@ -36,13 +36,10 @@ const C={
 const SUPA_URL="https://rfysmwpdzlxmadobdvzh.supabase.co";
 const SUPA_KEY="sb_publishable_LHZWmeFFmnua2j3y8dqqdw_rx0u3vad";
 const _H={apikey:SUPA_KEY,Authorization:`Bearer ${SUPA_KEY}`,"Content-Type":"application/json"};
-const _bust=url=>`${url}${url.includes('?')?'&':'?'}_cb=${Date.now()}`;
 const _go=async(url,opts={})=>{
-  const isGet=!opts.method||opts.method.toUpperCase()==='GET';
-  const reqUrl=isGet?_bust(url):url;
   for(let i=0;i<3;i++){
     try{
-      const res=await fetch(reqUrl,{cache:'no-cache',headers:_H,...opts});
+      const res=await fetch(url,{cache:'no-cache',headers:_H,...opts});
       if(res.ok){const t=await res.text();return{data:t?JSON.parse(t):null,error:null};}
       if([400,403,404,409].includes(res.status)){const t=await res.text();return{data:null,error:{status:res.status,message:t}};}
       if(i<2)await new Promise(ok=>setTimeout(ok,(i+1)*2000));
