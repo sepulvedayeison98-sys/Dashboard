@@ -119,14 +119,14 @@ const sb = {
         },
         body: JSON.stringify(body)
       }),
-      upsert: body => _go(base, {
-        method: "POST",
-        headers: {
-          ..._H,
-          Prefer: "resolution=merge-duplicates,return=minimal"
-        },
-        body: JSON.stringify(body)
-      }),
+      upsert: (body, opts={}) => _go(
+        opts.onConflict ? `${base}?on_conflict=${opts.onConflict}` : base,
+        {
+          method: "POST",
+          headers: { ..._H, Prefer: "resolution=merge-duplicates,return=minimal" },
+          body: JSON.stringify(body)
+        }
+      ),
       update: body => ({
         eq: (col, val) => _go(`${base}?${col}=eq.${encodeURIComponent(val)}`, {
           method: "PATCH",
@@ -650,7 +650,8 @@ function PickingApp() {
         const nBaj = (nuevo.posiciones || []).filter(p => p.bajada).length;
         const pBaj = (prev.posiciones || []).filter(p => p.bajada).length;
         if (nBaj > pBaj) {
-          const nuevasBaj = (nuevo.posiciones || []).filter((p, i) => p.bajada && !((prev.posiciones || [])[i] || {}).bajada);
+          const prevBaj = new Set((prev.posiciones || []).filter(p => p.bajada).map(p => p.ubi));
+          const nuevasBaj = (nuevo.posiciones || []).filter(p => p.bajada && !prevBaj.has(p.ubi));
           const ubis = nuevasBaj.map(p => p.ubi).join(', ');
           setNotifs(n => [...n, {
             id: Date.now(),
@@ -663,7 +664,8 @@ function PickingApp() {
         const nFalloPos = (nuevo.posiciones || []).filter(p => p.fallo).length;
         const pFalloPos = (prev.posiciones || []).filter(p => p.fallo).length;
         if (nFalloPos > pFalloPos) {
-          const nuevosFallos = (nuevo.posiciones || []).filter((p, i) => p.fallo && !((prev.posiciones || [])[i] || {}).fallo);
+          const prevFallos = new Set((prev.posiciones || []).filter(p => p.fallo).map(p => p.ubi));
+          const nuevosFallos = (nuevo.posiciones || []).filter(p => p.fallo && !prevFallos.has(p.ubi));
           nuevosFallos.forEach(p => {
             setNotifs(n => [...n, {
               id: Date.now() + (Math.random() * 100 | 0),
@@ -1002,7 +1004,7 @@ function PickingApp() {
         Prefer: "return=minimal"
       }
     });
-    const picklist = doneT.map(t => encodeURIComponent(t.picking)).join(",");
+    const picklist = doneT.map(t => t.picking).join(",");
     if (picklist) await _go(`${SUPA_URL}/rest/v1/asignaciones?picking=in.(${picklist})`, {
       method: "DELETE",
       headers: {
@@ -2147,7 +2149,7 @@ function PickingApp() {
           } else if (nuevoVal && nuevasPos.every(p => p.bajada || p.fallo)) {
             await sb.from("turnos").update({
               estado: "completado",
-              montacarguista: operario || "picker",
+              montacarguista: turnoActivo.montacarguista || operario || "picker",
               fecha_completado: new Date().toISOString()
             }).eq("id", turnoActivo.id);
           }

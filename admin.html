@@ -125,7 +125,12 @@ function AdminApp(){
   const cancelarTurno=async(id)=>{
     if(!window.confirm("¿Cancelar este turno?"))return;
     setProcesando(p=>({...p,[id]:true}));
+    const turno=turnos.find(t=>t.id===id);
     await api.patchTurno(id,{estado:"completado",fecha_completado:new Date().toISOString(),montacarguista:"[Admin-cancelado]"});
+    if(turno?.picking){
+      await _go(`${SUPA_URL}/rest/v1/asignaciones?picking=eq.${encodeURIComponent(turno.picking)}`,
+        {method:"PATCH",headers:{..._H,Prefer:"return=minimal"},body:JSON.stringify({estado:"liberado",fecha_completado:new Date().toISOString()})});
+    }
     await refrescar();
     setProcesando(p=>({...p,[id]:false}));
   };
@@ -144,7 +149,12 @@ function AdminApp(){
   };
   const limpiarTodo=async()=>{
     if(!window.confirm("¿Eliminar todos los turnos completados y fallidos?\nEsta acción no se puede deshacer."))return;
+    const{data:doneT}=await _go(`${SUPA_URL}/rest/v1/turnos?estado=in.(completado,fallido)&select=id,picking`);
     await _go(`${SUPA_URL}/rest/v1/turnos?estado=in.(completado,fallido)`,{method:"DELETE",headers:{..._H,Prefer:"return=minimal"}});
+    if(doneT?.length){
+      const picklist=doneT.map(t=>t.picking).join(",");
+      if(picklist)await _go(`${SUPA_URL}/rest/v1/asignaciones?picking=in.(${picklist})`,{method:"DELETE",headers:{..._H,Prefer:"return=minimal"}});
+    }
     await refrescar();
   };
   const liberarPedido=async(id)=>{

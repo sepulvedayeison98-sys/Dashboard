@@ -202,9 +202,9 @@ function MontacargasApp(){
     setProcesando(p=>({...p,[key]:true}));
     const ts=new Date().toISOString();
     const nuevasPos=turno.posiciones.map((p,i)=>i===posIdx?{...p,bajada:true,bajada_ts:ts}:p);
-    await sb.from("turnos").update({posiciones:nuevasPos}).eq("id",turnoId);
-    // Auto-completar si todas bajadas
-    if(nuevasPos.every(p=>p.bajada)){
+    const{error:e1}=await sb.from("turnos").update({posiciones:nuevasPos}).eq("id",turnoId);
+    // Auto-completar si todas bajadas (solo si el primer PATCH funcionó)
+    if(!e1&&nuevasPos.every(p=>p.bajada)){
       await sb.from("turnos").update({estado:"completado",montacarguista:operario,fecha_completado:new Date().toISOString()}).eq("id",turnoId);
     }
     await refrescar();
@@ -226,8 +226,8 @@ function MontacargasApp(){
     setProcesando(p=>({...p,[key]:true}));
     const ts=new Date().toISOString();
     const nuevasPos=turno.posiciones.map((p,i)=>i===posIdx?{...p,fallo:true,motivo_fallo:motivo,fallo_ts:ts}:p);
-    await sb.from("turnos").update({posiciones:nuevasPos}).eq("id",turnoId);
-    if(nuevasPos.every(p=>p.bajada||p.fallo)){
+    const{error:e1}=await sb.from("turnos").update({posiciones:nuevasPos}).eq("id",turnoId);
+    if(!e1&&nuevasPos.every(p=>p.bajada||p.fallo)){
       await sb.from("turnos").update({estado:"completado",montacarguista:operario,fecha_completado:new Date().toISOString()}).eq("id",turnoId);
     }
     await refrescar();
@@ -251,8 +251,8 @@ function MontacargasApp(){
       const turno=turnos.find(t=>t.id===turnoId);
       if(!turno)continue;
       const nuevasPos=turno.posiciones.map((p,i)=>idxs.includes(i)?{...p,bajada:true,bajada_ts:ts}:p);
-      await sb.from("turnos").update({posiciones:nuevasPos}).eq("id",turnoId);
-      if(nuevasPos.every(p=>p.bajada||p.fallo)){
+      const{error:e1}=await sb.from("turnos").update({posiciones:nuevasPos}).eq("id",turnoId);
+      if(!e1&&nuevasPos.every(p=>p.bajada||p.fallo)){
         await sb.from("turnos").update({estado:"completado",montacarguista:operario,fecha_completado:ts}).eq("id",turnoId);
       }
     }
@@ -265,7 +265,7 @@ function MontacargasApp(){
     const{data:doneT}=await _go(`${SUPA_URL}/rest/v1/turnos?estado=in.(completado,fallido)&select=id,picking`,{headers:_H});
     if(!doneT?.length)return;
     await _go(`${SUPA_URL}/rest/v1/turnos?estado=in.(completado,fallido)`,{method:"DELETE",headers:{..._H,Prefer:"return=minimal"}});
-    const picklist=doneT.map(t=>encodeURIComponent(t.picking)).join(",");
+    const picklist=doneT.map(t=>t.picking).join(",");
     if(picklist)await _go(`${SUPA_URL}/rest/v1/asignaciones?picking=in.(${picklist})`,{method:"DELETE",headers:{..._H,Prefer:"return=minimal"}});
     await refrescar();
   };
