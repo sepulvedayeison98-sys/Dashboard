@@ -86,20 +86,44 @@ const tipoDeSkus=skus=>[...new Set((skus||[]).map(s=>s.tipo||((s.desc||"").split
 
 const beep=()=>{try{const ctx=new(window.AudioContext||window.webkitAudioContext)();const o=ctx.createOscillator();const g=ctx.createGain();o.connect(g);g.connect(ctx.destination);o.frequency.value=880;g.gain.setValueAtTime(0.3,ctx.currentTime);g.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+0.4);o.start();o.stop(ctx.currentTime+0.4);}catch(e){}};
 
+// VAPID public key — par generado para este proyecto
+const VAPID_PUB="BIkO5rFXvS_7NPyJSWIWyoUhafWswdr0ImaaYV2s8EvHVLiYxkHLQGcWUKOxII5fXlkL9-o4E38oKKy9qwZTspM";
+const _b64ToUint8=(b64)=>{const raw=atob(b64.replace(/-/g,"+").replace(/_/g,"/"));const out=new Uint8Array(raw.length);for(let i=0;i<raw.length;i++)out[i]=raw.charCodeAt(i);return out;};
+
 const mostrarNotif=(titulo,cuerpo)=>{
   if(!("Notification" in window)||Notification.permission!=="granted")return;
   try{new Notification(titulo,{body:cuerpo,icon:"./icon-montacargas.svg",badge:"./icon-montacargas.svg",requireInteraction:false});}catch(e){}
 };
-const pedirPermiso=()=>{
+
+// Guarda la suscripción Web Push en Supabase para recibir notifs con la app cerrada
+const suscribirPush=async()=>{
+  try{
+    if(!("PushManager" in window))return;
+    const reg=await navigator.serviceWorker.ready;
+    let sub=await reg.pushManager.getSubscription();
+    if(!sub){
+      sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:_b64ToUint8(VAPID_PUB)});
+    }
+    const j=sub.toJSON();
+    await _go(`${SUPA_URL}/rest/v1/push_subscriptions`,{
+      method:"POST",
+      headers:{..._H,Prefer:"resolution=merge-duplicates"},
+      body:JSON.stringify({endpoint:j.endpoint,p256dh:j.keys.p256dh,auth:j.keys.auth})
+    });
+  }catch(e){console.warn("push sub:",e);}
+};
+
+const pedirPermiso=async()=>{
   if(!("Notification" in window)){
     alert('En iPhone: toca el botón compartir (⬆) en Safari → "Añadir a inicio". La app instalada en inicio sí puede recibir notificaciones del sistema.');
     return;
   }
   if(Notification.permission==="denied"){
-    alert("Notificaciones bloqueadas. Ve a Ajustes → Safari → Notificaciones para habilitarlas.");
+    alert("Notificaciones bloqueadas. Ve a Ajustes → Notificaciones → Safari (o la app) para habilitarlas.");
     return;
   }
-  Notification.requestPermission();
+  const p=await Notification.requestPermission();
+  if(p==="granted") suscribirPush();
 };
 
 // ═══════════ LOGIN ═══════════
@@ -381,6 +405,8 @@ function MontacargasApp(){
   if(!operario)return(
     <LoginForm onLogin={async(nombre)=>{
       pedirPermiso();
+      // Si ya tenía permiso concedido, suscribir igual (registra endpoint nuevo si cambió)
+      if(typeof Notification!=="undefined"&&Notification.permission==="granted")suscribirPush();
       setOperario(nombre);
       try{
         await _go(`${SUPA_URL}/rest/v1/usuarios?nombre=eq.${encodeURIComponent(nombre)}&rol=eq.montacarguista`,{method:"DELETE",headers:{..._H,Prefer:"return=minimal"}});
