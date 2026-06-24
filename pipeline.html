@@ -581,16 +581,20 @@ function PickingApp() {
     setErr("");
     try {
       const fetchWb = async url => {
-        const r = await fetch(url, {
-          cache: "reload"
-        });
-        if (!r.ok) throw new Error(`${url} → HTTP ${r.status}`);
-        const buf = await r.arrayBuffer();
-        if (buf.byteLength < 100) throw new Error(`${url} llegó vacío`);
-        return XLSX.read(new Uint8Array(buf), {
-          type: "array",
-          cellDates: true
-        });
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 30000);
+        try {
+          const r = await fetch(url, { cache: "reload", signal: ctrl.signal });
+          clearTimeout(t);
+          if (!r.ok) throw new Error(`${url} → HTTP ${r.status}`);
+          const buf = await r.arrayBuffer();
+          if (buf.byteLength < 100) throw new Error(`${url} llegó vacío`);
+          return XLSX.read(new Uint8Array(buf), { type: "array", cellDates: true });
+        } catch (e) {
+          clearTimeout(t);
+          if (e.name === "AbortError") throw new Error(`Sin respuesta al descargar ${url.split("/").pop()} (30s). Verifica tu conexión.`);
+          throw e;
+        }
       };
       const [wbInv, wbFact] = await Promise.all([fetchWb("./Inventario.xlsx"), fetchWb("./Bandejadeplaneacion.xlsx")]);
       setData(procesar(wbInv, wbFact));
@@ -1178,13 +1182,11 @@ function PickingApp() {
 
   // ═══════════ PANTALLAS ═══════════
   if (phase === "login") return /*#__PURE__*/React.createElement(LoginForm, {
-    onLogin: async nombre => {
+    onLogin: nombre => {
+      // Fire-and-forget: no bloqueamos la carga con escrituras de presencia
+      _go(`${SUPA_URL}/rest/v1/usuarios?nombre=eq.${encodeURIComponent(nombre)}&rol=eq.operario`, {method:"DELETE",headers:{..._H,Prefer:"return=minimal"}});
+      sb.from("usuarios").insert({nombre, rol:"operario", activo:true, fecha_login:new Date().toISOString()});
       setOperario(nombre);
-      try {
-        await _go(`${SUPA_URL}/rest/v1/usuarios?nombre=eq.${encodeURIComponent(nombre)}&rol=eq.operario`, {method:"DELETE",headers:{..._H,Prefer:"return=minimal"}});
-        await sb.from("usuarios").insert({nombre, rol:"operario", activo:true, fecha_login:new Date().toISOString()});
-      } catch (e) {}
-      setPhase("loading");
     }
   });
   if (phase === "loading") return /*#__PURE__*/React.createElement("div", {
