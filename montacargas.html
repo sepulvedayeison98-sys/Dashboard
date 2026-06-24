@@ -85,6 +85,15 @@ const tipoDeSkus=skus=>[...new Set((skus||[]).map(s=>s.tipo||((s.desc||"").split
 
 const beep=()=>{try{const ctx=new(window.AudioContext||window.webkitAudioContext)();const o=ctx.createOscillator();const g=ctx.createGain();o.connect(g);g.connect(ctx.destination);o.frequency.value=880;g.gain.setValueAtTime(0.3,ctx.currentTime);g.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+0.4);o.start();o.stop(ctx.currentTime+0.4);}catch(e){}};
 
+const mostrarNotif=(titulo,cuerpo)=>{
+  if(!("Notification" in window)||Notification.permission!=="granted")return;
+  try{new Notification(titulo,{body:cuerpo,icon:"./icon-montacargas.svg",badge:"./icon-montacargas.svg",requireInteraction:false});}catch(e){}
+};
+const pedirPermiso=()=>{
+  if(!("Notification" in window)||Notification.permission!=="default")return;
+  Notification.requestPermission();
+};
+
 // ═══════════ LOGIN ═══════════
 function LoginForm({onLogin}){
   const [nombre,setNombre]=useState("");
@@ -138,6 +147,19 @@ function MontacargasApp(){
       beep();
       try{navigator.vibrate&&navigator.vibrate([200,100,200]);}catch(e){}
       document.title=`(${nPend}) MONTACARGAS · nuevo turno`;
+      // Detectar cuáles son los turnos nuevos para la notificación
+      const prevIds=new Set(turnos.filter(t=>t.estado==="pendiente").map(t=>t.id));
+      const nuevos=data.filter(t=>t.estado==="pendiente"&&!prevIds.has(t.id));
+      if(nuevos.length===1){
+        const t=nuevos[0];
+        const urgente=t.es_mde||t.prioridad==="urgente";
+        mostrarNotif(
+          `${urgente?"🚨":"🏗️"} Turno nuevo · ${t.picking}`,
+          `${t.cliente||""}${t.ciudad?` · ${t.ciudad}`:""}${urgente?" · URGENTE":""}`
+        );
+      } else if(nuevos.length>1){
+        mostrarNotif(`🏗️ ${nuevos.length} turnos nuevos`,nuevos.map(t=>t.picking).join(" · "));
+      }
     } else {
       document.title="INDUCASOS · Montacargas";
     }
@@ -335,6 +357,7 @@ function MontacargasApp(){
 
   if(!operario)return(
     <LoginForm onLogin={async(nombre)=>{
+      pedirPermiso();
       setOperario(nombre);
       try{
         await _go(`${SUPA_URL}/rest/v1/usuarios?nombre=eq.${encodeURIComponent(nombre)}&rol=eq.montacarguista`,{method:"DELETE",headers:{..._H,Prefer:"return=minimal"}});
@@ -366,6 +389,12 @@ function MontacargasApp(){
             <div style={{color:C.t3,fontSize:10}}>CEDI ITAGUÍ · {operario}{ultimaAct?` · act. ${fmtHora(ultimaAct)}`:""}</div>
           </div>
           <button onClick={refrescar} style={{background:C.bg3,border:`1px solid ${C.b0}`,color:C.t3,borderRadius:8,padding:"7px 11px",fontSize:13,cursor:"pointer"}}>↻</button>
+          {"Notification" in window&&Notification.permission!=="granted"&&(
+            <button onClick={pedirPermiso} title={Notification.permission==="denied"?"Permiso bloqueado en el navegador":"Activar notificaciones"}
+              style={{background:Notification.permission==="denied"?`${C.red}15`:`${C.yellow}18`,border:`1px solid ${Notification.permission==="denied"?C.red+"40":C.yellow+"50"}`,color:Notification.permission==="denied"?C.red:C.yellow,borderRadius:8,padding:"7px 10px",fontSize:14,cursor:"pointer"}}>
+              🔔
+            </button>
+          )}
           <button onClick={()=>{setOperario(null);setTurnos([]);prevPendRef.current=0;misEnProcesoRef.current=new Set();}} style={{background:C.bg3,border:`1px solid ${C.b0}`,color:C.t3,borderRadius:8,padding:"7px 10px",fontSize:11}}>⇦</button>
         </div>
         <div style={{display:"flex",gap:4}}>
