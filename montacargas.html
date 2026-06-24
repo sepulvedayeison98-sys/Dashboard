@@ -95,25 +95,28 @@ const mostrarNotif=(titulo,cuerpo)=>{
   try{new Notification(titulo,{body:cuerpo,icon:"./icon-montacargas.svg",badge:"./icon-montacargas.svg",requireInteraction:false});}catch(e){}
 };
 
-// Guarda la suscripción Web Push en Supabase para recibir notifs con la app cerrada
-const suscribirPush=async()=>{
+// Guarda la suscripción Web Push en Supabase — retorna true si quedó activa
+const suscribirPush=async(setPushOk)=>{
   try{
-    if(!("PushManager" in window))return;
+    if(!("PushManager" in window)){setPushOk&&setPushOk(false);return false;}
     const reg=await navigator.serviceWorker.ready;
     let sub=await reg.pushManager.getSubscription();
     if(!sub){
       sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:_b64ToUint8(VAPID_PUB)});
     }
     const j=sub.toJSON();
-    await _go(`${SUPA_URL}/rest/v1/push_subscriptions`,{
+    const{error}=await _go(`${SUPA_URL}/rest/v1/push_subscriptions`,{
       method:"POST",
       headers:{..._H,Prefer:"resolution=merge-duplicates"},
       body:JSON.stringify({endpoint:j.endpoint,p256dh:j.keys.p256dh,auth:j.keys.auth})
     });
-  }catch(e){console.warn("push sub:",e);}
+    if(error){console.warn("push sub save:",error);setPushOk&&setPushOk(false);return false;}
+    setPushOk&&setPushOk(true);
+    return true;
+  }catch(e){console.warn("push sub:",e);setPushOk&&setPushOk(false);return false;}
 };
 
-const pedirPermiso=async()=>{
+const pedirPermiso=async(setPushOk)=>{
   if(!("Notification" in window)){
     alert('En iPhone: toca el botón compartir (⬆) en Safari → "Añadir a inicio". La app instalada en inicio sí puede recibir notificaciones del sistema.');
     return;
@@ -122,8 +125,13 @@ const pedirPermiso=async()=>{
     alert("Notificaciones bloqueadas. Ve a Ajustes → Notificaciones → Safari (o la app) para habilitarlas.");
     return;
   }
+  if(Notification.permission==="granted"){
+    await suscribirPush(setPushOk);
+    return;
+  }
   const p=await Notification.requestPermission();
-  if(p==="granted") suscribirPush();
+  if(p==="granted") await suscribirPush(setPushOk);
+  else setPushOk&&setPushOk(false);
 };
 
 // ═══════════ LOGIN ═══════════
@@ -165,7 +173,8 @@ function MontacargasApp(){
   const [alertaCancelacion,setAlertaCancelacion]=useState([]);
   const [reportando,setReportando]=useState({});
   const [reportandoPos,setReportandoPos]=useState({}); // {turnoId-posIdx: true}
-  const [toasts,setToasts]=useState([]); // notificaciones in-app
+  const [toasts,setToasts]=useState([]);
+  const [pushOk,setPushOk]=useState(null); // null=verificando, true=suscrito, false=sin push
   const timerRef=useRef(null);
   const prevPendRef=useRef(0);
   const misEnProcesoRef=useRef(new Set());
@@ -199,6 +208,13 @@ function MontacargasApp(){
           id:t.id,picking:t.picking,cliente:t.cliente||"",ciudad:t.ciudad||"",
           urgente:!!(t.es_mde||t.prioridad==="urgente")
         }))]);
+        // Llamar Edge Function desde browser como respaldo del trigger SQL
+        const t0=nuevos[0];
+        fetch(`${SUPA_URL}/functions/v1/notify-montacarguistas`,{
+          method:"POST",
+          headers:{..._H,"Content-Type":"application/json"},
+          body:JSON.stringify({record:{picking:t0.picking,cliente:t0.cliente,ciudad:t0.ciudad,es_mde:t0.es_mde,prioridad:t0.prioridad}})
+        }).catch(()=>{});
       }
     } else {
       document.title="INDUCASOS · Montacargas";
@@ -229,6 +245,12 @@ function MontacargasApp(){
     prevPendRef.current=-1;
     refrescar();
     timerRef.current=setInterval(refrescar,15000);
+    // Renovar suscripción push cada vez que el operario inicia sesión
+    if(typeof Notification!=="undefined"&&Notification.permission==="granted"){
+      suscribirPush(setPushOk);
+    } else {
+      setPushOk(typeof Notification==="undefined"||!("PushManager" in window)?false:null);
+    }
     return()=>clearInterval(timerRef.current);
   },[operario]);
 
@@ -404,9 +426,7 @@ function MontacargasApp(){
 
   if(!operario)return(
     <LoginForm onLogin={async(nombre)=>{
-      pedirPermiso();
-      // Si ya tenía permiso concedido, suscribir igual (registra endpoint nuevo si cambió)
-      if(typeof Notification!=="undefined"&&Notification.permission==="granted")suscribirPush();
+      pedirPermiso(setPushOk);
       setOperario(nombre);
       try{
         await _go(`${SUPA_URL}/rest/v1/usuarios?nombre=eq.${encodeURIComponent(nombre)}&rol=eq.montacarguista`,{method:"DELETE",headers:{..._H,Prefer:"return=minimal"}});
@@ -457,13 +477,18 @@ function MontacargasApp(){
             <div style={{color:C.t3,fontSize:10}}>CEDI ITAGUÍ · {operario}{ultimaAct?` · act. ${fmtHora(ultimaAct)}`:""}</div>
           </div>
           <button onClick={refrescar} style={{background:C.bg3,border:`1px solid ${C.b0}`,color:C.t3,borderRadius:8,padding:"7px 11px",fontSize:13,cursor:"pointer"}}>↻</button>
-          {(!("Notification" in window)||Notification.permission!=="granted")&&(
-            <button onClick={pedirPermiso}
-              title={!("Notification" in window)?"Instala la app en tu pantalla de inicio":Notification.permission==="denied"?"Permiso bloqueado en el navegador":"Activar notificaciones"}
-              style={{background:Notification.permission==="denied"?`${C.red}15`:`${C.yellow}18`,border:`1px solid ${Notification.permission==="denied"?C.red+"40":C.yellow+"50"}`,color:Notification.permission==="denied"?C.red:C.yellow,borderRadius:8,padding:"7px 10px",fontSize:14,cursor:"pointer"}}>
-              🔔
-            </button>
-          )}
+          {(()=>{
+            const denied=typeof Notification!=="undefined"&&Notification.permission==="denied";
+            const noSoporta=!("Notification" in window)||!("PushManager" in window);
+            const col=pushOk===true?C.green:denied?C.red:C.yellow;
+            const title=pushOk===true?"Notificaciones activas — recibirás alertas con la app cerrada":denied?"Bloqueado: ve a Ajustes → Notificaciones":noSoporta?"Instala la app en pantalla de inicio (iOS)":"Toca para activar notificaciones en segundo plano";
+            return(
+              <button onClick={()=>pedirPermiso(setPushOk)} title={title}
+                style={{background:`${col}18`,border:`1px solid ${col}40`,color:col,borderRadius:8,padding:"7px 10px",fontSize:14,cursor:"pointer",opacity:pushOk===null?0.5:1}}>
+                {pushOk===true?"🔔✓":pushOk===false&&denied?"🔕":"🔔"}
+              </button>
+            );
+          })()}
           <button onClick={()=>{setOperario(null);setTurnos([]);prevPendRef.current=0;misEnProcesoRef.current=new Set();}} style={{background:C.bg3,border:`1px solid ${C.b0}`,color:C.t3,borderRadius:8,padding:"7px 10px",fontSize:11}}>⇦</button>
         </div>
         <div style={{display:"flex",gap:4}}>
