@@ -19,6 +19,7 @@
   @keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
   @keyframes spin{to{transform:rotate(360deg)}}
   @keyframes pop{0%{transform:scale(.8);opacity:0}60%{transform:scale(1.08)}100%{transform:scale(1);opacity:1}}
+  @keyframes slideDown{from{opacity:0;transform:translateY(-110%)}to{opacity:1;transform:translateY(0)}}
 </style>
 <link rel="manifest" href="./manifest-montacargas.json"/>
 <meta name="theme-color" content="#a855f7"/>
@@ -85,6 +86,46 @@ const tipoDeSkus=skus=>[...new Set((skus||[]).map(s=>s.tipo||((s.desc||"").split
 
 const beep=()=>{try{const ctx=new(window.AudioContext||window.webkitAudioContext)();const o=ctx.createOscillator();const g=ctx.createGain();o.connect(g);g.connect(ctx.destination);o.frequency.value=880;g.gain.setValueAtTime(0.3,ctx.currentTime);g.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+0.4);o.start();o.stop(ctx.currentTime+0.4);}catch(e){}};
 
+// VAPID public key — par generado para este proyecto
+const VAPID_PUB="BIkO5rFXvS_7NPyJSWIWyoUhafWswdr0ImaaYV2s8EvHVLiYxkHLQGcWUKOxII5fXlkL9-o4E38oKKy9qwZTspM";
+const _b64ToUint8=(b64)=>{const raw=atob(b64.replace(/-/g,"+").replace(/_/g,"/"));const out=new Uint8Array(raw.length);for(let i=0;i<raw.length;i++)out[i]=raw.charCodeAt(i);return out;};
+
+const mostrarNotif=(titulo,cuerpo)=>{
+  if(!("Notification" in window)||Notification.permission!=="granted")return;
+  try{new Notification(titulo,{body:cuerpo,icon:"./icon-montacargas.svg",badge:"./icon-montacargas.svg",requireInteraction:false});}catch(e){}
+};
+
+// Guarda la suscripción Web Push en Supabase para recibir notifs con la app cerrada
+const suscribirPush=async()=>{
+  try{
+    if(!("PushManager" in window))return;
+    const reg=await navigator.serviceWorker.ready;
+    let sub=await reg.pushManager.getSubscription();
+    if(!sub){
+      sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:_b64ToUint8(VAPID_PUB)});
+    }
+    const j=sub.toJSON();
+    await _go(`${SUPA_URL}/rest/v1/push_subscriptions`,{
+      method:"POST",
+      headers:{..._H,Prefer:"resolution=merge-duplicates"},
+      body:JSON.stringify({endpoint:j.endpoint,p256dh:j.keys.p256dh,auth:j.keys.auth})
+    });
+  }catch(e){console.warn("push sub:",e);}
+};
+
+const pedirPermiso=async()=>{
+  if(!("Notification" in window)){
+    alert('En iPhone: toca el botón compartir (⬆) en Safari → "Añadir a inicio". La app instalada en inicio sí puede recibir notificaciones del sistema.');
+    return;
+  }
+  if(Notification.permission==="denied"){
+    alert("Notificaciones bloqueadas. Ve a Ajustes → Notificaciones → Safari (o la app) para habilitarlas.");
+    return;
+  }
+  const p=await Notification.requestPermission();
+  if(p==="granted") suscribirPush();
+};
+
 // ═══════════ LOGIN ═══════════
 function LoginForm({onLogin}){
   const [nombre,setNombre]=useState("");
@@ -124,6 +165,7 @@ function MontacargasApp(){
   const [alertaCancelacion,setAlertaCancelacion]=useState([]);
   const [reportando,setReportando]=useState({});
   const [reportandoPos,setReportandoPos]=useState({}); // {turnoId-posIdx: true}
+  const [toasts,setToasts]=useState([]); // notificaciones in-app
   const timerRef=useRef(null);
   const prevPendRef=useRef(0);
   const misEnProcesoRef=useRef(new Set());
@@ -138,6 +180,26 @@ function MontacargasApp(){
       beep();
       try{navigator.vibrate&&navigator.vibrate([200,100,200]);}catch(e){}
       document.title=`(${nPend}) MONTACARGAS · nuevo turno`;
+      // Detectar cuáles son los turnos nuevos para la notificación
+      const prevIds=new Set(turnos.filter(t=>t.estado==="pendiente").map(t=>t.id));
+      const nuevos=data.filter(t=>t.estado==="pendiente"&&!prevIds.has(t.id));
+      if(nuevos.length===1){
+        const t=nuevos[0];
+        const urgente=t.es_mde||t.prioridad==="urgente";
+        mostrarNotif(
+          `${urgente?"🚨":"🏗️"} Turno nuevo · ${t.picking}`,
+          `${t.cliente||""}${t.ciudad?` · ${t.ciudad}`:""}${urgente?" · URGENTE":""}`
+        );
+      } else if(nuevos.length>1){
+        mostrarNotif(`🏗️ ${nuevos.length} turnos nuevos`,nuevos.map(t=>t.picking).join(" · "));
+      }
+      // Toast in-app (funciona en iOS y cualquier navegador)
+      if(nuevos.length>0){
+        setToasts(prev=>[...prev,...nuevos.map(t=>({
+          id:t.id,picking:t.picking,cliente:t.cliente||"",ciudad:t.ciudad||"",
+          urgente:!!(t.es_mde||t.prioridad==="urgente")
+        }))]);
+      }
     } else {
       document.title="INDUCASOS · Montacargas";
     }
@@ -169,6 +231,13 @@ function MontacargasApp(){
     timerRef.current=setInterval(refrescar,15000);
     return()=>clearInterval(timerRef.current);
   },[operario]);
+
+  // Auto-dismiss toasts después de 7s
+  useEffect(()=>{
+    if(!toasts.length)return;
+    const t=setTimeout(()=>setToasts(p=>p.slice(1)),7000);
+    return()=>clearTimeout(t);
+  },[toasts.length]);
 
   const tomarTurno=async(id)=>{
     setProcesando(p=>({...p,[id]:true}));
@@ -335,6 +404,9 @@ function MontacargasApp(){
 
   if(!operario)return(
     <LoginForm onLogin={async(nombre)=>{
+      pedirPermiso();
+      // Si ya tenía permiso concedido, suscribir igual (registra endpoint nuevo si cambió)
+      if(typeof Notification!=="undefined"&&Notification.permission==="granted")suscribirPush();
       setOperario(nombre);
       try{
         await _go(`${SUPA_URL}/rest/v1/usuarios?nombre=eq.${encodeURIComponent(nombre)}&rol=eq.montacarguista`,{method:"DELETE",headers:{..._H,Prefer:"return=minimal"}});
@@ -357,6 +429,25 @@ function MontacargasApp(){
 
   return(
     <div style={{minHeight:"100vh",paddingBottom:24}}>
+      {/* Toast in-app: funciona en iOS y cualquier navegador */}
+      {toasts.length>0&&(
+        <div style={{position:"fixed",top:0,left:0,right:0,zIndex:200,animation:"slideDown .35s ease"}}>
+          <div style={{background:toasts[0].urgente?`linear-gradient(135deg,${C.red},${C.orange})`:`linear-gradient(135deg,${C.purple},${C.accent})`,padding:"14px 16px",boxShadow:"0 4px 20px #00000060"}}>
+            <div style={{display:"flex",alignItems:"center",gap:10}}>
+              <span style={{fontSize:22,flexShrink:0}}>{toasts[0].urgente?"🚨":"🏗️"}</span>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{color:"#fff",fontWeight:800,fontSize:15}}>
+                  {toasts.length>1?`${toasts.length} turnos nuevos`:`Nuevo turno · ${toasts[0].picking}`}
+                </div>
+                <div style={{color:"rgba(255,255,255,.75)",fontSize:12,marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                  {toasts.length>1?toasts.map(t=>t.picking).join(" · "):`${toasts[0].cliente}${toasts[0].ciudad?` · ${toasts[0].ciudad}`:""}`}
+                </div>
+              </div>
+              <button onClick={()=>setToasts([])} style={{background:"rgba(255,255,255,.2)",border:"none",color:"#fff",borderRadius:7,width:30,height:30,fontSize:16,cursor:"pointer",flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* Header */}
       <div style={{position:"sticky",top:0,zIndex:10,background:C.bg1,borderBottom:`1px solid ${C.b0}`,padding:"12px 14px"}}>
         <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
@@ -366,6 +457,13 @@ function MontacargasApp(){
             <div style={{color:C.t3,fontSize:10}}>CEDI ITAGUÍ · {operario}{ultimaAct?` · act. ${fmtHora(ultimaAct)}`:""}</div>
           </div>
           <button onClick={refrescar} style={{background:C.bg3,border:`1px solid ${C.b0}`,color:C.t3,borderRadius:8,padding:"7px 11px",fontSize:13,cursor:"pointer"}}>↻</button>
+          {(!("Notification" in window)||Notification.permission!=="granted")&&(
+            <button onClick={pedirPermiso}
+              title={!("Notification" in window)?"Instala la app en tu pantalla de inicio":Notification.permission==="denied"?"Permiso bloqueado en el navegador":"Activar notificaciones"}
+              style={{background:Notification.permission==="denied"?`${C.red}15`:`${C.yellow}18`,border:`1px solid ${Notification.permission==="denied"?C.red+"40":C.yellow+"50"}`,color:Notification.permission==="denied"?C.red:C.yellow,borderRadius:8,padding:"7px 10px",fontSize:14,cursor:"pointer"}}>
+              🔔
+            </button>
+          )}
           <button onClick={()=>{setOperario(null);setTurnos([]);prevPendRef.current=0;misEnProcesoRef.current=new Set();}} style={{background:C.bg3,border:`1px solid ${C.b0}`,color:C.t3,borderRadius:8,padding:"7px 10px",fontSize:11}}>⇦</button>
         </div>
         <div style={{display:"flex",gap:4}}>
