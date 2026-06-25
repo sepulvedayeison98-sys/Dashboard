@@ -690,6 +690,20 @@ function MontacargasApp(){
                               {esBajada&&<div style={{color:C.green,fontSize:9,marginTop:4,fontWeight:600}}>
                                 {(pos.skus||[]).map(s=>`${s.ref} · ${s.cant}u`).join("  ·  ")}
                               </div>}
+                              {(pos.solicitantes||[]).length>0&&(
+                                <div style={{marginTop:6,borderTop:`1px solid ${C.b0}`,paddingTop:5}}>
+                                  <div style={{fontSize:7,color:C.t4,fontWeight:700,marginBottom:3,letterSpacing:.5}}>SOLICITANTES</div>
+                                  {(pos.solicitantes||[]).map((sol,si)=>(
+                                    <div key={si} style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:3,padding:"3px 6px",background:C.bg3,borderRadius:5}}>
+                                      <div>
+                                        <div style={{color:C.t2,fontSize:9,fontWeight:700}}>{sol.operario}</div>
+                                        <div style={{color:C.t4,fontSize:7,marginTop:1}}>{(sol.skus||[]).map(s=>`${s.ref}·${s.cant}u`).join(" ")}</div>
+                                      </div>
+                                      <div style={{color:C.t4,fontSize:7,flexShrink:0,marginLeft:6}}>{sol.fecha?new Date(sol.fecha).toLocaleTimeString("es-CO",{hour:"2-digit",minute:"2-digit"}):""}</div>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
                               {esFalloPosicion&&<div style={{color:C.red,fontSize:9,marginTop:2,opacity:.7}}>{fmtHora(pos.fallo_ts)||""}</div>}
                             </div>
                             {/* Selector de motivo inline por posición */}

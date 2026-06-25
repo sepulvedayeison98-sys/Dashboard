@@ -601,6 +601,109 @@ function LoginForm({
   }, cargando ? "Cargando datos..." : "Entrar al picking →"))));
 }
 
+// ═══════════ MODAL SELECCIÓN SKU (bajada manual UBI) ═══════════
+function UBIModal({ ubiInfo, operario, onClose, onConfirm }) {
+  const [selSkus, setSelSkus] = React.useState(() => {
+    const m = {};
+    ubiInfo.skus.forEach(s => { m[s.ref] = { checked: true, cant: s.saldo }; });
+    return m;
+  });
+  const toggle = ref => setSelSkus(p => ({ ...p, [ref]: { ...p[ref], checked: !p[ref].checked } }));
+  const setCant = (ref, v) => {
+    const n = Math.max(1, Math.min(selSkus[ref].cant, parseInt(v) || 1));
+    setSelSkus(p => ({ ...p, [ref]: { ...p[ref], cant: n } }));
+  };
+  const seleccionados = ubiInfo.skus.filter(s => selSkus[s.ref]?.checked);
+  const totalSel = seleccionados.reduce((t, s) => t + (selSkus[s.ref]?.cant || s.saldo), 0);
+
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      position: "fixed", inset: 0, zIndex: 9999,
+      background: "rgba(0,0,0,0.75)", display: "flex",
+      alignItems: "flex-end", justifyContent: "center"
+    },
+    onClick: e => { if (e.target === e.currentTarget) onClose(); }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: C.bg1, borderRadius: "18px 18px 0 0",
+      padding: "20px 16px 32px", width: "100%", maxWidth: 480,
+      maxHeight: "85vh", overflowY: "auto"
+    }
+  },
+    /*#__PURE__*/React.createElement("div", {
+      style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }
+    },
+      /*#__PURE__*/React.createElement("div", null,
+        /*#__PURE__*/React.createElement("div", { style: { color: C.t1, fontWeight: 800, fontSize: 16 } }, "Seleccionar SKUs"),
+        /*#__PURE__*/React.createElement("div", { style: { color: C.t3, fontSize: 11, marginTop: 2 } }, "UBI ", ubiInfo.ubi, " · ", operario)
+      ),
+      /*#__PURE__*/React.createElement("button", {
+        onClick: onClose,
+        style: { background: C.bg3, border: "none", borderRadius: 8, color: C.t2, padding: "6px 12px", cursor: "pointer", fontFamily: "inherit", fontSize: 13 }
+      }, "✕")
+    ),
+    ubiInfo.skus.map((s, i) => {
+      const st = selSkus[s.ref] || { checked: false, cant: s.saldo };
+      return /*#__PURE__*/React.createElement("div", {
+        key: i,
+        style: {
+          background: st.checked ? `${C.accent}12` : C.bg2,
+          border: `1px solid ${st.checked ? C.accent : C.bg3}`,
+          borderRadius: 10, padding: "10px 12px", marginBottom: 8,
+          display: "flex", alignItems: "center", gap: 10, cursor: "pointer"
+        },
+        onClick: () => toggle(s.ref)
+      },
+        /*#__PURE__*/React.createElement("div", {
+          style: {
+            width: 20, height: 20, borderRadius: 5, flexShrink: 0,
+            background: st.checked ? C.accent : C.bg3,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            color: C.bg0, fontWeight: 800, fontSize: 12
+          }
+        }, st.checked ? "✓" : ""),
+        /*#__PURE__*/React.createElement("div", { style: { flex: 1, minWidth: 0 } },
+          /*#__PURE__*/React.createElement("div", { style: { color: C.accent, fontWeight: 700, fontSize: 13, fontFamily: "'JetBrains Mono',monospace" } }, s.ref),
+          /*#__PURE__*/React.createElement("div", { style: { color: C.t4, fontSize: 9, marginTop: 1 } }, (s.desc || "").slice(0, 50))
+        ),
+        st.checked ? /*#__PURE__*/React.createElement("div", {
+          style: { display: "flex", alignItems: "center", gap: 6 },
+          onClick: e => e.stopPropagation()
+        },
+          /*#__PURE__*/React.createElement("button", {
+            onClick: () => setCant(s.ref, st.cant - 1),
+            style: { background: C.bg3, border: "none", borderRadius: 5, color: C.t2, width: 24, height: 24, cursor: "pointer", fontFamily: "inherit", fontSize: 14, lineHeight: 1 }
+          }, "−"),
+          /*#__PURE__*/React.createElement("span", { style: { color: C.green, fontWeight: 800, fontSize: 14, minWidth: 28, textAlign: "center", fontFamily: "'JetBrains Mono',monospace" } }, st.cant, "u"),
+          /*#__PURE__*/React.createElement("button", {
+            onClick: () => setCant(s.ref, st.cant + 1),
+            disabled: st.cant >= s.saldo,
+            style: { background: C.bg3, border: "none", borderRadius: 5, color: st.cant >= s.saldo ? C.t4 : C.t2, width: 24, height: 24, cursor: st.cant >= s.saldo ? "not-allowed" : "pointer", fontFamily: "inherit", fontSize: 14, lineHeight: 1 }
+          }, "+")
+        ) : /*#__PURE__*/React.createElement("span", { style: { color: C.t4, fontSize: 12 } }, s.saldo, "u")
+      );
+    }),
+    /*#__PURE__*/React.createElement("div", { style: { marginTop: 16, display: "flex", gap: 10 } },
+      /*#__PURE__*/React.createElement("button", {
+        onClick: onClose,
+        style: { flex: 1, padding: "13px", background: C.bg3, border: "none", borderRadius: 11, color: C.t2, fontWeight: 700, fontSize: 14, cursor: "pointer", fontFamily: "inherit" }
+      }, "Cancelar"),
+      /*#__PURE__*/React.createElement("button", {
+        onClick: () => seleccionados.length > 0 && onConfirm(seleccionados.map(s => ({ ref: s.ref, desc: s.desc, cant: selSkus[s.ref].cant, saldo: s.saldo, cajap: s.cajap }))),
+        disabled: seleccionados.length === 0,
+        style: {
+          flex: 2, padding: "13px",
+          background: seleccionados.length > 0 ? `linear-gradient(135deg,${C.orange},${C.yellow})` : C.bg3,
+          border: "none", borderRadius: 11,
+          color: seleccionados.length > 0 ? C.bg0 : C.t4,
+          fontWeight: 800, fontSize: 14, cursor: seleccionados.length > 0 ? "pointer" : "not-allowed",
+          fontFamily: "inherit"
+        }
+      }, "⬇ Agendar ", totalSel, "u")
+    )
+  ));
+}
+
 // ═══════════ COMPONENTE PRINCIPAL ═══════════
 function PickingApp() {
   const [phase, setPhase] = useState("login"); // login | loading | ready | error
@@ -799,6 +902,7 @@ function PickingApp() {
   const [sortDir, setSortDir] = useState("asc"); // asc | desc
   const [misBajadas, setMisBajadas] = useState([]);
   const [bajadascargando, setBajadasCargando] = useState(false);
+  const [ubiModal, setUbiModal] = useState(null); // null | ubiInfo
 
   // Cargar historial de bajadas manuales (tab "bajadas")
   useEffect(() => {
@@ -1013,44 +1117,61 @@ function PickingApp() {
       [sel.picking]: true
     }));
   };
-  const agendarTurnoUBI = async ubiInfo => {
-    if (!operario || !ubiInfo) return;
+  const agendarTurnoUBI = async (ubiInfo, skusSeleccionados) => {
+    if (!operario || !ubiInfo || !skusSeleccionados?.length) return;
     const k = ubiInfo.ubi;
-    setUbiTurnosEnviados(o => ({
-      ...o,
-      [k]: "loading"
-    }));
-    const totalSaldo = ubiInfo.skus.reduce((t, s) => t + s.saldo, 0);
-    const {
-      error
-    } = await sb.from("turnos").insert({
-      picking: `UBI-${ubiInfo.ubi}`,
-      pedido_siesa: "",
-      cliente: `Bajada manual · ${ubiInfo.ubi}`,
-      ciudad: "ITAGUÍ",
-      operario_solicitante: operario,
-      posiciones: [{
-        ubi: ubiInfo.ubi,
-        calleLetra: ubiInfo.calleLetra,
-        modulo: ubiInfo.modulo,
-        nivel: ubiInfo.nivel,
-        skus: ubiInfo.skus.map(s => ({
-          ref: s.ref,
-          desc: s.desc,
-          cant: s.saldo,
-          saldo: s.saldo
-        })),
-        totalSaldo
-      }],
-      estado: "pendiente",
-      fecha_solicitud: new Date().toISOString(),
-      prioridad: "normal",
-      es_mde: false
-    });
-    setUbiTurnosEnviados(o => ({
-      ...o,
-      [k]: error ? "error" : "ok"
-    }));
+    setUbiTurnosEnviados(o => ({ ...o, [k]: "loading" }));
+    const picking = `UBI-${ubiInfo.ubi}`;
+    const totalSaldo = skusSeleccionados.reduce((t, s) => t + s.cant, 0);
+    const nuevaSolicitud = { operario, fecha: new Date().toISOString(), skus: skusSeleccionados };
+
+    // Buscar turno pendiente existente para esta UBI
+    const { data: existentes } = await _go(`${SUPA_URL}/rest/v1/turnos?picking=eq.${encodeURIComponent(picking)}&estado=eq.pendiente&select=id,posiciones,operario_solicitante`);
+    const existente = existentes?.[0];
+
+    let error;
+    if (existente) {
+      // Merge: agregar solicitud al array solicitantes de la posición existente
+      const pos0 = (existente.posiciones || [])[0] || {};
+      const solicitantes = [...(pos0.solicitantes || [])];
+      // Quitar solicitud previa del mismo operario si existe
+      const idx = solicitantes.findIndex(r => r.operario === operario);
+      if (idx >= 0) solicitantes[idx] = nuevaSolicitud; else solicitantes.push(nuevaSolicitud);
+      // Unión de SKUs: merge por ref
+      const skusMap = {};
+      (pos0.skus || []).forEach(s => { skusMap[s.ref] = { ...s }; });
+      skusSeleccionados.forEach(s => { skusMap[s.ref] = { ...skusMap[s.ref], ...s, cant: s.cant }; });
+      const skusMerged = Object.values(skusMap);
+      const totalMerged = skusMerged.reduce((t, s) => t + (s.cant || 0), 0);
+      const posActualizada = [{ ...pos0, skus: skusMerged, totalSaldo: totalMerged, solicitantes }];
+      ({ error } = await _go(`${SUPA_URL}/rest/v1/turnos?id=eq.${existente.id}`, {
+        method: "PATCH",
+        headers: { ..._H, Prefer: "return=minimal" },
+        body: JSON.stringify({ posiciones: posActualizada, operario_solicitante: operario })
+      }));
+    } else {
+      ({ error } = await sb.from("turnos").insert({
+        picking,
+        pedido_siesa: "",
+        cliente: `Bajada manual · ${ubiInfo.ubi}`,
+        ciudad: "ITAGUÍ",
+        operario_solicitante: operario,
+        posiciones: [{
+          ubi: ubiInfo.ubi,
+          calleLetra: ubiInfo.calleLetra,
+          modulo: ubiInfo.modulo,
+          nivel: ubiInfo.nivel,
+          skus: skusSeleccionados,
+          totalSaldo,
+          solicitantes: [nuevaSolicitud]
+        }],
+        estado: "pendiente",
+        fecha_solicitud: new Date().toISOString(),
+        prioridad: "normal",
+        es_mde: false
+      }));
+    }
+    setUbiTurnosEnviados(o => ({ ...o, [k]: error ? "error" : "ok" }));
   };
   const limpiarBandeja = async () => {
     if (!window.confirm("¿Limpiar todos los turnos completados y fallidos?\nEsta acción no se puede deshacer.")) return;
@@ -3748,7 +3869,7 @@ function PickingApp() {
         fontWeight: 700
       }
     }, "⚠ Error al agendar — intenta de nuevo") : /*#__PURE__*/React.createElement("button", {
-      onClick: () => agendarTurnoUBI(ubiInfo),
+      onClick: () => setUbiModal(ubiInfo),
       disabled: yaEnviado === "loading",
       style: {
         width: "100%",
@@ -3837,7 +3958,18 @@ function PickingApp() {
         ));
       })
     );
-  })()));
+  })()),
+  ubiModal && /*#__PURE__*/React.createElement(UBIModal, {
+    key: ubiModal.ubi,
+    ubiInfo: ubiModal,
+    operario: operario,
+    onClose: () => setUbiModal(null),
+    onConfirm: skusSeleccionados => {
+      setUbiModal(null);
+      agendarTurnoUBI(ubiModal, skusSeleccionados);
+    }
+  })
+  );
 }
 ReactDOM.createRoot(document.getElementById("root")).render(/*#__PURE__*/React.createElement(PickingApp, null));
 </script>
