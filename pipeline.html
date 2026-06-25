@@ -147,7 +147,49 @@ const sb = {
   removeChannel: () => {}
 };
 
-// ═══════════ PALETA ═══════════
+// ═══════════ WEB PUSH (notificaciones con app cerrada) ═══════════
+const VAPID_PUB = "BIkO5rFXvS_7NPyJSWIWyoUhafWswdr0ImaaYV2s8EvHVLiYxkHLQGcWUKOxII5fXlkL9-o4E38oKKy9qwZTspM";
+const _b64ToUint8 = b64 => {
+  const raw = atob(b64.replace(/-/g, "+").replace(/_/g, "/"));
+  const out = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+  return out;
+};
+const suscribirPush = async setPushOk => {
+  try {
+    if (!("PushManager" in window)) { setPushOk && setPushOk(false); return false; }
+    const reg = await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: _b64ToUint8(VAPID_PUB) });
+    const j = sub.toJSON();
+    const { error } = await _go(`${SUPA_URL}/rest/v1/push_subscriptions`, {
+      method: "POST",
+      headers: { ..._H, Prefer: "resolution=merge-duplicates" },
+      body: JSON.stringify({ endpoint: j.endpoint, p256dh: j.keys.p256dh, auth: j.keys.auth, rol: "operario" })
+    });
+    if (error) { console.warn("push sub:", error); setPushOk && setPushOk(false); return false; }
+    setPushOk && setPushOk(true); return true;
+  } catch (e) { console.warn("push sub:", e); setPushOk && setPushOk(false); return false; }
+};
+const pedirPermisoPipeline = async setPushOk => {
+  if (!("Notification" in window)) { alert('Instala la app en pantalla de inicio para recibir notificaciones.'); return; }
+  if (Notification.permission === "denied") { alert("Notificaciones bloqueadas. Ve a Ajustes → Notificaciones para habilitarlas."); return; }
+  if (Notification.permission === "granted") { await suscribirPush(setPushOk); return; }
+  const p = await Notification.requestPermission();
+  if (p === "granted") await suscribirPush(setPushOk);
+  else setPushOk && setPushOk(false);
+};
+const pushOperario = (turno, tipo) => {
+  const titulo = tipo === "completado"
+    ? `✅ Turno completado · ${turno.picking || ""}`
+    : `⚠️ Fallo en turno · ${turno.picking || ""}`;
+  const cuerpo = `${turno.montacarguista || "Montacargas"}${turno.ciudad ? ` · ${turno.ciudad}` : ""}`;
+  fetch(`${SUPA_URL}/functions/v1/hyper-task`, {
+    method: "POST",
+    headers: { ..._H, "Content-Type": "application/json" },
+    body: JSON.stringify({ record: { picking: turno.picking, cliente: turno.cliente, ciudad: turno.ciudad, montacarguista: turno.montacarguista }, titulo_override: titulo, cuerpo_override: cuerpo, target_rol: "operario" })
+  }).catch(() => {});
+};
 const C = {
   bg0: "#05080f",
   bg1: "#080d19",
@@ -574,7 +616,8 @@ function PickingApp() {
   const [skuDetAbierto, setSkuDetAbierto] = useState({}); // SKUs expandidos en tab SKUs
   const [hechos, setHechos] = useState({}); // paradas completadas
   const [turnoActivo, setTurnoActivo] = useState(null);
-  const [notifs, setNotifs] = useState([]); // notificaciones en tiempo real del montacarguista
+  const [notifs, setNotifs] = useState([]);
+  const [pushOk, setPushOk] = useState(null);
   const prevTurnoRef = useRef(null);
   const cargar = useCallback(async () => {
     setPhase("loading");
@@ -607,6 +650,16 @@ function PickingApp() {
   useEffect(() => {
     if (operario) cargar();
   }, [cargar, operario]);
+
+  // Suscripción push al iniciar sesión
+  useEffect(() => {
+    if (!operario) return;
+    if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+      suscribirPush(setPushOk);
+    } else {
+      setPushOk(!("Notification" in window) || !("PushManager" in window) ? false : null);
+    }
+  }, [operario]);
 
   // ── Supabase: asignaciones en tiempo real ──
   useEffect(() => {
@@ -683,6 +736,10 @@ function PickingApp() {
             msg: `✅ Turno completado`,
             by: nuevo.montacarguista || "Montacargas"
           }]);
+          pushOperario(nuevo, 'completado');
+        }
+        if (nuevo.estado === 'fallido' && prev.estado !== 'fallido') {
+          pushOperario(nuevo, 'fallido');
         }
       }
       prevTurnoRef.current = nuevo;
@@ -2581,6 +2638,19 @@ function PickingApp() {
       alignItems: "center"
     }
   }, /*#__PURE__*/React.createElement("button", {
+    onClick: () => pedirPermisoPipeline(setPushOk),
+    title: pushOk === true ? "Notificaciones activas — te avisamos cuando el montacargas termina" : "Activar notificaciones de fondo",
+    style: {
+      background: `${pushOk === true ? C.green : pushOk === false && typeof Notification !== "undefined" && Notification.permission === "denied" ? C.red : C.yellow}18`,
+      border: `1px solid ${pushOk === true ? C.green : pushOk === false && typeof Notification !== "undefined" && Notification.permission === "denied" ? C.red : C.yellow}40`,
+      color: pushOk === true ? C.green : pushOk === false && typeof Notification !== "undefined" && Notification.permission === "denied" ? C.red : C.yellow,
+      borderRadius: 8,
+      padding: "7px 10px",
+      fontSize: 14,
+      cursor: "pointer",
+      opacity: pushOk === null ? 0.5 : 1
+    }
+  }, pushOk === true ? "🔔✓" : "🔔"), /*#__PURE__*/React.createElement("button", {
     onClick: cargar,
     style: {
       background: C.bg3,

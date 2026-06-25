@@ -108,7 +108,7 @@ const suscribirPush=async(setPushOk)=>{
     const{error}=await _go(`${SUPA_URL}/rest/v1/push_subscriptions`,{
       method:"POST",
       headers:{..._H,Prefer:"resolution=merge-duplicates"},
-      body:JSON.stringify({endpoint:j.endpoint,p256dh:j.keys.p256dh,auth:j.keys.auth})
+      body:JSON.stringify({endpoint:j.endpoint,p256dh:j.keys.p256dh,auth:j.keys.auth,rol:"montacarguista"})
     });
     if(error){console.warn("push sub save:",error);setPushOk&&setPushOk(false);return false;}
     setPushOk&&setPushOk(true);
