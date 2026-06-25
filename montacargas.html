@@ -210,7 +210,7 @@ function MontacargasApp(){
         }))]);
         // Llamar Edge Function desde browser como respaldo del trigger SQL
         const t0=nuevos[0];
-        fetch(`${SUPA_URL}/functions/v1/notify-montacarguistas`,{
+        fetch(`${SUPA_URL}/functions/v1/hyper-task`,{
           method:"POST",
           headers:{..._H,"Content-Type":"application/json"},
           body:JSON.stringify({record:{picking:t0.picking,cliente:t0.cliente,ciudad:t0.ciudad,es_mde:t0.es_mde,prioridad:t0.prioridad}})
