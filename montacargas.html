@@ -175,6 +175,7 @@ function MontacargasApp(){
   const [reportandoPos,setReportandoPos]=useState({}); // {turnoId-posIdx: true}
   const [toasts,setToasts]=useState([]);
   const [pushOk,setPushOk]=useState(null); // null=verificando, true=suscrito, false=sin push
+  const [verTodos,setVerTodos]=useState(false);
   const timerRef=useRef(null);
   const prevPendRef=useRef(0);
   const misEnProcesoRef=useRef(new Set());
@@ -442,10 +443,10 @@ function MontacargasApp(){
     :agrupadoPorUBI.length;
   const listaRaw=tab==="agrupado"?[]:porEstado(tab);
   const unaHoraAtras=Date.now()-3600000;
-  const lista=tab==="completado"
+  const lista=tab==="completado"&&!verTodos
     ?listaRaw.filter(t=>!t.fecha_completado||new Date(t.fecha_completado).getTime()>unaHoraAtras)
     :listaRaw;
-  const nOcultos=tab==="completado"?listaRaw.length-lista.length:0;
+  const nOcultos=tab==="completado"&&!verTodos?listaRaw.length-lista.length:0;
 
   return(
     <div style={{minHeight:"100vh",paddingBottom:24}}>
@@ -523,10 +524,18 @@ function MontacargasApp(){
         {tab!=="agrupado"&&(
           <>
             {tab==="completado"&&listaRaw.length>0&&(
-              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8,padding:"0 2px"}}>
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8,padding:"0 2px",gap:6}}>
                 {nOcultos>0
-                  ?<div style={{fontSize:10,color:C.t3}}>+{nOcultos} oculto{nOcultos!==1?"s":""} (&gt;1h)</div>
-                  :<div/>
+                  ?<button onClick={()=>setVerTodos(true)}
+                      style={{background:`${C.accent}15`,border:`1px solid ${C.accent}35`,color:C.accent,borderRadius:8,padding:"6px 11px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+                      +{nOcultos} oculto{nOcultos!==1?"s":""} · Ver todos
+                    </button>
+                  :verTodos
+                    ?<button onClick={()=>setVerTodos(false)}
+                        style={{background:C.bg3,border:`1px solid ${C.b0}`,color:C.t3,borderRadius:8,padding:"6px 11px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+                        Mostrar solo &lt;1h
+                      </button>
+                    :<div/>
                 }
                 <button onClick={limpiarCompletados}
                   style={{background:`${C.red}15`,border:`1px solid ${C.red}35`,color:C.red,borderRadius:8,padding:"6px 13px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit",letterSpacing:".3px"}}>
