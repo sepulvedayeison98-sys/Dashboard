@@ -737,6 +737,9 @@ function PickingApp() {
   const [ubiTurnosEnviados, setUbiTurnosEnviados] = useState({});
   const [tab, setTab] = useState("pedidos"); // pedidos | skus | viajes | ubi | bajadas
   const [filtroClasif, setFiltroClasif] = useState(""); // "" | despachable | parcial | reabasto | ruptura
+  const [filtroTipo, setFiltroTipo] = useState(""); // "" | PDV | REQ | PDE
+  const [sortBy, setSortBy] = useState("fecha"); // fecha | unidades | lineas
+  const [sortDir, setSortDir] = useState("asc"); // asc | desc
   const [misBajadas, setMisBajadas] = useState([]);
   const [bajadascargando, setBajadasCargando] = useState(false);
 
@@ -2740,7 +2743,19 @@ function PickingApp() {
         opacity: .6
       }
     }, "(", cnt, ")"));
-  }))) : tab === "ubi" ? /*#__PURE__*/React.createElement("input", {
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {display:"flex", gap:4, flexWrap:"wrap", marginTop:5}
+  }, [{k:"",l:"Tipo: Todos",c:C.t3},{k:"PDV",l:"PDV",c:"#a855f7"},{k:"REQ",l:"REQ",c:C.teal},{k:"PDE",l:"PDE",c:C.orange}].map(t => {
+    const cnt2 = data ? data.pedidos.filter(p => !t.k || p.tipoDocto === t.k).length : 0;
+    return /*#__PURE__*/React.createElement("button", {key:t.k, onClick:()=>setFiltroTipo(t.k), style:{padding:"5px 10px",borderRadius:7,border:`1px solid ${filtroTipo===t.k?t.c:C.b0}`,background:filtroTipo===t.k?`${t.c}20`:C.bg2,color:filtroTipo===t.k?t.c:C.t3,fontSize:10,fontWeight:700,cursor:"pointer"}}, t.l, t.k && /*#__PURE__*/React.createElement("span",{style:{opacity:.6}}," (", cnt2, ")"));
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {display:"flex", gap:4, flexWrap:"wrap", marginTop:5, borderTop:`1px solid ${C.b0}`, paddingTop:5}
+  }, [{k:"fecha",l:"📅 Fecha"},{k:"unidades",l:"📦 Unidades"},{k:"lineas",l:"# Líneas"}].map(s => /*#__PURE__*/React.createElement("button", {
+    key:s.k,
+    onClick:()=>{ if(sortBy===s.k) setSortDir(d=>d==="asc"?"desc":"asc"); else{setSortBy(s.k);setSortDir("asc");} },
+    style:{padding:"5px 10px",borderRadius:7,border:`1px solid ${sortBy===s.k?C.teal:C.b0}`,background:sortBy===s.k?`${C.teal}20`:C.bg2,color:sortBy===s.k?C.teal:C.t3,fontSize:10,fontWeight:700,cursor:"pointer"}
+  }, s.l, " ", sortBy===s.k?(sortDir==="asc"?"↑":"↓"):""))
+  ))) : tab === "ubi" ? /*#__PURE__*/React.createElement("input", {
     value: buscaUBI,
     onChange: e => setBuscaUBI(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6)),
     placeholder: "📍 Escribe UBI · ej: B0101",
@@ -2775,9 +2790,16 @@ function PickingApp() {
       padding: "14px 12px"
     }
   }, tab === "pedidos" && (() => {
-    const base = busca.trim() ? resultados : filtroClasif ? data?.pedidos || [] : [];
-    const lista = filtroClasif ? base.filter(p => p.clasif === filtroClasif) : base;
-    if (!busca.trim() && !filtroClasif) return /*#__PURE__*/React.createElement("div", {
+    const base = busca.trim() ? resultados : (filtroClasif || filtroTipo) ? data?.pedidos || [] : [];
+    const filtrada = base.filter(p => (!filtroClasif || p.clasif === filtroClasif) && (!filtroTipo || p.tipoDocto === filtroTipo));
+    const lista = [...filtrada].sort((a, b) => {
+      let va, vb;
+      if (sortBy === "unidades") { va = a.uni || 0; vb = b.uni || 0; }
+      else if (sortBy === "lineas") { va = a.nLineas || 0; vb = b.nLineas || 0; }
+      else { va = a.fecha || ""; vb = b.fecha || ""; }
+      return sortDir === "asc" ? (va > vb ? 1 : -1) : (va < vb ? 1 : -1);
+    });
+    if (!busca.trim() && !filtroClasif && !filtroTipo) return /*#__PURE__*/React.createElement("div", {
       style: {
         textAlign: "center",
         color: C.t3,
