@@ -603,18 +603,28 @@ function LoginForm({
 
 // ═══════════ MODAL SELECCIÓN SKU (bajada manual UBI) ═══════════
 function UBIModal({ ubiInfo, operario, onClose, onConfirm }) {
+  // Agregar SKUs duplicados por ref (mismo ref puede aparecer varias veces, uno por picking)
+  const skus = React.useMemo(() => {
+    const map = {};
+    ubiInfo.skus.forEach(s => {
+      if (!map[s.ref]) map[s.ref] = { ref: s.ref, desc: s.desc, saldo: 0, cajap: s.cajap };
+      map[s.ref].saldo += s.saldo;
+    });
+    return Object.values(map);
+  }, [ubiInfo]);
+
   const [selSkus, setSelSkus] = React.useState(() => {
     const m = {};
-    ubiInfo.skus.forEach(s => { m[s.ref] = { checked: true, cant: s.saldo }; });
+    skus.forEach(s => { m[s.ref] = { checked: true, cant: s.saldo }; });
     return m;
   });
   const toggle = ref => setSelSkus(p => ({ ...p, [ref]: { ...p[ref], checked: !p[ref].checked } }));
   const setCant = (ref, v) => {
-    const maxSaldo = ubiInfo.skus.find(s => s.ref === ref)?.saldo ?? 999;
+    const maxSaldo = skus.find(s => s.ref === ref)?.saldo ?? 999;
     const n = Math.max(1, Math.min(maxSaldo, parseInt(v) || 1));
     setSelSkus(p => ({ ...p, [ref]: { ...p[ref], cant: n } }));
   };
-  const seleccionados = ubiInfo.skus.filter(s => selSkus[s.ref]?.checked);
+  const seleccionados = skus.filter(s => selSkus[s.ref]?.checked);
   const totalSel = seleccionados.reduce((t, s) => t + (selSkus[s.ref]?.cant || s.saldo), 0);
 
   return /*#__PURE__*/React.createElement("div", {
@@ -643,7 +653,7 @@ function UBIModal({ ubiInfo, operario, onClose, onConfirm }) {
         style: { background: C.bg3, border: "none", borderRadius: 8, color: C.t2, padding: "6px 12px", cursor: "pointer", fontFamily: "inherit", fontSize: 13 }
       }, "✕")
     ),
-    ubiInfo.skus.map((s, i) => {
+    skus.map((s, i) => {
       const st = selSkus[s.ref] || { checked: false, cant: s.saldo };
       return /*#__PURE__*/React.createElement("div", {
         key: i,
