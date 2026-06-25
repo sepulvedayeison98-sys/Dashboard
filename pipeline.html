@@ -685,7 +685,18 @@ function UBIModal({ ubiInfo, operario, onClose, onConfirm }) {
             onClick: () => setCant(s.ref, st.cant - 1),
             style: { background: C.bg3, border: "none", borderRadius: 5, color: C.t2, width: 24, height: 24, cursor: "pointer", fontFamily: "inherit", fontSize: 14, lineHeight: 1 }
           }, "−"),
-          /*#__PURE__*/React.createElement("span", { style: { color: C.green, fontWeight: 800, fontSize: 14, minWidth: 28, textAlign: "center", fontFamily: "'JetBrains Mono',monospace" } }, st.cant, "u"),
+          /*#__PURE__*/React.createElement("input", {
+            key: s.ref + "-" + st.cant,
+            type: "text",
+            inputMode: "numeric",
+            pattern: "[0-9]*",
+            defaultValue: st.cant,
+            onFocus: function(e) { e.target.select(); },
+            onBlur: function(e) { setCant(s.ref, e.target.value); },
+            onKeyDown: function(e) { if (e.key === "Enter") e.target.blur(); },
+            style: { color: C.green, fontWeight: 800, fontSize: 14, width: 40, textAlign: "center", fontFamily: "'JetBrains Mono',monospace", background: "transparent", border: "1px solid " + C.green, borderRadius: 6, padding: "3px 0", outline: "none", WebkitAppearance: "none" }
+          }),
+          /*#__PURE__*/React.createElement("span", { style: { color: C.green, fontWeight: 800, fontSize: 12 } }, "u"),
           /*#__PURE__*/React.createElement("button", {
             onClick: () => setCant(s.ref, st.cant + 1),
             disabled: st.cant >= s.saldo,
