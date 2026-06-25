@@ -2717,7 +2717,18 @@ function PickingApp() {
     style: {
       minHeight: "100vh"
     }
-  }, /*#__PURE__*/React.createElement("div", {
+  },
+  ubiModal && /*#__PURE__*/React.createElement(UBIModal, {
+    key: ubiModal.ubi,
+    ubiInfo: ubiModal,
+    operario: operario,
+    onClose: () => setUbiModal(null),
+    onConfirm: skusSeleccionados => {
+      setUbiModal(null);
+      agendarTurnoUBI(ubiModal, skusSeleccionados);
+    }
+  }),
+  /*#__PURE__*/React.createElement("div", {
     style: {
       background: C.bg1,
       borderBottom: `1px solid ${C.b0}`,
@@ -2947,7 +2958,7 @@ function PickingApp() {
     onClick:()=>{ if(sortBy===s.k) setSortDir(d=>d==="asc"?"desc":"asc"); else{setSortBy(s.k);setSortDir("asc");} },
     style:{padding:"5px 10px",borderRadius:7,border:`1px solid ${sortBy===s.k?C.teal:C.b0}`,background:sortBy===s.k?`${C.teal}20`:C.bg2,color:sortBy===s.k?C.teal:C.t3,fontSize:10,fontWeight:700,cursor:"pointer"}
   }, s.l, " ", sortBy===s.k?(sortDir==="asc"?"↑":"↓"):""))
-  ))) : tab === "ubi" ? /*#__PURE__*/React.createElement("input", {
+  )))) : tab === "ubi" ? /*#__PURE__*/React.createElement("input", {
     value: buscaUBI,
     onChange: e => setBuscaUBI(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6)),
     placeholder: "📍 Escribe UBI · ej: B0101",
@@ -3959,18 +3970,7 @@ function PickingApp() {
         ));
       })
     );
-  })()),
-  ubiModal && /*#__PURE__*/React.createElement(UBIModal, {
-    key: ubiModal.ubi,
-    ubiInfo: ubiModal,
-    operario: operario,
-    onClose: () => setUbiModal(null),
-    onConfirm: skusSeleccionados => {
-      setUbiModal(null);
-      agendarTurnoUBI(ubiModal, skusSeleccionados);
-    }
-  })
-  );
+  })()));
 }
 ReactDOM.createRoot(document.getElementById("root")).render(/*#__PURE__*/React.createElement(PickingApp, null));
 </script>
