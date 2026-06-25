@@ -610,7 +610,8 @@ function UBIModal({ ubiInfo, operario, onClose, onConfirm }) {
   });
   const toggle = ref => setSelSkus(p => ({ ...p, [ref]: { ...p[ref], checked: !p[ref].checked } }));
   const setCant = (ref, v) => {
-    const n = Math.max(1, Math.min(selSkus[ref].cant, parseInt(v) || 1));
+    const maxSaldo = ubiInfo.skus.find(s => s.ref === ref)?.saldo ?? 999;
+    const n = Math.max(1, Math.min(maxSaldo, parseInt(v) || 1));
     setSelSkus(p => ({ ...p, [ref]: { ...p[ref], cant: n } }));
   };
   const seleccionados = ubiInfo.skus.filter(s => selSkus[s.ref]?.checked);
