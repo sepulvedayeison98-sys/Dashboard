@@ -603,7 +603,6 @@ function LoginForm({
 
 // ═══════════ MODAL SELECCIÓN SKU (bajada manual UBI) ═══════════
 function UBIModal({ ubiInfo, operario, onClose, onConfirm }) {
-  // Agregar SKUs duplicados por ref (mismo ref puede aparecer varias veces, uno por picking)
   const skus = React.useMemo(() => {
     const map = {};
     ubiInfo.skus.forEach(s => {
@@ -612,6 +611,8 @@ function UBIModal({ ubiInfo, operario, onClose, onConfirm }) {
     });
     return Object.values(map);
   }, [ubiInfo]);
+
+  const isManual = skus.length === 0;
 
   const [selSkus, setSelSkus] = React.useState(() => {
     const m = {};
@@ -624,8 +625,32 @@ function UBIModal({ ubiInfo, operario, onClose, onConfirm }) {
     const n = Math.max(1, Math.min(maxSaldo, parseInt(v) || 1));
     setSelSkus(p => ({ ...p, [ref]: { ...p[ref], cant: n } }));
   };
+
+  const [manualSkus, setManualSkus] = React.useState([]);
+  const [newRef, setNewRef] = React.useState("");
+  const [newCant, setNewCant] = React.useState("1");
+  const addManual = () => {
+    const ref = newRef.trim().toUpperCase();
+    const cant = Math.max(1, parseInt(newCant) || 1);
+    if (!ref) return;
+    setManualSkus(prev => {
+      const idx = prev.findIndex(s => s.ref === ref);
+      if (idx >= 0) return prev.map((s, i) => i === idx ? { ...s, cant: s.cant + cant } : s);
+      return [...prev, { ref, desc: "", cant, saldo: cant, cajap: "" }];
+    });
+    setNewRef(""); setNewCant("1");
+  };
+  const removeManual = ref => setManualSkus(prev => prev.filter(s => s.ref !== ref));
+  const updateManualCant = (ref, v) => {
+    const n = Math.max(1, parseInt(v) || 1);
+    setManualSkus(prev => prev.map(s => s.ref === ref ? { ...s, cant: n, saldo: n } : s));
+  };
+
   const seleccionados = skus.filter(s => selSkus[s.ref]?.checked);
-  const totalSel = seleccionados.reduce((t, s) => t + (selSkus[s.ref]?.cant || s.saldo), 0);
+  const totalSel = isManual
+    ? manualSkus.reduce((t, s) => t + s.cant, 0)
+    : seleccionados.reduce((t, s) => t + (selSkus[s.ref]?.cant || s.saldo), 0);
+  const canConfirm = isManual ? manualSkus.length > 0 : seleccionados.length > 0;
 
   return /*#__PURE__*/React.createElement("div", {
     style: {
@@ -645,7 +670,7 @@ function UBIModal({ ubiInfo, operario, onClose, onConfirm }) {
       style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }
     },
       /*#__PURE__*/React.createElement("div", null,
-        /*#__PURE__*/React.createElement("div", { style: { color: C.t1, fontWeight: 800, fontSize: 16 } }, "Seleccionar SKUs"),
+        /*#__PURE__*/React.createElement("div", { style: { color: C.t1, fontWeight: 800, fontSize: 16 } }, isManual ? "Ingresar SKUs manual" : "Seleccionar SKUs"),
         /*#__PURE__*/React.createElement("div", { style: { color: C.t3, fontSize: 11, marginTop: 2 } }, "UBI ", ubiInfo.ubi, " · ", operario)
       ),
       /*#__PURE__*/React.createElement("button", {
@@ -653,6 +678,66 @@ function UBIModal({ ubiInfo, operario, onClose, onConfirm }) {
         style: { background: C.bg3, border: "none", borderRadius: 8, color: C.t2, padding: "6px 12px", cursor: "pointer", fontFamily: "inherit", fontSize: 13 }
       }, "✕")
     ),
+    isManual ? /*#__PURE__*/React.createElement("div", null,
+      /*#__PURE__*/React.createElement("div", {
+        style: { background: `${C.yellow}15`, border: `1px solid ${C.yellow}40`, borderRadius: 8, padding: "8px 12px", marginBottom: 14, color: C.yellow, fontSize: 11, fontWeight: 600 }
+      }, "⚠️ Sin stock ICH registrado — ingresa los SKUs a bajar"),
+      /*#__PURE__*/React.createElement("div", { style: { display: "flex", gap: 6, marginBottom: 10 } },
+        /*#__PURE__*/React.createElement("input", {
+          value: newRef,
+          onChange: e => setNewRef(e.target.value.replace(/[^0-9A-Za-z]/g, "")),
+          onFocus: e => e.target.select(),
+          onKeyDown: e => { if (e.key === "Enter") addManual(); },
+          placeholder: "Ref SKU",
+          inputMode: "numeric",
+          style: { flex: 2, background: C.bg2, border: `1px solid ${C.b0}`, borderRadius: 8, padding: "10px", color: C.t1, fontSize: 13, fontFamily: "'JetBrains Mono',monospace", outline: "none" }
+        }),
+        /*#__PURE__*/React.createElement("input", {
+          value: newCant,
+          onChange: e => setNewCant(e.target.value.replace(/[^0-9]/g, "")),
+          onFocus: e => e.target.select(),
+          onKeyDown: e => { if (e.key === "Enter") addManual(); },
+          placeholder: "Cant",
+          inputMode: "numeric",
+          style: { flex: 1, background: C.bg2, border: `1px solid ${C.b0}`, borderRadius: 8, padding: "10px 8px", color: C.green, fontSize: 13, fontWeight: 800, textAlign: "center", fontFamily: "'JetBrains Mono',monospace", outline: "none" }
+        }),
+        /*#__PURE__*/React.createElement("button", {
+          onClick: addManual,
+          style: { background: `${C.accent}25`, border: `1px solid ${C.accent}`, borderRadius: 8, color: C.accent, fontWeight: 800, fontSize: 20, width: 44, cursor: "pointer", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }
+        }, "+")
+      ),
+      manualSkus.length === 0
+        ? /*#__PURE__*/React.createElement("div", { style: { textAlign: "center", color: C.t4, fontSize: 12, padding: "24px 0" } }, "Agrega los SKUs que necesitas bajar")
+        : manualSkus.map((s, i) => /*#__PURE__*/React.createElement("div", {
+            key: s.ref,
+            style: { background: `${C.accent}12`, border: `1px solid ${C.accent}40`, borderRadius: 10, padding: "10px 12px", marginBottom: 8, display: "flex", alignItems: "center", gap: 10 }
+          },
+            /*#__PURE__*/React.createElement("div", { style: { flex: 1 } },
+              /*#__PURE__*/React.createElement("div", { style: { color: C.accent, fontWeight: 700, fontSize: 14, fontFamily: "'JetBrains Mono',monospace" } }, s.ref)
+            ),
+            /*#__PURE__*/React.createElement("button", {
+              onClick: () => updateManualCant(s.ref, s.cant - 1),
+              style: { background: C.bg3, border: "none", borderRadius: 5, color: C.t2, width: 26, height: 26, cursor: "pointer", fontSize: 16, lineHeight: 1 }
+            }, "−"),
+            /*#__PURE__*/React.createElement("input", {
+              key: s.ref + "-" + s.cant,
+              type: "text", inputMode: "numeric", defaultValue: s.cant,
+              onFocus: e => e.target.select(),
+              onBlur: e => updateManualCant(s.ref, e.target.value),
+              onKeyDown: e => { if (e.key === "Enter") e.target.blur(); },
+              style: { color: C.green, fontWeight: 800, fontSize: 14, width: 40, textAlign: "center", fontFamily: "'JetBrains Mono',monospace", background: "transparent", border: "1px solid " + C.green, borderRadius: 6, padding: "3px 0", outline: "none" }
+            }),
+            /*#__PURE__*/React.createElement("span", { style: { color: C.green, fontWeight: 800, fontSize: 12 } }, "u"),
+            /*#__PURE__*/React.createElement("button", {
+              onClick: () => updateManualCant(s.ref, s.cant + 1),
+              style: { background: C.bg3, border: "none", borderRadius: 5, color: C.t2, width: 26, height: 26, cursor: "pointer", fontSize: 16, lineHeight: 1 }
+            }, "+"),
+            /*#__PURE__*/React.createElement("button", {
+              onClick: () => removeManual(s.ref),
+              style: { background: `${C.red}20`, border: "none", borderRadius: 6, color: C.red, width: 26, height: 26, cursor: "pointer", fontSize: 13, fontWeight: 800, marginLeft: 2 }
+            }, "✕")
+          ))
+    ) :
     skus.map((s, i) => {
       const st = selSkus[s.ref] || { checked: false, cant: s.saldo };
       return /*#__PURE__*/React.createElement("div", {
@@ -687,10 +772,7 @@ function UBIModal({ ubiInfo, operario, onClose, onConfirm }) {
           }, "−"),
           /*#__PURE__*/React.createElement("input", {
             key: s.ref + "-" + st.cant,
-            type: "text",
-            inputMode: "numeric",
-            pattern: "[0-9]*",
-            defaultValue: st.cant,
+            type: "text", inputMode: "numeric", pattern: "[0-9]*", defaultValue: st.cant,
             onFocus: function(e) { e.target.select(); },
             onBlur: function(e) { setCant(s.ref, e.target.value); },
             onKeyDown: function(e) { if (e.key === "Enter") e.target.blur(); },
@@ -711,14 +793,18 @@ function UBIModal({ ubiInfo, operario, onClose, onConfirm }) {
         style: { flex: 1, padding: "13px", background: C.bg3, border: "none", borderRadius: 11, color: C.t2, fontWeight: 700, fontSize: 14, cursor: "pointer", fontFamily: "inherit" }
       }, "Cancelar"),
       /*#__PURE__*/React.createElement("button", {
-        onClick: () => seleccionados.length > 0 && onConfirm(seleccionados.map(s => ({ ref: s.ref, desc: s.desc, cant: selSkus[s.ref].cant, saldo: s.saldo, cajap: s.cajap }))),
-        disabled: seleccionados.length === 0,
+        onClick: () => canConfirm && onConfirm(
+          isManual
+            ? manualSkus
+            : seleccionados.map(s => ({ ref: s.ref, desc: s.desc, cant: selSkus[s.ref].cant, saldo: s.saldo, cajap: s.cajap }))
+        ),
+        disabled: !canConfirm,
         style: {
           flex: 2, padding: "13px",
-          background: seleccionados.length > 0 ? `linear-gradient(135deg,${C.orange},${C.yellow})` : C.bg3,
+          background: canConfirm ? `linear-gradient(135deg,${C.orange},${C.yellow})` : C.bg3,
           border: "none", borderRadius: 11,
-          color: seleccionados.length > 0 ? C.bg0 : C.t4,
-          fontWeight: 800, fontSize: 14, cursor: seleccionados.length > 0 ? "pointer" : "not-allowed",
+          color: canConfirm ? C.bg0 : C.t4,
+          fontWeight: 800, fontSize: 14, cursor: canConfirm ? "pointer" : "not-allowed",
           fontFamily: "inherit"
         }
       }, "⬇ Agendar ", totalSel, "u")
@@ -3731,30 +3817,23 @@ function PickingApp() {
         margin: "0 auto"
       }
     }, "Escribe una UBI para ver qué hay ahí y agendar su bajada · ej: B0101, C0203"));
-    if (!ubiInfo) return /*#__PURE__*/React.createElement("div", {
-      style: {
-        textAlign: "center",
-        color: C.t3,
-        padding: "40px 20px"
-      }
-    }, /*#__PURE__*/React.createElement("div", {
-      style: {
-        fontSize: 36,
-        marginBottom: 12
-      }
-    }, "🔍"), /*#__PURE__*/React.createElement("div", {
-      style: {
-        fontSize: 13,
-        color: C.t2,
-        fontFamily: "'JetBrains Mono',monospace"
-      }
-    }, q), /*#__PURE__*/React.createElement("div", {
-      style: {
-        fontSize: 11,
-        color: C.t4,
-        marginTop: 8
-      }
-    }, "No hay stock ICH en esta posición"));
+    if (!ubiInfo) return /*#__PURE__*/React.createElement("div", { style: { paddingTop: 8 } },
+      /*#__PURE__*/React.createElement("div", {
+        style: { background: C.bg2, borderRadius: 13, border: `1px solid ${C.b0}`, borderLeft: `4px solid ${C.t4}`, padding: "16px" }
+      },
+        /*#__PURE__*/React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 12, marginBottom: 14 } },
+          /*#__PURE__*/React.createElement("div", { style: { fontSize: 30 } }, "📦"),
+          /*#__PURE__*/React.createElement("div", null,
+            /*#__PURE__*/React.createElement("div", { style: { fontFamily: "'JetBrains Mono',monospace", color: C.t1, fontWeight: 800, fontSize: 20 } }, q),
+            /*#__PURE__*/React.createElement("div", { style: { color: C.t4, fontSize: 11, marginTop: 3 } }, "Sin stock ICH registrado en esta posición")
+          )
+        ),
+        /*#__PURE__*/React.createElement("button", {
+          onClick: () => setUbiModal({ ubi: q, calleLetra: q[0] || "", modulo: parseInt(q.slice(1, 3)) || 0, nivel: parseInt(q.slice(3, 4)) || 0, skus: [] }),
+          style: { width: "100%", padding: "13px", background: `linear-gradient(135deg,${C.accent},${C.purple})`, border: "none", borderRadius: 11, color: C.bg0, fontWeight: 800, fontSize: 14, cursor: "pointer", fontFamily: "inherit" }
+        }, "⬇ Agendar bajada manual")
+      )
+    );
     return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
       style: {
         background: C.bg2,
