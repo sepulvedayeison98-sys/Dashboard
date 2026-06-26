@@ -449,17 +449,17 @@ function MontacargasApp(){
   const nOcultos=tab==="completado"&&!verTodos?listaRaw.length-lista.length:0;
 
   // Agrupar pendientes por operario_solicitante
-  const listaItems=React.useMemo(()=>{
-    if(tab!=="pendiente"){return lista.map((t,i)=>({type:"turno",t,numLabel:i+1}));}
+  const listaItems=(()=>{
+    if(tab!=="pendiente")return lista.map((t,i)=>({type:"turno",t,numLabel:i+1}));
     const grupos={};
     lista.forEach(t=>{const k=t.operario_solicitante||"—";if(!grupos[k])grupos[k]=[];grupos[k].push(t);});
     const keys=Object.keys(grupos);
-    if(keys.length<=1){return lista.map((t,i)=>({type:"turno",t,numLabel:i+1}));}
+    if(keys.length<=1)return lista.map((t,i)=>({type:"turno",t,numLabel:i+1}));
     return keys.flatMap(k=>[
       {type:"header",operario:k,count:grupos[k].length},
       ...grupos[k].map((t,gi)=>({type:"turno",t,numLabel:gi+1}))
     ]);
-  },[lista,tab]);
+  })();
 
   return(
     <div style={{minHeight:"100vh",paddingBottom:24}}>
