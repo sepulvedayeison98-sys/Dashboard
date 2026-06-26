@@ -448,7 +448,9 @@ function MontacargasApp(){
   const nRuta=misTurnosActivos.length>0
     ?agrupadoPorUBI.filter(u=>!u.posiciones.every(p=>p.bajada||p.fallo)).length
     :agrupadoPorUBI.length;
-  const listaRaw=tab==="agrupado"?[]:porEstado(tab);
+  const listaRaw=tab==="agrupado"?[]:tab==="completado"
+    ?porEstado(tab).sort((a,b)=>new Date(b.fecha_completado||0)-new Date(a.fecha_completado||0))
+    :porEstado(tab);
   const unaHoraAtras=Date.now()-3600000;
   const lista=tab==="completado"&&!verTodos
     ?listaRaw.filter(t=>!t.fecha_completado||new Date(t.fecha_completado).getTime()>unaHoraAtras)
