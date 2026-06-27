@@ -463,7 +463,9 @@ function MontacargasApp(){
     const grupos={};
     lista.forEach(t=>{const k=t.operario_solicitante||"—";if(!grupos[k])grupos[k]=[];grupos[k].push(t);});
     const keys=Object.keys(grupos);
-    if(keys.length<=1)return lista.map((t,i)=>({type:"turno",t,numLabel:i+1}));
+    // Mostrar header si cualquier operario tiene >1 turno (aunque sea el único)
+    const necesitaHeader=keys.some(k=>grupos[k].length>1);
+    if(!necesitaHeader)return lista.map((t,i)=>({type:"turno",t,numLabel:i+1}));
     return keys.flatMap(k=>[
       {type:"header",operario:k,count:grupos[k].length,ids:grupos[k].map(t=>t.id)},
       ...grupos[k].map((t,gi)=>({type:"turno",t,numLabel:gi+1}))
