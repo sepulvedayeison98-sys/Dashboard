@@ -322,6 +322,8 @@ function AdminApp(){
                   const nombre=u.nombre;
                   const enProceso=turnos.filter(t=>t.montacarguista===nombre&&t.estado==="en_proceso").sort((a,b)=>(b.es_mde?1:0)-(a.es_mde?1:0));
                   const completadosHoy=turnos.filter(t=>t.montacarguista===nombre&&t.estado==="completado"&&t.fecha_completado&&new Date(t.fecha_completado)>=hoyCut);
+                  const avgMcMin=completadosHoy.length>0?Math.round(completadosHoy.filter(t=>t.fecha_solicitud).reduce((s,t)=>(new Date(t.fecha_completado)-new Date(t.fecha_solicitud))/60000+s,0)/completadosHoy.length):null;
+                  const ultimoMcTs=completadosHoy.map(t=>t.fecha_completado).filter(Boolean).sort().pop();
                   const libre=enProceso.length===0;
                   const accentCol=libre?C.green:C.orange;
                   const expKey=`mc-${nombre}`;
@@ -348,6 +350,7 @@ function AdminApp(){
                             <div style={{textAlign:"center",background:C.bg3,borderRadius:7,padding:"4px 9px",border:`1px solid ${completadosHoy.length>0?C.green+"30":C.b0}`}}>
                               <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:15,fontWeight:800,color:completadosHoy.length>0?C.green:C.t4,lineHeight:1}}>{completadosHoy.length}</div>
                               <div style={{fontSize:7,color:C.t4,textTransform:"uppercase",marginTop:1}}>hoy</div>
+                              {avgMcMin!=null&&<div style={{fontSize:7,color:C.green,fontWeight:600,marginTop:1}}>~{avgMcMin}m</div>}
                             </div>
                             {(completadosHoy.length>0||enProceso.length>0)&&
                               <span style={{color:C.t3,fontSize:13,transform:exp?"rotate(90deg)":"none",transition:"transform .2s"}}>▶</span>}
@@ -446,6 +449,18 @@ function AdminApp(){
                       <span key={ai} style={{fontFamily:"'JetBrains Mono',monospace",background:C.bg3,border:`1px solid ${C.b0}`,borderRadius:4,padding:"2px 7px",fontSize:9,color:C.teal}}>{a.picking}</span>
                     ))}
                   </div>}
+                  {(()=>{
+                    const opKey=(op.nombre||"").toLowerCase().trim();
+                    const compHoyOp=asigs.filter(a=>a.estado==="completado"&&(a.operario||"").toLowerCase().trim()===opKey&&a.fecha_completado&&new Date(a.fecha_completado)>=hoyCut);
+                    const ultimoOp=compHoyOp.map(a=>a.fecha_completado).filter(Boolean).sort().pop();
+                    if(!compHoyOp.length)return null;
+                    return(
+                      <div style={{marginTop:5,padding:"4px 8px",background:C.bg3,borderRadius:6,display:"flex",gap:12,fontSize:9,color:C.t3,flexWrap:"wrap"}}>
+                        <span style={{color:C.green}}>✅ {compHoyOp.length} completado{compHoyOp.length!==1?"s":""} hoy</span>
+                        {ultimoOp&&<span>🕐 Último: {fmtHora(ultimoOp)}</span>}
+                      </div>
+                    );
+                  })()}
                 </div>
                 {expandido[`op-${op.nombre}`]&&op.pedidos.map((a,ai)=>(
                   <div key={ai} style={{borderTop:`1px solid ${C.b0}`,padding:"8px 13px"}}>
