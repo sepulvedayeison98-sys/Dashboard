@@ -88,6 +88,7 @@ function AdminApp(){
   const [editando,setEditando]=useState(null);
   const [procesando,setProcesando]=useState({});
   const [busca,setBusca]=useState("");
+  const [filtroEst,setFiltroEst]=useState("todos");
   const timerRef=useRef(null);
 
   const refrescar=useCallback(async()=>{
@@ -440,11 +441,37 @@ function AdminApp(){
               style={{width:"100%",background:C.bg3,color:C.t1,border:`1px solid ${C.b1}`,borderRadius:11,padding:"11px 13px",fontSize:13,marginBottom:10}}
             />
 
+            {/* Filtros por estado */}
+            <div style={{display:"flex",gap:4,marginBottom:10,flexWrap:"wrap"}}>
+              {[
+                {k:"todos",lbl:"Todos",ico:""},
+                {k:"pendiente",lbl:"Pendiente",ico:"⏳"},
+                {k:"en_proceso",lbl:"En proceso",ico:"🔄"},
+                {k:"completado",lbl:"Completado",ico:"✅"},
+                {k:"fallido",lbl:"Fallido",ico:"⚠️"},
+              ].map(f=>{
+                const col={pendiente:C.yellow,en_proceso:C.orange,completado:C.green,fallido:C.red,todos:C.accent}[f.k];
+                const cnt=f.k==="todos"
+                  ?turnos.filter(t=>!(t.picking||"").startsWith("UBI-")).length
+                  :turnos.filter(t=>t.estado===f.k&&!(t.picking||"").startsWith("UBI-")).length;
+                const sel=filtroEst===f.k;
+                return(
+                  <button key={f.k} onClick={()=>setFiltroEst(f.k)}
+                    style={{padding:"5px 9px",borderRadius:8,border:`1px solid ${sel?col:C.b0}`,background:sel?`${col}20`:C.bg2,color:sel?col:C.t3,fontSize:10,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",gap:4}}>
+                    {f.ico&&<span>{f.ico}</span>}
+                    <span>{f.lbl}</span>
+                    <span style={{background:sel?`${col}35`:C.bg3,borderRadius:5,padding:"0 5px",fontSize:9,fontWeight:800,color:sel?col:C.t4}}>{cnt}</span>
+                  </button>
+                );
+              })}
+            </div>
+
             {/* Bajadas UBI */}
-            {(()=>{
+            {(filtroEst==="todos"||filtroEst==="pendiente"||filtroEst==="en_proceso"||filtroEst==="completado"||filtroEst==="fallido")&&(()=>{
               const q=busca.trim().toLowerCase();
               const ubiTurnos=turnos
                 .filter(t=>(t.picking||"").startsWith("UBI-"))
+                .filter(t=>filtroEst==="todos"||t.estado===filtroEst)
                 .filter(t=>!q||(t.picking||"").toLowerCase().includes(q)||(t.cliente||"").toLowerCase().includes(q)||(t.operario_solicitante||"").toLowerCase().includes(q))
                 .sort((a,b)=>new Date(b.fecha_solicitud)-new Date(a.fecha_solicitud));
               if(ubiTurnos.length===0)return null;
@@ -497,7 +524,7 @@ function AdminApp(){
             })()}
 
             {/* Turnos picking normales */}
-            {["pendiente","en_proceso","fallido","completado"].map(est=>{
+            {(filtroEst==="todos"?["pendiente","en_proceso","fallido","completado"]:[filtroEst]).map(est=>{
               const q=busca.trim().toLowerCase();
               const lista=turnos
                 .filter(t=>t.estado===est&&!(t.picking||"").startsWith("UBI-"))
