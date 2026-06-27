@@ -92,13 +92,21 @@ function AdminApp(){
   const timerRef=useRef(null);
 
   const autoLimpiar=async()=>{
-    const cutoff=new Date(Date.now()-8*60*60*1000).toISOString();
-    const{data:viejos}=await _go(`${SUPA_URL}/rest/v1/turnos?estado=in.(completado,fallido)&fecha_completado=lt.${cutoff}&select=id,picking`);
-    if(!viejos?.length)return;
-    const ids=viejos.map(t=>t.id).join(",");
-    await _go(`${SUPA_URL}/rest/v1/turnos?id=in.(${ids})`,{method:"DELETE",headers:{..._H,Prefer:"return=minimal"}});
-    const picks=viejos.map(t=>t.picking).filter(Boolean).join(",");
-    if(picks)await _go(`${SUPA_URL}/rest/v1/asignaciones?picking=in.(${picks})`,{method:"DELETE",headers:{..._H,Prefer:"return=minimal"}});
+    // Borrar turnos completados/fallidos con más de 8h
+    const cutoff8h=new Date(Date.now()-8*60*60*1000).toISOString();
+    const{data:viejos}=await _go(`${SUPA_URL}/rest/v1/turnos?estado=in.(completado,fallido)&fecha_completado=lt.${cutoff8h}&select=id,picking`);
+    if(viejos?.length){
+      const ids=viejos.map(t=>t.id).join(",");
+      await _go(`${SUPA_URL}/rest/v1/turnos?id=in.(${ids})`,{method:"DELETE",headers:{..._H,Prefer:"return=minimal"}});
+      const picks=viejos.map(t=>t.picking).filter(Boolean).join(",");
+      if(picks)await _go(`${SUPA_URL}/rest/v1/asignaciones?picking=in.(${picks})`,{method:"DELETE",headers:{..._H,Prefer:"return=minimal"}});
+    }
+    // Auto-completar asignaciones en_proceso con más de 5h
+    const cutoff5h=new Date(Date.now()-5*60*60*1000).toISOString();
+    await _go(`${SUPA_URL}/rest/v1/asignaciones?estado=eq.en_proceso&fecha_asignacion=lt.${cutoff5h}`,{
+      method:"PATCH",headers:{..._H,Prefer:"return=minimal"},
+      body:JSON.stringify({estado:"completado",fecha_completado:new Date().toISOString()})
+    });
   };
 
   const refrescar=useCallback(async()=>{
@@ -177,6 +185,23 @@ function AdminApp(){
     await api.patchAsig(id,{estado:"liberado",fecha_completado:new Date().toISOString()});
     await refrescar();
     setProcesando(p=>({...p,[id]:false}));
+  };
+  const completarPedido=async(id)=>{
+    setProcesando(p=>({...p,[id]:true}));
+    await api.patchAsig(id,{estado:"completado",fecha_completado:new Date().toISOString()});
+    await refrescar();
+    setProcesando(p=>({...p,[id]:false}));
+  };
+  const completarVencidos=async()=>{
+    const vencidas=asigs.filter(a=>a.estado==="en_proceso"&&(new Date()-new Date(a.fecha_asignacion))/3600000>5);
+    if(!vencidas.length)return;
+    if(!window.confirm(`¿Marcar como completados los ${vencidas.length} pedido${vencidas.length!==1?"s":""} con más de 5h en proceso?`))return;
+    const ids=vencidas.map(a=>a.id).join(",");
+    await _go(`${SUPA_URL}/rest/v1/asignaciones?id=in.(${ids})`,{
+      method:"PATCH",headers:{..._H,Prefer:"return=minimal"},
+      body:JSON.stringify({estado:"completado",fecha_completado:new Date().toISOString()})
+    });
+    await refrescar();
   };
   const reasignarPedido=async(id,nuevoOperario)=>{
     setProcesando(p=>({...p,[id]:true}));
@@ -474,16 +499,28 @@ function AdminApp(){
                     );
                   })()}
                 </div>
-                {expandido[`op-${op.nombre}`]&&op.pedidos.map((a,ai)=>(
-                  <div key={ai} style={{borderTop:`1px solid ${C.b0}`,padding:"8px 13px"}}>
+                {expandido[`op-${op.nombre}`]&&op.pedidos.map((a,ai)=>{
+                  const horas=(new Date()-new Date(a.fecha_asignacion))/3600000;
+                  const vencida=horas>5;
+                  const demorada=horas>2&&!vencida;
+                  const pickCol=vencida?C.red:demorada?C.orange:C.teal;
+                  return(
+                  <div key={ai} style={{borderTop:`1px solid ${vencida?C.red+"30":demorada?C.orange+"25":C.b0}`,padding:"8px 13px",background:vencida?`${C.red}06`:demorada?`${C.orange}05`:"transparent"}}>
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:3}}>
-                      <span style={{fontFamily:"'JetBrains Mono',monospace",color:C.teal,fontWeight:700,fontSize:12}}>{a.picking}</span>
-                      <span style={{fontSize:10,color:C.t3}}>desde {fmtHora(a.fecha_asignacion)} · {transcurrido(a.fecha_asignacion)}</span>
+                      <div style={{display:"flex",alignItems:"center",gap:6}}>
+                        <span style={{fontFamily:"'JetBrains Mono',monospace",color:pickCol,fontWeight:700,fontSize:12}}>{a.picking}</span>
+                        {vencida&&<span style={{background:`${C.red}20`,color:C.red,borderRadius:3,padding:"0 5px",fontSize:7,fontWeight:800}}>VENCIDO</span>}
+                        {demorada&&<span style={{background:`${C.orange}20`,color:C.orange,borderRadius:3,padding:"0 5px",fontSize:7,fontWeight:800}}>DEMORADO</span>}
+                      </div>
+                      <span style={{fontSize:10,color:vencida?C.red:demorada?C.orange:C.t3,fontWeight:vencida||demorada?700:400}}>desde {fmtHora(a.fecha_asignacion)} · {transcurrido(a.fecha_asignacion)}</span>
                     </div>
                     <div style={{color:C.t2,fontSize:11,marginBottom:6,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{a.cliente}</div>
                     <div style={{display:"flex",gap:6}}>
-                      <button onClick={()=>setEditando(`asig-${a.id}`)} style={{flex:1,padding:"6px",background:C.bg3,border:`1px solid ${C.b0}`,borderRadius:7,color:C.t2,fontSize:11,fontWeight:700,cursor:"pointer"}}>✏️ Reasignar</button>
-                      <button onClick={()=>liberarPedido(a.id)} disabled={!!procesando[a.id]} style={{flex:1,padding:"6px",background:`${C.orange}15`,border:`1px solid ${C.orange}30`,borderRadius:7,color:C.orange,fontSize:11,fontWeight:700,cursor:"pointer"}}>🔓 Liberar</button>
+                      {!vencida&&<button onClick={()=>setEditando(`asig-${a.id}`)} style={{flex:1,padding:"6px",background:C.bg3,border:`1px solid ${C.b0}`,borderRadius:7,color:C.t2,fontSize:11,fontWeight:700,cursor:"pointer"}}>✏️ Reasignar</button>}
+                      {vencida
+                        ?<button onClick={()=>completarPedido(a.id)} disabled={!!procesando[a.id]} style={{flex:1,padding:"8px",background:`${C.green}20`,border:`1px solid ${C.green}40`,borderRadius:7,color:C.green,fontSize:12,fontWeight:800,cursor:"pointer"}}>✅ Completar</button>
+                        :<button onClick={()=>liberarPedido(a.id)} disabled={!!procesando[a.id]} style={{flex:1,padding:"6px",background:`${C.orange}15`,border:`1px solid ${C.orange}30`,borderRadius:7,color:C.orange,fontSize:11,fontWeight:700,cursor:"pointer"}}>🔓 Liberar</button>
+                      }
                     </div>
                     {editando===`asig-${a.id}`&&(
                       <ReasignarForm
@@ -494,7 +531,8 @@ function AdminApp(){
                       />
                     )}
                   </div>
-                ))}
+                  );
+                })}
               </div>
             ))}
           </div>
@@ -686,6 +724,23 @@ function AdminApp(){
         {/* ── TAB ASIGNACIONES ── */}
         {tab==="asignaciones"&&(
           <div>
+            {/* Alerta bulk vencidos */}
+            {(()=>{
+              const vencidas=asigs.filter(a=>a.estado==="en_proceso"&&(new Date()-new Date(a.fecha_asignacion))/3600000>5);
+              if(!vencidas.length)return null;
+              return(
+                <div style={{background:`${C.orange}12`,border:`1px solid ${C.orange}35`,borderRadius:11,padding:"11px 13px",marginBottom:12,display:"flex",justifyContent:"space-between",alignItems:"center",gap:10}}>
+                  <div>
+                    <div style={{fontSize:11,color:C.orange,fontWeight:800}}>⚠ {vencidas.length} pedido{vencidas.length!==1?"s":""} sin cerrar (+5h)</div>
+                    <div style={{fontSize:9,color:C.t3,marginTop:2}}>Se completarán solos en el próximo refresh</div>
+                  </div>
+                  <button onClick={completarVencidos} style={{flexShrink:0,padding:"8px 12px",background:`${C.green}20`,border:`1px solid ${C.green}40`,borderRadius:8,color:C.green,fontSize:11,fontWeight:800,cursor:"pointer"}}>
+                    ✅ Completar ahora
+                  </button>
+                </div>
+              );
+            })()}
+
             {["en_proceso","liberado","completado"].map(est=>{
               const lista=asigs.filter(a=>a.estado===est).sort((a,b)=>new Date(b.fecha_asignacion)-new Date(a.fecha_asignacion));
               if(lista.length===0)return null;
@@ -697,21 +752,28 @@ function AdminApp(){
                     <span style={{fontSize:10,color:col,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>{lbl}</span>
                     <span style={{background:`${col}20`,color:col,borderRadius:10,padding:"1px 7px",fontSize:9,fontWeight:700}}>{lista.length}</span>
                   </div>
-                  {lista.map((a)=>(
-                    <div key={a.id} style={{background:C.bg2,borderRadius:11,marginBottom:6,border:`1px solid ${C.b0}`,borderLeft:`4px solid ${col}`,animation:"fadeUp .2s ease both",padding:"10px 13px"}}>
+                  {lista.map((a)=>{
+                    const horas=est==="en_proceso"?(new Date()-new Date(a.fecha_asignacion))/3600000:0;
+                    const vencida=horas>5;
+                    const demorada=horas>2&&!vencida;
+                    const alertaCol=vencida?C.red:demorada?C.orange:col;
+                    return(
+                    <div key={a.id} style={{background:C.bg2,borderRadius:11,marginBottom:6,border:`1px solid ${vencida?C.red+"40":demorada?C.orange+"35":C.b0}`,borderLeft:`4px solid ${alertaCol}`,animation:"fadeUp .2s ease both",padding:"10px 13px"}}>
                       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:4}}>
-                        <div>
-                          <span style={{fontFamily:"'JetBrains Mono',monospace",color:C.teal,fontWeight:800,fontSize:13}}>{a.picking}</span>
-                          {a.pedido_siesa&&<span style={{fontFamily:"'JetBrains Mono',monospace",color:C.t4,fontSize:10,marginLeft:8}}>#{a.pedido_siesa}</span>}
+                        <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+                          <span style={{fontFamily:"'JetBrains Mono',monospace",color:vencida?C.red:demorada?C.orange:C.teal,fontWeight:800,fontSize:13}}>{a.picking}</span>
+                          {a.pedido_siesa&&<span style={{fontFamily:"'JetBrains Mono',monospace",color:C.t4,fontSize:10}}>#{a.pedido_siesa}</span>}
+                          {vencida&&<span style={{background:`${C.red}20`,color:C.red,borderRadius:4,padding:"1px 5px",fontSize:7,fontWeight:800}}>VENCIDO</span>}
+                          {demorada&&<span style={{background:`${C.orange}20`,color:C.orange,borderRadius:4,padding:"1px 5px",fontSize:7,fontWeight:800}}>DEMORADO</span>}
                         </div>
-                        <span style={{background:`${col}18`,color:col,borderRadius:4,padding:"1px 6px",fontSize:8,fontWeight:700}}>{estadoLbl[est]}</span>
+                        <span style={{background:`${alertaCol}18`,color:alertaCol,borderRadius:4,padding:"1px 6px",fontSize:8,fontWeight:700,flexShrink:0}}>{estadoLbl[est]}</span>
                       </div>
                       <div style={{color:C.t2,fontSize:11,marginBottom:4,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{a.cliente}</div>
                       <div style={{display:"flex",gap:10,fontSize:10,color:C.t3,flexWrap:"wrap",marginBottom:est==="en_proceso"?6:0}}>
                         <span>👷 {a.operario}</span>
                         <span>📍 {a.ciudad}</span>
                         <span>🕐 {fmtFecha(a.fecha_asignacion)}</span>
-                        {est==="en_proceso"&&<span style={{color:C.t4}}>⏱ {transcurrido(a.fecha_asignacion)}</span>}
+                        {est==="en_proceso"&&<span style={{color:vencida?C.red:demorada?C.orange:C.t4,fontWeight:vencida||demorada?700:400}}>⏱ {transcurrido(a.fecha_asignacion)}</span>}
                       </div>
                       {est==="en_proceso"&&(
                         editando===`asig-${a.id}`
@@ -722,12 +784,16 @@ function AdminApp(){
                               onCancelar={()=>setEditando(null)}
                             />
                           :<div style={{display:"flex",gap:5}}>
-                            <button onClick={()=>setEditando(`asig-${a.id}`)} style={{flex:1,padding:"6px",background:C.bg3,border:`1px solid ${C.b0}`,borderRadius:7,color:C.t2,fontSize:11,fontWeight:700,cursor:"pointer"}}>✏️ Reasignar</button>
-                            <button onClick={()=>liberarPedido(a.id)} disabled={!!procesando[a.id]} style={{flex:1,padding:"6px",background:`${C.orange}15`,border:`1px solid ${C.orange}30`,borderRadius:7,color:C.orange,fontSize:11,fontWeight:700,cursor:"pointer"}}>🔓 Liberar</button>
+                            {!vencida&&<button onClick={()=>setEditando(`asig-${a.id}`)} style={{flex:1,padding:"6px",background:C.bg3,border:`1px solid ${C.b0}`,borderRadius:7,color:C.t2,fontSize:11,fontWeight:700,cursor:"pointer"}}>✏️ Reasignar</button>}
+                            {vencida
+                              ?<button onClick={()=>completarPedido(a.id)} disabled={!!procesando[a.id]} style={{flex:1,padding:"8px",background:`${C.green}20`,border:`1px solid ${C.green}40`,borderRadius:7,color:C.green,fontSize:11,fontWeight:800,cursor:"pointer"}}>✅ Completar</button>
+                              :<button onClick={()=>liberarPedido(a.id)} disabled={!!procesando[a.id]} style={{flex:1,padding:"6px",background:`${C.orange}15`,border:`1px solid ${C.orange}30`,borderRadius:7,color:C.orange,fontSize:11,fontWeight:700,cursor:"pointer"}}>🔓 Liberar</button>
+                            }
                           </div>
                       )}
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               );
             })}
