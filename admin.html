@@ -113,6 +113,12 @@ function AdminApp(){
   const nCompletadosHoy=turnos.filter(t=>t.estado==="completado"&&t.fecha_completado&&new Date(t.fecha_completado)>=hoyCut).length;
   const nFallidos=turnos.filter(t=>t.estado==="fallido").length;
   const nUBI=turnos.filter(t=>(t.picking||"").startsWith("UBI-")&&(t.estado==="pendiente"||t.estado==="en_proceso")).length;
+  const avgMinHoy=(()=>{
+    const c=turnos.filter(t=>t.estado==="completado"&&t.fecha_completado&&t.fecha_solicitud&&new Date(t.fecha_completado)>=hoyCut);
+    if(!c.length)return null;
+    const avg=c.reduce((s,t)=>(new Date(t.fecha_completado)-new Date(t.fecha_solicitud))/60000+s,0)/c.length;
+    return Math.round(avg);
+  })();
 
   const priorizarTurno=async(id)=>{
     setProcesando(p=>({...p,[id]:true}));
@@ -241,14 +247,15 @@ function AdminApp(){
         </div>
         <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:5,marginBottom:10}}>
           {[
-            {l:"Comp. Hoy",v:nCompletadosHoy,c:C.green,ico:"✅"},
-            {l:"Fallidos",v:nFallidos,c:nFallidos>0?C.red:C.t4,ico:"⚠️"},
-            {l:"UBI activas",v:nUBI,c:nUBI>0?C.purple:C.t4,ico:"⬇"},
+            {l:"Comp. Hoy",v:nCompletadosHoy,c:C.green,ico:"✅",sub:avgMinHoy!=null?`~${avgMinHoy}m prom.`:null},
+            {l:"Fallidos",v:nFallidos,c:nFallidos>0?C.red:C.t4,ico:"⚠️",sub:null},
+            {l:"UBI activas",v:nUBI,c:nUBI>0?C.purple:C.t4,ico:"⬇",sub:null},
           ].map(k=>(
             <div key={k.l} style={{background:C.bg2,borderRadius:9,padding:"8px 4px",textAlign:"center",border:`1px solid ${k.v>0?k.c+"30":C.b0}`}}>
               <div style={{fontSize:13}}>{k.ico}</div>
               <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:20,fontWeight:800,color:k.c,lineHeight:1.1}}>{k.v}</div>
               <div style={{fontSize:7,color:C.t4,fontWeight:700,textTransform:"uppercase",marginTop:2}}>{k.l}</div>
+              {k.sub&&<div style={{fontSize:7,color:k.c,fontWeight:600,marginTop:1,opacity:.8}}>{k.sub}</div>}
             </div>
           ))}
         </div>
