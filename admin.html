@@ -266,6 +266,7 @@ function AdminApp(){
             {key:"operarios",lbl:"👷 Operarios"},
             {key:"turnos",lbl:"🏗️ Turnos"},
             {key:"asignaciones",lbl:"📋 Pedidos"},
+            {key:"metricas",lbl:"📊 Métricas"},
           ].map(t=>(
             <button key={t.key} onClick={()=>setTab(t.key)} style={{flex:1,padding:"8px 4px",borderRadius:9,border:`1px solid ${tab===t.key?C.accent:C.b0}`,background:tab===t.key?`${C.accent}18`:C.bg2,color:tab===t.key?C.accent:C.t3,fontWeight:700,fontSize:10,cursor:"pointer"}}>
               {t.lbl}
@@ -727,6 +728,110 @@ function AdminApp(){
             )}
           </div>
         )}
+        {/* ── TAB MÉTRICAS ── */}
+        {tab==="metricas"&&(()=>{
+          const compHoy=turnos.filter(t=>t.estado==="completado"&&t.fecha_completado&&new Date(t.fecha_completado)>=hoyCut);
+
+          // Turnos por hora (0–23)
+          const porHora=Array.from({length:24},(_,h)=>({h,n:compHoy.filter(t=>new Date(t.fecha_completado).getHours()===h).length}));
+          const maxHora=Math.max(...porHora.map(x=>x.n),1);
+          const horaActual=new Date().getHours();
+          const horasActivas=porHora.filter(x=>x.n>0||x.h<=horaActual);
+
+          // Ranking montacarguistas
+          const rankMc=(()=>{
+            const map={};
+            compHoy.forEach(t=>{if(t.montacarguista){if(!map[t.montacarguista])map[t.montacarguista]=0;map[t.montacarguista]++;}});
+            return Object.entries(map).sort((a,b)=>b[1]-a[1]);
+          })();
+
+          // Ranking operarios (asigns completadas hoy)
+          const asigHoy=asigs.filter(a=>a.estado==="completado"&&a.fecha_completado&&new Date(a.fecha_completado)>=hoyCut);
+          const rankOp=(()=>{
+            const map={};
+            asigHoy.forEach(a=>{if(a.operario){if(!map[a.operario])map[a.operario]=0;map[a.operario]++;}});
+            return Object.entries(map).sort((a,b)=>b[1]-a[1]);
+          })();
+
+          // Turno más largo del día
+          const masLargo=compHoy.filter(t=>t.fecha_solicitud).sort((a,b)=>(new Date(b.fecha_completado)-new Date(b.fecha_solicitud))-(new Date(a.fecha_completado)-new Date(a.fecha_solicitud)))[0];
+          const masLargoMin=masLargo?Math.round((new Date(masLargo.fecha_completado)-new Date(masLargo.fecha_solicitud))/60000):null;
+
+          return(
+            <div>
+              {/* Turnos completados por hora */}
+              <div style={{background:C.bg2,borderRadius:12,padding:"13px",marginBottom:12,border:`1px solid ${C.b0}`}}>
+                <div style={{fontSize:10,color:C.accent,fontWeight:700,textTransform:"uppercase",letterSpacing:.5,marginBottom:10}}>📈 Completados por hora</div>
+                {compHoy.length===0?(
+                  <div style={{textAlign:"center",color:C.t4,fontSize:12,padding:"20px 0"}}>Sin completados hoy</div>
+                ):(
+                  <div style={{display:"flex",alignItems:"flex-end",gap:3,height:60}}>
+                    {horasActivas.map(({h,n})=>(
+                      <div key={h} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
+                        {n>0&&<div style={{fontSize:7,color:C.accent,fontWeight:700}}>{n}</div>}
+                        <div style={{width:"100%",background:n>0?C.accent:C.bg3,borderRadius:"3px 3px 0 0",height:n>0?`${Math.max(Math.round(n/maxHora*44),4)}px`:"4px",transition:"height .3s",opacity:h===horaActual?1:.7}}/>
+                        <div style={{fontSize:6,color:C.t4}}>{h}h</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div style={{marginTop:8,fontSize:9,color:C.t4,textAlign:"right"}}>{compHoy.length} turno{compHoy.length!==1?"s":""} completado{compHoy.length!==1?"s":""} hoy</div>
+              </div>
+
+              {/* Rankings */}
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:12}}>
+                {/* Ranking montacarguistas */}
+                <div style={{background:C.bg2,borderRadius:12,padding:"11px",border:`1px solid ${C.b0}`}}>
+                  <div style={{fontSize:9,color:C.purple,fontWeight:700,textTransform:"uppercase",letterSpacing:.5,marginBottom:8}}>🏗️ Montacarguistas</div>
+                  {rankMc.length===0?(
+                    <div style={{color:C.t4,fontSize:10,textAlign:"center",padding:"8px 0"}}>—</div>
+                  ):rankMc.slice(0,5).map(([nom,cnt],ri)=>(
+                    <div key={nom} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"3px 0",borderTop:ri>0?`1px solid ${C.b0}`:"none"}}>
+                      <div style={{display:"flex",alignItems:"center",gap:5}}>
+                        <span style={{fontSize:9,color:ri===0?C.yellow:C.t4,fontWeight:700}}>#{ri+1}</span>
+                        <span style={{fontSize:10,color:C.t2,textTransform:"capitalize",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:60}}>{nom}</span>
+                      </div>
+                      <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:12,fontWeight:800,color:ri===0?C.yellow:C.green}}>{cnt}</span>
+                    </div>
+                  ))}
+                </div>
+                {/* Ranking operarios */}
+                <div style={{background:C.bg2,borderRadius:12,padding:"11px",border:`1px solid ${C.b0}`}}>
+                  <div style={{fontSize:9,color:C.teal,fontWeight:700,textTransform:"uppercase",letterSpacing:.5,marginBottom:8}}>👷 Operarios</div>
+                  {rankOp.length===0?(
+                    <div style={{color:C.t4,fontSize:10,textAlign:"center",padding:"8px 0"}}>—</div>
+                  ):rankOp.slice(0,5).map(([nom,cnt],ri)=>(
+                    <div key={nom} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"3px 0",borderTop:ri>0?`1px solid ${C.b0}`:"none"}}>
+                      <div style={{display:"flex",alignItems:"center",gap:5}}>
+                        <span style={{fontSize:9,color:ri===0?C.yellow:C.t4,fontWeight:700}}>#{ri+1}</span>
+                        <span style={{fontSize:10,color:C.t2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:60}}>{nom}</span>
+                      </div>
+                      <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:12,fontWeight:800,color:ri===0?C.yellow:C.teal}}>{cnt}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Turno más largo */}
+              {masLargo&&(
+                <div style={{background:C.bg2,borderRadius:12,padding:"13px",border:`1px solid ${C.orange}30`,borderLeft:`4px solid ${C.orange}`}}>
+                  <div style={{fontSize:9,color:C.orange,fontWeight:700,textTransform:"uppercase",letterSpacing:.5,marginBottom:6}}>⏱ Turno más largo del día</div>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <div>
+                      <div style={{fontFamily:"'JetBrains Mono',monospace",color:C.teal,fontWeight:800,fontSize:14}}>{masLargo.picking}</div>
+                      <div style={{fontSize:10,color:C.t3,marginTop:2}}>🏗️ {masLargo.montacarguista||"—"} · {fmtHora(masLargo.fecha_solicitud)} → {fmtHora(masLargo.fecha_completado)}</div>
+                    </div>
+                    <div style={{textAlign:"right"}}>
+                      <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:22,fontWeight:800,color:C.orange,lineHeight:1}}>{masLargoMin}</div>
+                      <div style={{fontSize:8,color:C.t4,textTransform:"uppercase"}}>minutos</div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
       </div>
     </div>
   );
