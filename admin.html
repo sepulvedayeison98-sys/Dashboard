@@ -91,7 +91,18 @@ function AdminApp(){
   const [filtroEst,setFiltroEst]=useState("todos");
   const timerRef=useRef(null);
 
+  const autoLimpiar=async()=>{
+    const cutoff=new Date(Date.now()-8*60*60*1000).toISOString();
+    const{data:viejos}=await _go(`${SUPA_URL}/rest/v1/turnos?estado=in.(completado,fallido)&fecha_completado=lt.${cutoff}&select=id,picking`);
+    if(!viejos?.length)return;
+    const ids=viejos.map(t=>t.id).join(",");
+    await _go(`${SUPA_URL}/rest/v1/turnos?id=in.(${ids})`,{method:"DELETE",headers:{..._H,Prefer:"return=minimal"}});
+    const picks=viejos.map(t=>t.picking).filter(Boolean).join(",");
+    if(picks)await _go(`${SUPA_URL}/rest/v1/asignaciones?picking=in.(${picks})`,{method:"DELETE",headers:{..._H,Prefer:"return=minimal"}});
+  };
+
   const refrescar=useCallback(async()=>{
+    await autoLimpiar();
     const [rT,rA,rU]=await Promise.all([api.turnos(),api.asigs(),api.usuarios()]);
     if(rT.data)setTurnos(rT.data);
     if(rA.data)setAsigs(rA.data);
