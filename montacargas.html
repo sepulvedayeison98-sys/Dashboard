@@ -411,11 +411,20 @@ function MontacargasApp(){
       });
     });
     if(enActivo){
-      // Ruta real: pendientes primero, luego por ubicación física
+      // Demanda cruzada: cuántos turnos pendientes (de cualquier operario) esperan cada UBI
+      const demCruz={};
+      turnos.filter(t=>t.estado==="pendiente").forEach(t=>(t.posiciones||[]).forEach(p=>{demCruz[p.ubi]=(demCruz[p.ubi]||0)+1;}));
+      // Ruta real: pendientes primero → urgentes → alta demanda cruzada → ubicación física
       return Object.values(map).sort((a,b)=>{
         const aDone=a.posiciones.every(p=>p.bajada||p.fallo);
         const bDone=b.posiciones.every(p=>p.bajada||p.fallo);
         if(aDone!==bDone)return aDone?1:-1;
+        const aUrg=a.posiciones.some(p=>p.urgente)?1:0;
+        const bUrg=b.posiciones.some(p=>p.urgente)?1:0;
+        if(aUrg!==bUrg)return bUrg-aUrg;
+        const aDem=demCruz[a.ubi]||0;
+        const bDem=demCruz[b.ubi]||0;
+        if(bDem!==aDem)return bDem-aDem;
         return (CALLE_ORD[a.calleLetra]||9)-(CALLE_ORD[b.calleLetra]||9)
           ||(a.modulo||0)-(b.modulo||0)
           ||(a.nivel||0)-(b.nivel||0);
@@ -878,7 +887,8 @@ function MontacargasApp(){
                         const pendPos=ubiEntry.posiciones.filter(p=>!p.bajada&&!p.fallo);
                         const allDone=pendPos.length===0;
                         const tieneUrgente=pendPos.some(p=>p.urgente);
-                        const isMulti=ubiEntry.posiciones.length>1;
+                        const demandaCruz=demandaMap[ubiEntry.ubi]||0;
+                        const isMulti=ubiEntry.posiciones.length>1||demandaCruz>1;
                         const keyProc=`ruta-${ubiEntry.ubi}`;
                         const proc=!!procesando[keyProc];
                         const totalUnids=ubiEntry.posiciones.reduce((s,p)=>p.skus.reduce((u,k)=>u+k.cant,s),0);
@@ -896,7 +906,7 @@ function MontacargasApp(){
                                     <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
                                       <span style={{fontFamily:"'JetBrains Mono',monospace",color:allDone?C.t3:C.teal,fontWeight:800,fontSize:15}}>{ubiEntry.ubi}</span>
                                       {tieneUrgente&&!allDone&&<span style={{background:`${C.red}20`,color:C.red,borderRadius:3,padding:"0 4px",fontSize:7,fontWeight:800}}>🚨</span>}
-                                      {isMulti&&!allDone&&<span style={{background:`${C.yellow}20`,color:C.yellow,borderRadius:3,padding:"1px 5px",fontSize:8,fontWeight:700}}>{ubiEntry.posiciones.length} ped.</span>}
+                                      {isMulti&&!allDone&&<span style={{background:`${C.yellow}20`,color:C.yellow,borderRadius:3,padding:"1px 5px",fontSize:8,fontWeight:700}}>⚡ {demandaCruz>1?`${demandaCruz} ops.`:ubiEntry.posiciones.length+" ped."}</span>}
                                     </div>
                                     <div style={{color:C.t3,fontSize:8,marginTop:1}}>{CALLE_NOM[ubiEntry.calleLetra]} · Mód {ubiEntry.modulo} · Niv {ubiEntry.nivel}</div>
                                   </div>
