@@ -89,6 +89,7 @@ function AdminApp(){
   const [procesando,setProcesando]=useState({});
   const [busca,setBusca]=useState("");
   const [filtroEst,setFiltroEst]=useState("todos");
+  const [agendarModal,setAgendarModal]=useState(false);
   const timerRef=useRef(null);
 
   const autoLimpiar=async()=>{
@@ -138,6 +139,13 @@ function AdminApp(){
     const avg=c.reduce((s,t)=>(new Date(t.fecha_completado)-new Date(t.fecha_solicitud))/60000+s,0)/c.length;
     return Math.round(avg);
   })();
+
+  const crearTurno=async(data)=>{
+    const {error}=await _go(`${SUPA_URL}/rest/v1/turnos`,{method:"POST",headers:{..._H,Prefer:"return=minimal"},body:JSON.stringify(data)});
+    if(error){alert("Error al crear el turno: "+(error.message||JSON.stringify(error)));return;}
+    setAgendarModal(false);
+    await refrescar();
+  };
 
   const priorizarTurno=async(id)=>{
     setProcesando(p=>({...p,[id]:true}));
@@ -541,6 +549,9 @@ function AdminApp(){
         {/* ── TAB TURNOS ── */}
         {tab==="turnos"&&(
           <div>
+            <button onClick={()=>setAgendarModal(true)} style={{width:"100%",padding:"12px",background:`linear-gradient(135deg,${C.orange},${C.yellow})`,border:"none",borderRadius:11,color:C.bg0,fontWeight:800,fontSize:13,cursor:"pointer",marginBottom:10}}>
+              🏗️ + Agendar turno manual
+            </button>
             <input value={busca} onChange={e=>setBusca(e.target.value)}
               placeholder="🔍 Buscar por picking, cliente u operario..."
               style={{width:"100%",background:C.bg3,color:C.t1,border:`1px solid ${C.b1}`,borderRadius:11,padding:"11px 13px",fontSize:13,marginBottom:10}}
@@ -909,6 +920,169 @@ function AdminApp(){
           );
         })()}
 
+      </div>
+      {agendarModal&&(
+        <AgendarTurnoModal
+          usuarios={usuarios}
+          montacarguistas={montacarguistasActivos}
+          todosMonta={usuarios.filter(u=>u.rol==="montacarguista")}
+          onGuardar={crearTurno}
+          onCancelar={()=>setAgendarModal(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+function AgendarTurnoModal({usuarios,montacarguistas,todosMonta,onGuardar,onCancelar}){
+  const [picking,setPicking]=useState("");
+  const [cliente,setCliente]=useState("");
+  const [operario,setOperario]=useState("");
+  const [monta,setMonta]=useState("");
+  const [urgente,setUrgente]=useState(false);
+  const [posiciones,setPosiciones]=useState([{ubi:"",skus:[{ref:"",cant:""}]}]);
+  const [enviando,setEnviando]=useState(false);
+  const [err,setErr]=useState("");
+
+  const operariosDisp=[...new Set(usuarios.filter(u=>u.rol==="operario"||u.rol==="picker").map(u=>u.nombre))].filter(Boolean).sort();
+  const montaDisp=[...new Set([...montacarguistas.map(u=>u.nombre),...todosMonta.map(u=>u.nombre)])].filter(Boolean).sort();
+
+  const parseUbi=ubi=>{
+    const u=(ubi||"").trim().toUpperCase();
+    const letra=u[0]||"";
+    const nums=u.slice(1);
+    return{ubi:u,calleLetra:letra,modulo:parseInt(nums.slice(0,2))||0,nivel:parseInt(nums[2])||0};
+  };
+
+  const addPos=()=>setPosiciones(p=>[...p,{ubi:"",skus:[{ref:"",cant:""}]}]);
+  const removePos=i=>setPosiciones(p=>p.filter((_,idx)=>idx!==i));
+  const setPos=(i,k,v)=>setPosiciones(p=>p.map((pos,idx)=>idx===i?{...pos,[k]:v}:pos));
+  const addSku=pi=>setPosiciones(p=>p.map((pos,idx)=>idx===pi?{...pos,skus:[...pos.skus,{ref:"",cant:""}]}:pos));
+  const removeSku=(pi,si)=>setPosiciones(p=>p.map((pos,idx)=>idx===pi?{...pos,skus:pos.skus.filter((_,i)=>i!==si)}:pos));
+  const setSku=(pi,si,k,v)=>setPosiciones(p=>p.map((pos,idx)=>idx===pi?{...pos,skus:pos.skus.map((s,i)=>i===si?{...s,[k]:v}:s)}:pos));
+
+  const handleGuardar=async()=>{
+    if(!picking.trim()){setErr("Falta el número de picking");return;}
+    if(!operario.trim()){setErr("Falta el operario solicitante");return;}
+    const posOk=posiciones.filter(p=>p.ubi.trim());
+    if(!posOk.length){setErr("Agrega al menos una posición UBI");return;}
+    setErr("");setEnviando(true);
+    const posData=posOk.map(p=>{
+      const base=parseUbi(p.ubi);
+      const skusOk=p.skus.filter(s=>s.ref.trim()&&s.cant);
+      const totalSaldo=skusOk.reduce((s,k)=>s+(parseInt(k.cant)||0),0);
+      return{...base,skus:skusOk.map(s=>({ref:s.ref.trim().toUpperCase(),desc:"",cant:parseInt(s.cant)||0,cajap:0})),totalSaldo,bajada:false,fallo:false};
+    });
+    const tieneMonta=monta.trim();
+    await onGuardar({
+      picking:picking.trim().toUpperCase(),
+      estado:tieneMonta?"en_proceso":"pendiente",
+      posiciones:posData,
+      operario_solicitante:operario.trim(),
+      montacarguista:tieneMonta||null,
+      cliente:cliente.trim()||null,
+      ciudad:"Itagüí",
+      es_mde:urgente,
+      prioridad:urgente?"urgente":null,
+      fecha_solicitud:new Date().toISOString(),
+    });
+    setEnviando(false);
+  };
+
+  const inp={background:C.bg0,border:`1px solid ${C.b1}`,borderRadius:8,padding:"9px 11px",fontSize:13,color:C.t1,width:"100%",marginTop:4};
+  const lbl={fontSize:10,color:C.t4,fontWeight:700,textTransform:"uppercase",letterSpacing:".5px"};
+  const chip=(val,cur,col,onClick)=>(
+    <button onClick={onClick} style={{padding:"3px 9px",background:cur===val?`${col}25`:C.bg3,border:`1px solid ${cur===val?col:C.b0}`,borderRadius:5,color:cur===val?col:C.t3,fontSize:9,cursor:"pointer"}}>{val}</button>
+  );
+
+  return(
+    <div style={{position:"fixed",inset:0,background:"#00000095",zIndex:50,display:"flex",flexDirection:"column",justifyContent:"flex-end"}}>
+      <div style={{background:C.bg1,borderRadius:"16px 16px 0 0",maxHeight:"93vh",display:"flex",flexDirection:"column"}}>
+        <div style={{flexShrink:0,borderBottom:`1px solid ${C.b0}`,padding:"14px 16px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div style={{fontWeight:800,fontSize:15}}>🏗️ Agendar turno</div>
+          <button onClick={onCancelar} style={{background:"none",border:"none",color:C.t3,fontSize:22,cursor:"pointer",lineHeight:1}}>✕</button>
+        </div>
+        <div style={{overflowY:"auto",padding:"14px 16px",display:"flex",flexDirection:"column",gap:13}}>
+
+          <div>
+            <div style={lbl}>Nº Picking *</div>
+            <input value={picking} onChange={e=>setPicking(e.target.value)} placeholder="Ej: 789456"
+              style={{...inp,fontFamily:"'JetBrains Mono',monospace",fontSize:15,color:C.teal,fontWeight:800}}/>
+          </div>
+
+          <div>
+            <div style={lbl}>Cliente</div>
+            <input value={cliente} onChange={e=>setCliente(e.target.value)} placeholder="Nombre del cliente" style={inp}/>
+          </div>
+
+          <div>
+            <div style={lbl}>Operario solicitante *</div>
+            <input value={operario} onChange={e=>setOperario(e.target.value)} placeholder="Picker que solicita" style={inp}/>
+            {operariosDisp.length>0&&(
+              <div style={{display:"flex",gap:4,flexWrap:"wrap",marginTop:6}}>
+                {operariosDisp.map(n=>chip(n,operario,C.teal,()=>setOperario(n)))}
+              </div>
+            )}
+          </div>
+
+          <div>
+            <div style={lbl}>Montacarguista <span style={{color:C.t4,fontWeight:400,textTransform:"none"}}>(vacío = queda pendiente)</span></div>
+            <input value={monta} onChange={e=>setMonta(e.target.value)} placeholder="Asignar directo a..." style={inp}/>
+            {montaDisp.length>0&&(
+              <div style={{display:"flex",gap:4,flexWrap:"wrap",marginTop:6}}>
+                {montaDisp.map(n=>chip(n,monta,C.purple,()=>setMonta(m=>m===n?"":n)))}
+              </div>
+            )}
+            {monta.trim()&&(
+              <div style={{marginTop:6,fontSize:9,color:C.purple,fontWeight:600}}>
+                ✓ Se creará directo en <strong>en proceso</strong> para {monta.trim()}
+              </div>
+            )}
+          </div>
+
+          <button onClick={()=>setUrgente(u=>!u)} style={{display:"flex",alignItems:"center",gap:9,padding:"10px 13px",background:urgente?`${C.red}18`:C.bg3,border:`1px solid ${urgente?C.red+"50":C.b0}`,borderRadius:9,color:urgente?C.red:C.t3,fontSize:12,fontWeight:700,cursor:"pointer",textAlign:"left"}}>
+            <span style={{fontSize:18}}>{urgente?"🚨":"⚪"}</span>
+            {urgente?"URGENTE — MDE":"Marcar como urgente (MDE)"}
+          </button>
+
+          <div>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+              <div style={lbl}>Posiciones UBI *</div>
+              <button onClick={addPos} style={{padding:"4px 11px",background:`${C.teal}20`,border:`1px solid ${C.teal}40`,borderRadius:6,color:C.teal,fontSize:10,fontWeight:700,cursor:"pointer"}}>+ UBI</button>
+            </div>
+            {posiciones.map((pos,pi)=>(
+              <div key={pi} style={{background:C.bg3,borderRadius:10,padding:"10px",marginBottom:8,border:`1px solid ${C.b1}`}}>
+                <div style={{display:"flex",gap:6,marginBottom:8}}>
+                  <input value={pos.ubi} onChange={e=>setPos(pi,"ubi",e.target.value.toUpperCase())} placeholder="UBI — ej: D0432"
+                    style={{flex:1,background:C.bg0,border:`1px solid ${C.b1}`,borderRadius:7,padding:"8px 10px",fontSize:14,color:C.teal,fontFamily:"'JetBrains Mono',monospace",fontWeight:800}}/>
+                  {posiciones.length>1&&(
+                    <button onClick={()=>removePos(pi)} style={{padding:"6px 10px",background:`${C.red}15`,border:`1px solid ${C.red}30`,borderRadius:7,color:C.red,fontSize:12,cursor:"pointer"}}>✕</button>
+                  )}
+                </div>
+                {pos.skus.map((s,si)=>(
+                  <div key={si} style={{display:"flex",gap:5,marginBottom:5}}>
+                    <input value={s.ref} onChange={e=>setSku(pi,si,"ref",e.target.value)} placeholder="REF"
+                      style={{flex:2,background:C.bg0,border:`1px solid ${C.b1}`,borderRadius:6,padding:"7px 9px",fontSize:11,color:C.accent,fontFamily:"'JetBrains Mono',monospace"}}/>
+                    <input value={s.cant} onChange={e=>setSku(pi,si,"cant",e.target.value.replace(/\D/g,""))} placeholder="Cant" type="number" min="1"
+                      style={{flex:1,background:C.bg0,border:`1px solid ${C.b1}`,borderRadius:6,padding:"7px 9px",fontSize:11,color:C.yellow,fontFamily:"'JetBrains Mono',monospace"}}/>
+                    {pos.skus.length>1&&(
+                      <button onClick={()=>removeSku(pi,si)} style={{padding:"5px 9px",background:`${C.red}12`,border:`1px solid ${C.red}25`,borderRadius:5,color:C.red,fontSize:11,cursor:"pointer"}}>✕</button>
+                    )}
+                  </div>
+                ))}
+                <button onClick={()=>addSku(pi)} style={{width:"100%",padding:"6px",background:C.bg2,border:`1px dashed ${C.b1}`,borderRadius:6,color:C.t4,fontSize:10,cursor:"pointer"}}>+ SKU</button>
+              </div>
+            ))}
+          </div>
+
+          {err&&<div style={{background:`${C.red}15`,border:`1px solid ${C.red}40`,borderRadius:8,padding:"9px 12px",color:C.red,fontSize:11,fontWeight:600}}>{err}</div>}
+
+          <button onClick={handleGuardar} disabled={enviando}
+            style={{width:"100%",padding:"14px",background:enviando?C.bg3:`linear-gradient(135deg,${C.orange},${C.yellow})`,border:"none",borderRadius:11,color:enviando?C.t3:C.bg0,fontWeight:800,fontSize:14,cursor:enviando?"not-allowed":"pointer",marginBottom:8}}>
+            {enviando?"Guardando...":"✓ Agendar turno"}
+          </button>
+
+        </div>
       </div>
     </div>
   );
