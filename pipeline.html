@@ -259,12 +259,12 @@ const familia = d => {
   const m = u.match(/ICH[- ]?([0-9]{2,4})/);
   return m ? m[1] : "OTRO";
 };
-// Regla CEDI: la familia 501 SOLID vive físicamente en la Calle 2 (C).
-// Aunque el WMS la registre en otra calle (ej. D = Calle 3), se reasigna
-// a Calle 2 para que no aparezca como reposición en la Calle 3.
-const es501Solid = desc => {
+// Regla CEDI: la familia 501 SOLID y los 501_SP_S viven físicamente en la
+// Calle 2 (C). Aunque el WMS los registre en otra calle (ej. D = Calle 3),
+// se reasignan a Calle 2 para que no aparezcan como reposición en la Calle 3.
+const esCalle2 = desc => {
   const u = (desc || "").toUpperCase();
-  return familia(u) === "501" && u.includes("SOLID");
+  return (familia(u) === "501" && u.includes("SOLID")) || u.includes("501_SP_S");
 };
 const esMDE = ciudad => {
   const x = String(ciudad || "").toUpperCase().trim();
@@ -323,8 +323,8 @@ function procesar(wbInv, wbFact) {
     if (p && p.nivel <= 1) stockMap[ref].stock += saldo;else stockMap[ref].stockAlt += saldo;
     if (p && saldo > 0) {
       if (!invBySKU[ref]) invBySKU[ref] = [];
-      // 501 SOLID → forzar Calle 2 (C) aunque el WMS la ubique en otra calle
-      const calleLetra = es501Solid(desc) ? "C" : p.calleLetra;
+      // 501 SOLID / 501_SP_S → forzar Calle 2 (C) aunque el WMS los ubique en otra calle
+      const calleLetra = esCalle2(desc) ? "C" : p.calleLetra;
       invBySKU[ref].push({
         ubi,
         saldo,

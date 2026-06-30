@@ -79,6 +79,10 @@ const CALLE_ORD={B:1,C:2,D:3,E:4};
 const esMDE=c=>{const x=String(c||"").toUpperCase().trim();return x==="MDE"||x.includes("MEDELL")||x==="ITAGUI"||x==="ITAGÜI"||x.includes("ITAGU");};
 const fmtHora=ts=>{if(!ts)return"";const d=new Date(ts);return d.toLocaleTimeString("es-CO",{hour:"2-digit",minute:"2-digit"});};
 const ordenarPos=arr=>[...(arr||[])].sort((a,b)=>(CALLE_ORD[a.calleLetra]||9)-(CALLE_ORD[b.calleLetra]||9)||(a.modulo||0)-(b.modulo||0));
+// Regla CEDI: 501 SOLID y 501_SP_S viven en la Calle 2 (C). Se reasigna la calle
+// al cargar para que los turnos no aparezcan como reposición en la Calle 3.
+const esCalle2Sku=d=>{const u=(d||"").toUpperCase();const m=u.match(/ICH[- ]?([0-9]{2,4})/);const fam=/\bT[- ]?10\b/.test(u)?"T-10":(m?m[1]:"OTRO");return (fam==="501"&&u.includes("SOLID"))||u.includes("501_SP_S");};
+const normalizarCalles=arr=>(arr||[]).map(t=>({...t,posiciones:(t.posiciones||[]).map(p=>(p.skus||[]).some(s=>esCalle2Sku(s.desc))?{...p,calleLetra:"C"}:p)}));
 // Familia del casco: extraída del campo desc con el mismo patrón que usa "En curso" (ej: "CSC-3110"→"3110", "CEC-102"→"102")
 const familiasDePos=skus=>[...new Set((skus||[]).map(s=>(s.desc||"").match(/[A-Z]{2,5}-(\w+)/i)?.[1]||"").filter(Boolean))];
 // Tipo de producto: campo tipo o segunda palabra del desc ("altura", "cueros", etc.)
@@ -181,8 +185,9 @@ function MontacargasApp(){
   const misEnProcesoRef=useRef(new Set());
 
   const refrescar=useCallback(async()=>{
-    const{data,error}=await fetchTurnos();
-    if(!data){console.error("[montacargas] fetchTurnos falló:",error);return;}
+    const{data:rawData,error}=await fetchTurnos();
+    if(!rawData){console.error("[montacargas] fetchTurnos falló:",error);return;}
+    const data=normalizarCalles(rawData);
 
     // Notificación nuevos pendientes
     const nPend=data.filter(t=>t.estado==="pendiente").length;
