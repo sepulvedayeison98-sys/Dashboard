@@ -162,6 +162,9 @@ const esEXPO=d=>(d||"").toUpperCase().includes("EXPO");
 const esSlottable=d=>{const x=(d||"").toUpperCase();return x.includes("ICH")||x.includes("TECH");};
 // Familia de producto: 501, 3110, 102, T-10, etc. (desde descripción) — datos reales
 const familia=d=>{const u=(d||"").toUpperCase();if(/\bT[- ]?10\b/.test(u))return "T-10";const m=u.match(/ICH[- ]?([0-9]{2,4})/);return m?m[1]:"OTRO";};
+// Regla CEDI: 501 SOLID y 501_SP_S viven en la Calle 2 (C2), NO en la Calle 3.
+// Sirve para excluirlos del filtro C3 de Reposición (que captura toda la familia 501).
+const esCalle2=d=>{const u=(d||"").toUpperCase();return (familia(u)==="501"&&u.includes("SOLID"))||u.includes("501_SP_S");};
 // Familias que viven SOLO en altura (no se ubican en piso) — piso=0 no es ruptura
 const SOLO_ALTURA=["520"];
 const esSoloAltura=d=>SOLO_ALTURA.includes(familia(d));
@@ -2994,7 +2997,7 @@ function CEDIDashboard(){
                   const d=(s.desc||"").toUpperCase();
                   if(planCalle==="C1")return["3110","102","405"].includes(f);
                   if(planCalle==="C2")return(f==="501"&&/SP/.test(d))||f==="503";
-                  if(planCalle==="C3")return f==="501";
+                  if(planCalle==="C3")return f==="501"&&!esCalle2(d);
                   if(planCalle==="C4")return["321","3130"].includes(f);
                   return true;
                 });
@@ -3122,7 +3125,7 @@ function CEDIDashboard(){
                   const d=((s.desc||s.label||"")).toUpperCase();
                   if(planCalle==="C1")return["3110","102","405"].includes(f);
                   if(planCalle==="C2")return(f==="501"&&/SP/.test(d))||f==="503";
-                  if(planCalle==="C3")return f==="501";
+                  if(planCalle==="C3")return f==="501"&&!esCalle2(d);
                   if(planCalle==="C4")return["321","3130"].includes(f);
                   return true;
                 });
