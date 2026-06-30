@@ -88,9 +88,29 @@ function AdminApp(){
   const [editando,setEditando]=useState(null);
   const [procesando,setProcesando]=useState({});
   const [busca,setBusca]=useState("");
+  const [filtroEst,setFiltroEst]=useState("todos");
   const timerRef=useRef(null);
 
+  const autoLimpiar=async()=>{
+    // Borrar turnos completados/fallidos con más de 8h
+    const cutoff8h=new Date(Date.now()-8*60*60*1000).toISOString();
+    const{data:viejos}=await _go(`${SUPA_URL}/rest/v1/turnos?estado=in.(completado,fallido)&fecha_completado=lt.${cutoff8h}&select=id,picking`);
+    if(viejos?.length){
+      const ids=viejos.map(t=>t.id).join(",");
+      await _go(`${SUPA_URL}/rest/v1/turnos?id=in.(${ids})`,{method:"DELETE",headers:{..._H,Prefer:"return=minimal"}});
+      const picks=viejos.map(t=>t.picking).filter(Boolean).join(",");
+      if(picks)await _go(`${SUPA_URL}/rest/v1/asignaciones?picking=in.(${picks})`,{method:"DELETE",headers:{..._H,Prefer:"return=minimal"}});
+    }
+    // Auto-completar asignaciones en_proceso con más de 5h
+    const cutoff5h=new Date(Date.now()-5*60*60*1000).toISOString();
+    await _go(`${SUPA_URL}/rest/v1/asignaciones?estado=eq.en_proceso&fecha_asignacion=lt.${cutoff5h}`,{
+      method:"PATCH",headers:{..._H,Prefer:"return=minimal"},
+      body:JSON.stringify({estado:"completado",fecha_completado:new Date().toISOString()})
+    });
+  };
+
   const refrescar=useCallback(async()=>{
+    await autoLimpiar();
     const [rT,rA,rU]=await Promise.all([api.turnos(),api.asigs(),api.usuarios()]);
     if(rT.data)setTurnos(rT.data);
     if(rA.data)setAsigs(rA.data);
@@ -112,6 +132,12 @@ function AdminApp(){
   const nCompletadosHoy=turnos.filter(t=>t.estado==="completado"&&t.fecha_completado&&new Date(t.fecha_completado)>=hoyCut).length;
   const nFallidos=turnos.filter(t=>t.estado==="fallido").length;
   const nUBI=turnos.filter(t=>(t.picking||"").startsWith("UBI-")&&(t.estado==="pendiente"||t.estado==="en_proceso")).length;
+  const avgMinHoy=(()=>{
+    const c=turnos.filter(t=>t.estado==="completado"&&t.fecha_completado&&t.fecha_solicitud&&new Date(t.fecha_completado)>=hoyCut);
+    if(!c.length)return null;
+    const avg=c.reduce((s,t)=>(new Date(t.fecha_completado)-new Date(t.fecha_solicitud))/60000+s,0)/c.length;
+    return Math.round(avg);
+  })();
 
   const priorizarTurno=async(id)=>{
     setProcesando(p=>({...p,[id]:true}));
@@ -159,6 +185,23 @@ function AdminApp(){
     await api.patchAsig(id,{estado:"liberado",fecha_completado:new Date().toISOString()});
     await refrescar();
     setProcesando(p=>({...p,[id]:false}));
+  };
+  const completarPedido=async(id)=>{
+    setProcesando(p=>({...p,[id]:true}));
+    await api.patchAsig(id,{estado:"completado",fecha_completado:new Date().toISOString()});
+    await refrescar();
+    setProcesando(p=>({...p,[id]:false}));
+  };
+  const completarVencidos=async()=>{
+    const vencidas=asigs.filter(a=>a.estado==="en_proceso"&&(new Date()-new Date(a.fecha_asignacion))/3600000>5);
+    if(!vencidas.length)return;
+    if(!window.confirm(`¿Marcar como completados los ${vencidas.length} pedido${vencidas.length!==1?"s":""} con más de 5h en proceso?`))return;
+    const ids=vencidas.map(a=>a.id).join(",");
+    await _go(`${SUPA_URL}/rest/v1/asignaciones?id=in.(${ids})`,{
+      method:"PATCH",headers:{..._H,Prefer:"return=minimal"},
+      body:JSON.stringify({estado:"completado",fecha_completado:new Date().toISOString()})
+    });
+    await refrescar();
   };
   const reasignarPedido=async(id,nuevoOperario)=>{
     setProcesando(p=>({...p,[id]:true}));
@@ -240,14 +283,15 @@ function AdminApp(){
         </div>
         <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:5,marginBottom:10}}>
           {[
-            {l:"Comp. Hoy",v:nCompletadosHoy,c:C.green,ico:"✅"},
-            {l:"Fallidos",v:nFallidos,c:nFallidos>0?C.red:C.t4,ico:"⚠️"},
-            {l:"UBI activas",v:nUBI,c:nUBI>0?C.purple:C.t4,ico:"⬇"},
+            {l:"Comp. Hoy",v:nCompletadosHoy,c:C.green,ico:"✅",sub:avgMinHoy!=null?`~${avgMinHoy}m prom.`:null},
+            {l:"Fallidos",v:nFallidos,c:nFallidos>0?C.red:C.t4,ico:"⚠️",sub:null},
+            {l:"UBI activas",v:nUBI,c:nUBI>0?C.purple:C.t4,ico:"⬇",sub:null},
           ].map(k=>(
             <div key={k.l} style={{background:C.bg2,borderRadius:9,padding:"8px 4px",textAlign:"center",border:`1px solid ${k.v>0?k.c+"30":C.b0}`}}>
               <div style={{fontSize:13}}>{k.ico}</div>
               <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:20,fontWeight:800,color:k.c,lineHeight:1.1}}>{k.v}</div>
               <div style={{fontSize:7,color:C.t4,fontWeight:700,textTransform:"uppercase",marginTop:2}}>{k.l}</div>
+              {k.sub&&<div style={{fontSize:7,color:k.c,fontWeight:600,marginTop:1,opacity:.8}}>{k.sub}</div>}
             </div>
           ))}
         </div>
@@ -258,6 +302,7 @@ function AdminApp(){
             {key:"operarios",lbl:"👷 Operarios"},
             {key:"turnos",lbl:"🏗️ Turnos"},
             {key:"asignaciones",lbl:"📋 Pedidos"},
+            {key:"metricas",lbl:"📊 Métricas"},
           ].map(t=>(
             <button key={t.key} onClick={()=>setTab(t.key)} style={{flex:1,padding:"8px 4px",borderRadius:9,border:`1px solid ${tab===t.key?C.accent:C.b0}`,background:tab===t.key?`${C.accent}18`:C.bg2,color:tab===t.key?C.accent:C.t3,fontWeight:700,fontSize:10,cursor:"pointer"}}>
               {t.lbl}
@@ -265,6 +310,39 @@ function AdminApp(){
           ))}
         </div>
       </div>
+
+      {/* ── Alerta demorados ── */}
+      {(()=>{
+        const demorados=turnos.filter(t=>t.estado==="pendiente"&&(new Date()-new Date(t.fecha_solicitud))/60000>20);
+        if(!demorados.length)return null;
+        return(
+          <div style={{margin:"8px 12px 0",background:`${C.red}12`,border:`1px solid ${C.red}40`,borderRadius:11,padding:"10px 13px",animation:"fadeUp .2s ease both"}}>
+            <div style={{display:"flex",alignItems:"center",gap:7,marginBottom:7}}>
+              <span style={{fontSize:16}}>🚨</span>
+              <span style={{fontSize:10,color:C.red,fontWeight:800,textTransform:"uppercase",letterSpacing:.5}}>
+                {demorados.length} turno{demorados.length!==1?"s":""} demorado{demorados.length!==1?"s":""} (&gt;20 min)
+              </span>
+            </div>
+            {demorados.map(t=>{
+              const min=Math.round((new Date()-new Date(t.fecha_solicitud))/60000);
+              const esUBI=(t.picking||"").startsWith("UBI-");
+              return(
+                <div key={t.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"5px 0",borderTop:`1px solid ${C.red}20`}}>
+                  <div style={{display:"flex",alignItems:"center",gap:6}}>
+                    {esUBI&&<span style={{background:`${C.purple}20`,color:C.purple,borderRadius:3,padding:"0 4px",fontSize:7,fontWeight:800}}>UBI</span>}
+                    <span style={{fontFamily:"'JetBrains Mono',monospace",color:esUBI?C.purple:C.teal,fontWeight:700,fontSize:12}}>{t.picking}</span>
+                    <span style={{fontSize:9,color:C.t3}}>👷 {t.operario_solicitante||"—"}</span>
+                  </div>
+                  <div style={{display:"flex",alignItems:"center",gap:6}}>
+                    <span style={{fontFamily:"'JetBrains Mono',monospace",color:C.red,fontWeight:800,fontSize:11}}>{min}m</span>
+                    <button onClick={()=>{setTab("turnos");setFiltroEst("pendiente");}} style={{padding:"3px 7px",background:`${C.red}20`,border:`1px solid ${C.red}40`,borderRadius:5,color:C.red,fontSize:9,fontWeight:700,cursor:"pointer"}}>Ver</button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        );
+      })()}
 
       <div style={{padding:"12px 12px 0"}}>
 
@@ -281,6 +359,8 @@ function AdminApp(){
                   const nombre=u.nombre;
                   const enProceso=turnos.filter(t=>t.montacarguista===nombre&&t.estado==="en_proceso").sort((a,b)=>(b.es_mde?1:0)-(a.es_mde?1:0));
                   const completadosHoy=turnos.filter(t=>t.montacarguista===nombre&&t.estado==="completado"&&t.fecha_completado&&new Date(t.fecha_completado)>=hoyCut);
+                  const avgMcMin=completadosHoy.length>0?Math.round(completadosHoy.filter(t=>t.fecha_solicitud).reduce((s,t)=>(new Date(t.fecha_completado)-new Date(t.fecha_solicitud))/60000+s,0)/completadosHoy.length):null;
+                  const ultimoMcTs=completadosHoy.map(t=>t.fecha_completado).filter(Boolean).sort().pop();
                   const libre=enProceso.length===0;
                   const accentCol=libre?C.green:C.orange;
                   const expKey=`mc-${nombre}`;
@@ -307,6 +387,7 @@ function AdminApp(){
                             <div style={{textAlign:"center",background:C.bg3,borderRadius:7,padding:"4px 9px",border:`1px solid ${completadosHoy.length>0?C.green+"30":C.b0}`}}>
                               <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:15,fontWeight:800,color:completadosHoy.length>0?C.green:C.t4,lineHeight:1}}>{completadosHoy.length}</div>
                               <div style={{fontSize:7,color:C.t4,textTransform:"uppercase",marginTop:1}}>hoy</div>
+                              {avgMcMin!=null&&<div style={{fontSize:7,color:C.green,fontWeight:600,marginTop:1}}>~{avgMcMin}m</div>}
                             </div>
                             {(completadosHoy.length>0||enProceso.length>0)&&
                               <span style={{color:C.t3,fontSize:13,transform:exp?"rotate(90deg)":"none",transition:"transform .2s"}}>▶</span>}
@@ -405,17 +486,41 @@ function AdminApp(){
                       <span key={ai} style={{fontFamily:"'JetBrains Mono',monospace",background:C.bg3,border:`1px solid ${C.b0}`,borderRadius:4,padding:"2px 7px",fontSize:9,color:C.teal}}>{a.picking}</span>
                     ))}
                   </div>}
+                  {(()=>{
+                    const opKey=(op.nombre||"").toLowerCase().trim();
+                    const compHoyOp=asigs.filter(a=>a.estado==="completado"&&(a.operario||"").toLowerCase().trim()===opKey&&a.fecha_completado&&new Date(a.fecha_completado)>=hoyCut);
+                    const ultimoOp=compHoyOp.map(a=>a.fecha_completado).filter(Boolean).sort().pop();
+                    if(!compHoyOp.length)return null;
+                    return(
+                      <div style={{marginTop:5,padding:"4px 8px",background:C.bg3,borderRadius:6,display:"flex",gap:12,fontSize:9,color:C.t3,flexWrap:"wrap"}}>
+                        <span style={{color:C.green}}>✅ {compHoyOp.length} completado{compHoyOp.length!==1?"s":""} hoy</span>
+                        {ultimoOp&&<span>🕐 Último: {fmtHora(ultimoOp)}</span>}
+                      </div>
+                    );
+                  })()}
                 </div>
-                {expandido[`op-${op.nombre}`]&&op.pedidos.map((a,ai)=>(
-                  <div key={ai} style={{borderTop:`1px solid ${C.b0}`,padding:"8px 13px"}}>
+                {expandido[`op-${op.nombre}`]&&op.pedidos.map((a,ai)=>{
+                  const horas=(new Date()-new Date(a.fecha_asignacion))/3600000;
+                  const vencida=horas>5;
+                  const demorada=horas>2&&!vencida;
+                  const pickCol=vencida?C.red:demorada?C.orange:C.teal;
+                  return(
+                  <div key={ai} style={{borderTop:`1px solid ${vencida?C.red+"30":demorada?C.orange+"25":C.b0}`,padding:"8px 13px",background:vencida?`${C.red}06`:demorada?`${C.orange}05`:"transparent"}}>
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:3}}>
-                      <span style={{fontFamily:"'JetBrains Mono',monospace",color:C.teal,fontWeight:700,fontSize:12}}>{a.picking}</span>
-                      <span style={{fontSize:10,color:C.t3}}>desde {fmtHora(a.fecha_asignacion)} · {transcurrido(a.fecha_asignacion)}</span>
+                      <div style={{display:"flex",alignItems:"center",gap:6}}>
+                        <span style={{fontFamily:"'JetBrains Mono',monospace",color:pickCol,fontWeight:700,fontSize:12}}>{a.picking}</span>
+                        {vencida&&<span style={{background:`${C.red}20`,color:C.red,borderRadius:3,padding:"0 5px",fontSize:7,fontWeight:800}}>VENCIDO</span>}
+                        {demorada&&<span style={{background:`${C.orange}20`,color:C.orange,borderRadius:3,padding:"0 5px",fontSize:7,fontWeight:800}}>DEMORADO</span>}
+                      </div>
+                      <span style={{fontSize:10,color:vencida?C.red:demorada?C.orange:C.t3,fontWeight:vencida||demorada?700:400}}>desde {fmtHora(a.fecha_asignacion)} · {transcurrido(a.fecha_asignacion)}</span>
                     </div>
                     <div style={{color:C.t2,fontSize:11,marginBottom:6,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{a.cliente}</div>
                     <div style={{display:"flex",gap:6}}>
-                      <button onClick={()=>setEditando(`asig-${a.id}`)} style={{flex:1,padding:"6px",background:C.bg3,border:`1px solid ${C.b0}`,borderRadius:7,color:C.t2,fontSize:11,fontWeight:700,cursor:"pointer"}}>✏️ Reasignar</button>
-                      <button onClick={()=>liberarPedido(a.id)} disabled={!!procesando[a.id]} style={{flex:1,padding:"6px",background:`${C.orange}15`,border:`1px solid ${C.orange}30`,borderRadius:7,color:C.orange,fontSize:11,fontWeight:700,cursor:"pointer"}}>🔓 Liberar</button>
+                      {!vencida&&<button onClick={()=>setEditando(`asig-${a.id}`)} style={{flex:1,padding:"6px",background:C.bg3,border:`1px solid ${C.b0}`,borderRadius:7,color:C.t2,fontSize:11,fontWeight:700,cursor:"pointer"}}>✏️ Reasignar</button>}
+                      {vencida
+                        ?<button onClick={()=>completarPedido(a.id)} disabled={!!procesando[a.id]} style={{flex:1,padding:"8px",background:`${C.green}20`,border:`1px solid ${C.green}40`,borderRadius:7,color:C.green,fontSize:12,fontWeight:800,cursor:"pointer"}}>✅ Completar</button>
+                        :<button onClick={()=>liberarPedido(a.id)} disabled={!!procesando[a.id]} style={{flex:1,padding:"6px",background:`${C.orange}15`,border:`1px solid ${C.orange}30`,borderRadius:7,color:C.orange,fontSize:11,fontWeight:700,cursor:"pointer"}}>🔓 Liberar</button>
+                      }
                     </div>
                     {editando===`asig-${a.id}`&&(
                       <ReasignarForm
@@ -426,7 +531,8 @@ function AdminApp(){
                       />
                     )}
                   </div>
-                ))}
+                  );
+                })}
               </div>
             ))}
           </div>
@@ -440,11 +546,37 @@ function AdminApp(){
               style={{width:"100%",background:C.bg3,color:C.t1,border:`1px solid ${C.b1}`,borderRadius:11,padding:"11px 13px",fontSize:13,marginBottom:10}}
             />
 
+            {/* Filtros por estado */}
+            <div style={{display:"flex",gap:4,marginBottom:10,flexWrap:"wrap"}}>
+              {[
+                {k:"todos",lbl:"Todos",ico:""},
+                {k:"pendiente",lbl:"Pendiente",ico:"⏳"},
+                {k:"en_proceso",lbl:"En proceso",ico:"🔄"},
+                {k:"completado",lbl:"Completado",ico:"✅"},
+                {k:"fallido",lbl:"Fallido",ico:"⚠️"},
+              ].map(f=>{
+                const col={pendiente:C.yellow,en_proceso:C.orange,completado:C.green,fallido:C.red,todos:C.accent}[f.k];
+                const cnt=f.k==="todos"
+                  ?turnos.filter(t=>!(t.picking||"").startsWith("UBI-")).length
+                  :turnos.filter(t=>t.estado===f.k&&!(t.picking||"").startsWith("UBI-")).length;
+                const sel=filtroEst===f.k;
+                return(
+                  <button key={f.k} onClick={()=>setFiltroEst(f.k)}
+                    style={{padding:"5px 9px",borderRadius:8,border:`1px solid ${sel?col:C.b0}`,background:sel?`${col}20`:C.bg2,color:sel?col:C.t3,fontSize:10,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",gap:4}}>
+                    {f.ico&&<span>{f.ico}</span>}
+                    <span>{f.lbl}</span>
+                    <span style={{background:sel?`${col}35`:C.bg3,borderRadius:5,padding:"0 5px",fontSize:9,fontWeight:800,color:sel?col:C.t4}}>{cnt}</span>
+                  </button>
+                );
+              })}
+            </div>
+
             {/* Bajadas UBI */}
-            {(()=>{
+            {(filtroEst==="todos"||filtroEst==="pendiente"||filtroEst==="en_proceso"||filtroEst==="completado"||filtroEst==="fallido")&&(()=>{
               const q=busca.trim().toLowerCase();
               const ubiTurnos=turnos
                 .filter(t=>(t.picking||"").startsWith("UBI-"))
+                .filter(t=>filtroEst==="todos"||t.estado===filtroEst)
                 .filter(t=>!q||(t.picking||"").toLowerCase().includes(q)||(t.cliente||"").toLowerCase().includes(q)||(t.operario_solicitante||"").toLowerCase().includes(q))
                 .sort((a,b)=>new Date(b.fecha_solicitud)-new Date(a.fecha_solicitud));
               if(ubiTurnos.length===0)return null;
@@ -497,7 +629,7 @@ function AdminApp(){
             })()}
 
             {/* Turnos picking normales */}
-            {["pendiente","en_proceso","fallido","completado"].map(est=>{
+            {(filtroEst==="todos"?["pendiente","en_proceso","fallido","completado"]:[filtroEst]).map(est=>{
               const q=busca.trim().toLowerCase();
               const lista=turnos
                 .filter(t=>t.estado===est&&!(t.picking||"").startsWith("UBI-"))
@@ -592,6 +724,23 @@ function AdminApp(){
         {/* ── TAB ASIGNACIONES ── */}
         {tab==="asignaciones"&&(
           <div>
+            {/* Alerta bulk vencidos */}
+            {(()=>{
+              const vencidas=asigs.filter(a=>a.estado==="en_proceso"&&(new Date()-new Date(a.fecha_asignacion))/3600000>5);
+              if(!vencidas.length)return null;
+              return(
+                <div style={{background:`${C.orange}12`,border:`1px solid ${C.orange}35`,borderRadius:11,padding:"11px 13px",marginBottom:12,display:"flex",justifyContent:"space-between",alignItems:"center",gap:10}}>
+                  <div>
+                    <div style={{fontSize:11,color:C.orange,fontWeight:800}}>⚠ {vencidas.length} pedido{vencidas.length!==1?"s":""} sin cerrar (+5h)</div>
+                    <div style={{fontSize:9,color:C.t3,marginTop:2}}>Se completarán solos en el próximo refresh</div>
+                  </div>
+                  <button onClick={completarVencidos} style={{flexShrink:0,padding:"8px 12px",background:`${C.green}20`,border:`1px solid ${C.green}40`,borderRadius:8,color:C.green,fontSize:11,fontWeight:800,cursor:"pointer"}}>
+                    ✅ Completar ahora
+                  </button>
+                </div>
+              );
+            })()}
+
             {["en_proceso","liberado","completado"].map(est=>{
               const lista=asigs.filter(a=>a.estado===est).sort((a,b)=>new Date(b.fecha_asignacion)-new Date(a.fecha_asignacion));
               if(lista.length===0)return null;
@@ -603,21 +752,28 @@ function AdminApp(){
                     <span style={{fontSize:10,color:col,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>{lbl}</span>
                     <span style={{background:`${col}20`,color:col,borderRadius:10,padding:"1px 7px",fontSize:9,fontWeight:700}}>{lista.length}</span>
                   </div>
-                  {lista.map((a)=>(
-                    <div key={a.id} style={{background:C.bg2,borderRadius:11,marginBottom:6,border:`1px solid ${C.b0}`,borderLeft:`4px solid ${col}`,animation:"fadeUp .2s ease both",padding:"10px 13px"}}>
+                  {lista.map((a)=>{
+                    const horas=est==="en_proceso"?(new Date()-new Date(a.fecha_asignacion))/3600000:0;
+                    const vencida=horas>5;
+                    const demorada=horas>2&&!vencida;
+                    const alertaCol=vencida?C.red:demorada?C.orange:col;
+                    return(
+                    <div key={a.id} style={{background:C.bg2,borderRadius:11,marginBottom:6,border:`1px solid ${vencida?C.red+"40":demorada?C.orange+"35":C.b0}`,borderLeft:`4px solid ${alertaCol}`,animation:"fadeUp .2s ease both",padding:"10px 13px"}}>
                       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:4}}>
-                        <div>
-                          <span style={{fontFamily:"'JetBrains Mono',monospace",color:C.teal,fontWeight:800,fontSize:13}}>{a.picking}</span>
-                          {a.pedido_siesa&&<span style={{fontFamily:"'JetBrains Mono',monospace",color:C.t4,fontSize:10,marginLeft:8}}>#{a.pedido_siesa}</span>}
+                        <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+                          <span style={{fontFamily:"'JetBrains Mono',monospace",color:vencida?C.red:demorada?C.orange:C.teal,fontWeight:800,fontSize:13}}>{a.picking}</span>
+                          {a.pedido_siesa&&<span style={{fontFamily:"'JetBrains Mono',monospace",color:C.t4,fontSize:10}}>#{a.pedido_siesa}</span>}
+                          {vencida&&<span style={{background:`${C.red}20`,color:C.red,borderRadius:4,padding:"1px 5px",fontSize:7,fontWeight:800}}>VENCIDO</span>}
+                          {demorada&&<span style={{background:`${C.orange}20`,color:C.orange,borderRadius:4,padding:"1px 5px",fontSize:7,fontWeight:800}}>DEMORADO</span>}
                         </div>
-                        <span style={{background:`${col}18`,color:col,borderRadius:4,padding:"1px 6px",fontSize:8,fontWeight:700}}>{estadoLbl[est]}</span>
+                        <span style={{background:`${alertaCol}18`,color:alertaCol,borderRadius:4,padding:"1px 6px",fontSize:8,fontWeight:700,flexShrink:0}}>{estadoLbl[est]}</span>
                       </div>
                       <div style={{color:C.t2,fontSize:11,marginBottom:4,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{a.cliente}</div>
                       <div style={{display:"flex",gap:10,fontSize:10,color:C.t3,flexWrap:"wrap",marginBottom:est==="en_proceso"?6:0}}>
                         <span>👷 {a.operario}</span>
                         <span>📍 {a.ciudad}</span>
                         <span>🕐 {fmtFecha(a.fecha_asignacion)}</span>
-                        {est==="en_proceso"&&<span style={{color:C.t4}}>⏱ {transcurrido(a.fecha_asignacion)}</span>}
+                        {est==="en_proceso"&&<span style={{color:vencida?C.red:demorada?C.orange:C.t4,fontWeight:vencida||demorada?700:400}}>⏱ {transcurrido(a.fecha_asignacion)}</span>}
                       </div>
                       {est==="en_proceso"&&(
                         editando===`asig-${a.id}`
@@ -628,12 +784,16 @@ function AdminApp(){
                               onCancelar={()=>setEditando(null)}
                             />
                           :<div style={{display:"flex",gap:5}}>
-                            <button onClick={()=>setEditando(`asig-${a.id}`)} style={{flex:1,padding:"6px",background:C.bg3,border:`1px solid ${C.b0}`,borderRadius:7,color:C.t2,fontSize:11,fontWeight:700,cursor:"pointer"}}>✏️ Reasignar</button>
-                            <button onClick={()=>liberarPedido(a.id)} disabled={!!procesando[a.id]} style={{flex:1,padding:"6px",background:`${C.orange}15`,border:`1px solid ${C.orange}30`,borderRadius:7,color:C.orange,fontSize:11,fontWeight:700,cursor:"pointer"}}>🔓 Liberar</button>
+                            {!vencida&&<button onClick={()=>setEditando(`asig-${a.id}`)} style={{flex:1,padding:"6px",background:C.bg3,border:`1px solid ${C.b0}`,borderRadius:7,color:C.t2,fontSize:11,fontWeight:700,cursor:"pointer"}}>✏️ Reasignar</button>}
+                            {vencida
+                              ?<button onClick={()=>completarPedido(a.id)} disabled={!!procesando[a.id]} style={{flex:1,padding:"8px",background:`${C.green}20`,border:`1px solid ${C.green}40`,borderRadius:7,color:C.green,fontSize:11,fontWeight:800,cursor:"pointer"}}>✅ Completar</button>
+                              :<button onClick={()=>liberarPedido(a.id)} disabled={!!procesando[a.id]} style={{flex:1,padding:"6px",background:`${C.orange}15`,border:`1px solid ${C.orange}30`,borderRadius:7,color:C.orange,fontSize:11,fontWeight:700,cursor:"pointer"}}>🔓 Liberar</button>
+                            }
                           </div>
                       )}
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               );
             })}
@@ -645,6 +805,110 @@ function AdminApp(){
             )}
           </div>
         )}
+        {/* ── TAB MÉTRICAS ── */}
+        {tab==="metricas"&&(()=>{
+          const compHoy=turnos.filter(t=>t.estado==="completado"&&t.fecha_completado&&new Date(t.fecha_completado)>=hoyCut);
+
+          // Turnos por hora (0–23)
+          const porHora=Array.from({length:24},(_,h)=>({h,n:compHoy.filter(t=>new Date(t.fecha_completado).getHours()===h).length}));
+          const maxHora=Math.max(...porHora.map(x=>x.n),1);
+          const horaActual=new Date().getHours();
+          const horasActivas=porHora.filter(x=>x.n>0||x.h<=horaActual);
+
+          // Ranking montacarguistas
+          const rankMc=(()=>{
+            const map={};
+            compHoy.forEach(t=>{if(t.montacarguista){if(!map[t.montacarguista])map[t.montacarguista]=0;map[t.montacarguista]++;}});
+            return Object.entries(map).sort((a,b)=>b[1]-a[1]);
+          })();
+
+          // Ranking operarios (asigns completadas hoy)
+          const asigHoy=asigs.filter(a=>a.estado==="completado"&&a.fecha_completado&&new Date(a.fecha_completado)>=hoyCut);
+          const rankOp=(()=>{
+            const map={};
+            asigHoy.forEach(a=>{if(a.operario){if(!map[a.operario])map[a.operario]=0;map[a.operario]++;}});
+            return Object.entries(map).sort((a,b)=>b[1]-a[1]);
+          })();
+
+          // Turno más largo del día
+          const masLargo=compHoy.filter(t=>t.fecha_solicitud).sort((a,b)=>(new Date(b.fecha_completado)-new Date(b.fecha_solicitud))-(new Date(a.fecha_completado)-new Date(a.fecha_solicitud)))[0];
+          const masLargoMin=masLargo?Math.round((new Date(masLargo.fecha_completado)-new Date(masLargo.fecha_solicitud))/60000):null;
+
+          return(
+            <div>
+              {/* Turnos completados por hora */}
+              <div style={{background:C.bg2,borderRadius:12,padding:"13px",marginBottom:12,border:`1px solid ${C.b0}`}}>
+                <div style={{fontSize:10,color:C.accent,fontWeight:700,textTransform:"uppercase",letterSpacing:.5,marginBottom:10}}>📈 Completados por hora</div>
+                {compHoy.length===0?(
+                  <div style={{textAlign:"center",color:C.t4,fontSize:12,padding:"20px 0"}}>Sin completados hoy</div>
+                ):(
+                  <div style={{display:"flex",alignItems:"flex-end",gap:3,height:60}}>
+                    {horasActivas.map(({h,n})=>(
+                      <div key={h} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
+                        {n>0&&<div style={{fontSize:7,color:C.accent,fontWeight:700}}>{n}</div>}
+                        <div style={{width:"100%",background:n>0?C.accent:C.bg3,borderRadius:"3px 3px 0 0",height:n>0?`${Math.max(Math.round(n/maxHora*44),4)}px`:"4px",transition:"height .3s",opacity:h===horaActual?1:.7}}/>
+                        <div style={{fontSize:6,color:C.t4}}>{h}h</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div style={{marginTop:8,fontSize:9,color:C.t4,textAlign:"right"}}>{compHoy.length} turno{compHoy.length!==1?"s":""} completado{compHoy.length!==1?"s":""} hoy</div>
+              </div>
+
+              {/* Rankings */}
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:12}}>
+                {/* Ranking montacarguistas */}
+                <div style={{background:C.bg2,borderRadius:12,padding:"11px",border:`1px solid ${C.b0}`}}>
+                  <div style={{fontSize:9,color:C.purple,fontWeight:700,textTransform:"uppercase",letterSpacing:.5,marginBottom:8}}>🏗️ Montacarguistas</div>
+                  {rankMc.length===0?(
+                    <div style={{color:C.t4,fontSize:10,textAlign:"center",padding:"8px 0"}}>—</div>
+                  ):rankMc.slice(0,5).map(([nom,cnt],ri)=>(
+                    <div key={nom} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"3px 0",borderTop:ri>0?`1px solid ${C.b0}`:"none"}}>
+                      <div style={{display:"flex",alignItems:"center",gap:5}}>
+                        <span style={{fontSize:9,color:ri===0?C.yellow:C.t4,fontWeight:700}}>#{ri+1}</span>
+                        <span style={{fontSize:10,color:C.t2,textTransform:"capitalize",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:60}}>{nom}</span>
+                      </div>
+                      <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:12,fontWeight:800,color:ri===0?C.yellow:C.green}}>{cnt}</span>
+                    </div>
+                  ))}
+                </div>
+                {/* Ranking operarios */}
+                <div style={{background:C.bg2,borderRadius:12,padding:"11px",border:`1px solid ${C.b0}`}}>
+                  <div style={{fontSize:9,color:C.teal,fontWeight:700,textTransform:"uppercase",letterSpacing:.5,marginBottom:8}}>👷 Operarios</div>
+                  {rankOp.length===0?(
+                    <div style={{color:C.t4,fontSize:10,textAlign:"center",padding:"8px 0"}}>—</div>
+                  ):rankOp.slice(0,5).map(([nom,cnt],ri)=>(
+                    <div key={nom} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"3px 0",borderTop:ri>0?`1px solid ${C.b0}`:"none"}}>
+                      <div style={{display:"flex",alignItems:"center",gap:5}}>
+                        <span style={{fontSize:9,color:ri===0?C.yellow:C.t4,fontWeight:700}}>#{ri+1}</span>
+                        <span style={{fontSize:10,color:C.t2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:60}}>{nom}</span>
+                      </div>
+                      <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:12,fontWeight:800,color:ri===0?C.yellow:C.teal}}>{cnt}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Turno más largo */}
+              {masLargo&&(
+                <div style={{background:C.bg2,borderRadius:12,padding:"13px",border:`1px solid ${C.orange}30`,borderLeft:`4px solid ${C.orange}`}}>
+                  <div style={{fontSize:9,color:C.orange,fontWeight:700,textTransform:"uppercase",letterSpacing:.5,marginBottom:6}}>⏱ Turno más largo del día</div>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <div>
+                      <div style={{fontFamily:"'JetBrains Mono',monospace",color:C.teal,fontWeight:800,fontSize:14}}>{masLargo.picking}</div>
+                      <div style={{fontSize:10,color:C.t3,marginTop:2}}>🏗️ {masLargo.montacarguista||"—"} · {fmtHora(masLargo.fecha_solicitud)} → {fmtHora(masLargo.fecha_completado)}</div>
+                    </div>
+                    <div style={{textAlign:"right"}}>
+                      <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:22,fontWeight:800,color:C.orange,lineHeight:1}}>{masLargoMin}</div>
+                      <div style={{fontSize:8,color:C.t4,textTransform:"uppercase"}}>minutos</div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
       </div>
     </div>
   );

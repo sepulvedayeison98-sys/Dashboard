@@ -463,7 +463,9 @@ function MontacargasApp(){
     const grupos={};
     lista.forEach(t=>{const k=t.operario_solicitante||"—";if(!grupos[k])grupos[k]=[];grupos[k].push(t);});
     const keys=Object.keys(grupos);
-    if(keys.length<=1)return lista.map((t,i)=>({type:"turno",t,numLabel:i+1}));
+    // Mostrar header si cualquier operario tiene >1 turno (aunque sea el único)
+    const necesitaHeader=keys.some(k=>grupos[k].length>1);
+    if(!necesitaHeader)return lista.map((t,i)=>({type:"turno",t,numLabel:i+1}));
     return keys.flatMap(k=>[
       {type:"header",operario:k,count:grupos[k].length,ids:grupos[k].map(t=>t.id)},
       ...grupos[k].map((t,gi)=>({type:"turno",t,numLabel:gi+1}))
@@ -763,19 +765,20 @@ function MontacargasApp(){
                             {/* Selector de motivo inline por posición */}
                             {reportandoEstePosicion&&(
                               <div style={{background:`${C.red}10`,borderTop:`1px solid ${C.red}20`,padding:"8px 10px"}}>
-                                <div style={{fontSize:9,color:C.red,fontWeight:700,marginBottom:6}}>¿Qué pasó en {pos.ubi}?</div>
-                                <div style={{display:"flex",flexDirection:"column",gap:4}}>
-                                  {["Caja no encontrada","Posición vacía","Caja dañada / mojada","Acceso bloqueado","Cantidad incorrecta","Otro"].map(m=>(
-                                    <button key={m} onClick={()=>marcarFalloPosicion(t.id,pi,m)} disabled={bajando}
-                                      style={{padding:"7px 10px",background:`${C.red}12`,border:`1px solid ${C.red}30`,borderRadius:7,color:C.red,fontSize:11,fontWeight:600,cursor:"pointer",textAlign:"left",fontFamily:"inherit"}}>
-                                      {m}
+                                <div style={{fontSize:9,color:C.red,fontWeight:700,marginBottom:7}}>¿Qué pasó en {pos.ubi}?</div>
+                                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:5}}>
+                                  {[{ico:"❓",txt:"No encontrada"},{ico:"📭",txt:"Posición vacía"},{ico:"💥",txt:"Caja dañada"},{ico:"🚧",txt:"Acceso bloqueado"},{ico:"📋",txt:"Diferencia stock"},{ico:"✏️",txt:"Otro"}].map(m=>(
+                                    <button key={m.txt} onClick={()=>marcarFalloPosicion(t.id,pi,m.ico+" "+m.txt)} disabled={bajando}
+                                      style={{padding:"8px 6px",background:`${C.red}12`,border:`1px solid ${C.red}30`,borderRadius:8,color:C.red,fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit",display:"flex",flexDirection:"column",alignItems:"center",gap:3}}>
+                                      <span style={{fontSize:17}}>{m.ico}</span>
+                                      <span style={{fontSize:9,textAlign:"center",lineHeight:1.2}}>{m.txt}</span>
                                     </button>
                                   ))}
-                                  <button onClick={()=>setReportandoPos(r=>({...r,[keyBaj]:false}))}
-                                    style={{padding:"6px",background:C.bg3,border:`1px solid ${C.b0}`,borderRadius:7,color:C.t3,fontSize:10,cursor:"pointer",fontFamily:"inherit",marginTop:2}}>
-                                    Cancelar
-                                  </button>
                                 </div>
+                                <button onClick={()=>setReportandoPos(r=>({...r,[keyBaj]:false}))}
+                                  style={{width:"100%",padding:"6px",background:C.bg3,border:`1px solid ${C.b0}`,borderRadius:7,color:C.t3,fontSize:10,cursor:"pointer",fontFamily:"inherit",marginTop:6}}>
+                                  Cancelar
+                                </button>
                               </div>
                             )}
                           </div>
@@ -978,18 +981,19 @@ function MontacargasApp(){
                                       {reportandoEste&&(
                                         <div style={{background:`${C.red}10`,borderRadius:8,padding:"8px 10px",marginTop:4,border:`1px solid ${C.red}20`}}>
                                           <div style={{fontSize:10,color:C.red,fontWeight:700,marginBottom:7}}>¿Qué pasó en {ubiEntry.ubi}?</div>
-                                          <div style={{display:"flex",flexDirection:"column",gap:4}}>
-                                            {["Caja no encontrada","Posición vacía","Caja dañada / mojada","Acceso bloqueado","Cantidad incorrecta","Otro"].map(m=>(
-                                              <button key={m} onClick={()=>{marcarFalloPosicion(p.turnoId,p.posIdx,m);setReportandoPos(r=>({...r,[keyRep]:false}));}} disabled={procEste}
-                                                style={{padding:"8px 10px",background:`${C.red}12`,border:`1px solid ${C.red}30`,borderRadius:7,color:C.red,fontSize:12,fontWeight:600,cursor:"pointer",textAlign:"left",fontFamily:"inherit"}}>
-                                                {m}
+                                          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:5}}>
+                                            {[{ico:"❓",txt:"No encontrada"},{ico:"📭",txt:"Posición vacía"},{ico:"💥",txt:"Caja dañada"},{ico:"🚧",txt:"Acceso bloqueado"},{ico:"📋",txt:"Diferencia stock"},{ico:"✏️",txt:"Otro"}].map(m=>(
+                                              <button key={m.txt} onClick={()=>{marcarFalloPosicion(p.turnoId,p.posIdx,m.ico+" "+m.txt);setReportandoPos(r=>({...r,[keyRep]:false}));}} disabled={procEste}
+                                                style={{padding:"8px 6px",background:`${C.red}12`,border:`1px solid ${C.red}30`,borderRadius:8,color:C.red,fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit",display:"flex",flexDirection:"column",alignItems:"center",gap:3}}>
+                                                <span style={{fontSize:17}}>{m.ico}</span>
+                                                <span style={{fontSize:9,textAlign:"center",lineHeight:1.2}}>{m.txt}</span>
                                               </button>
                                             ))}
-                                            <button onClick={()=>setReportandoPos(r=>({...r,[keyRep]:false}))}
-                                              style={{padding:"7px",background:C.bg3,border:`1px solid ${C.b0}`,borderRadius:7,color:C.t3,fontSize:11,cursor:"pointer",fontFamily:"inherit",marginTop:2}}>
-                                              Cancelar
-                                            </button>
                                           </div>
+                                          <button onClick={()=>setReportandoPos(r=>({...r,[keyRep]:false}))}
+                                            style={{width:"100%",padding:"7px",background:C.bg3,border:`1px solid ${C.b0}`,borderRadius:7,color:C.t3,fontSize:11,cursor:"pointer",fontFamily:"inherit",marginTop:6}}>
+                                            Cancelar
+                                          </button>
                                         </div>
                                       )}
                                     </div>
