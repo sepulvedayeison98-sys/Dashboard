@@ -66,4 +66,14 @@ t("clasificar 60% → parcial", () => assert.strictEqual(C.clasificar(60, 10), "
 t("clasificar 0% con altura → reabasto", () => assert.strictEqual(C.clasificar(0, 20), "reabasto"));
 t("clasificar 0% sin altura → ruptura", () => assert.strictEqual(C.clasificar(0, 0), "ruptura"));
 
+// ── calleFamiliaMatch (filtro C1–C4 por familia) ─────────────────────────────
+t("C1 incluye 3110", () => assert.strictEqual(C.calleFamiliaMatch("C1", "CASCO ICH ICH-3110 X"), true));
+t("C2 incluye 501-SP", () => assert.strictEqual(C.calleFamiliaMatch("C2", "CASCO ICH ICH-501_SP HCI"), true));
+t("C2 incluye 503", () => assert.strictEqual(C.calleFamiliaMatch("C2", "CASCO ICH ICH-503 X"), true));
+t("C3 incluye 501_SP normal", () => assert.strictEqual(C.calleFamiliaMatch("C3", "CASCO ICH ICH-501_SP HCI"), true));
+t("C3 EXCLUYE 501 SOLID", () => assert.strictEqual(C.calleFamiliaMatch("C3", "CASCO ICH ICH-501_SP SOLID"), false));
+t("C3 EXCLUYE 501_SP_S", () => assert.strictEqual(C.calleFamiliaMatch("C3", "CASCO ICH ICH-501_SP_S CHAMPS"), false));
+t("C4 incluye 3130", () => assert.strictEqual(C.calleFamiliaMatch("C4", "CASCO ICH ICH-3130 X"), true));
+t("C1 NO incluye 501", () => assert.strictEqual(C.calleFamiliaMatch("C1", "CASCO ICH ICH-501_SP HCI"), false));
+
 console.log(`\n${pass} pruebas OK`);

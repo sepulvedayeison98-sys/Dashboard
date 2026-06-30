@@ -90,9 +90,22 @@
     return "ruptura";
   };
 
+  // Filtro de calle por FAMILIA (layout lógico del CEDI en Reposición):
+  //   C1: 3110/102/405 · C2: 501-SP + 503 · C3: 501 general (sin SOLID/SP_S) · C4: 321/3130
+  // Centraliza la lógica que estaba duplicada en index.html (filtro C1–C4).
+  const calleFamiliaMatch = (calle, desc) => {
+    const f = familia(desc);
+    const d = (desc || "").toUpperCase();
+    if (calle === "C1") return ["3110", "102", "405"].includes(f);
+    if (calle === "C2") return (f === "501" && /SP/.test(d)) || f === "503";
+    if (calle === "C3") return f === "501" && !esCalle2(desc); // SOLID/SP_S excluidos → solo C2
+    if (calle === "C4") return ["321", "3130"].includes(f);
+    return true;
+  };
+
   global.CEDI = {
     CAJA, CALLE_MAP, CALLE_NOM, CALLE_ORD,
     toNum, tieneNota, marcaDe, esEXPO, familia, esCalle2,
-    parseUbi, esMDE, coberturaLinea, clasificar,
+    parseUbi, esMDE, coberturaLinea, clasificar, calleFamiliaMatch,
   };
 })(typeof window !== "undefined" ? window : globalThis);
