@@ -1,9 +1,10 @@
 {
+  "id": "./index.html?app=cedi",
   "name": "CEDI INDUCASOS — Torre de Control",
   "short_name": "CEDI",
   "description": "Dashboard inteligente de abastecimiento del CEDI INDUCASOS",
   "start_url": "./index.html",
-  "scope": "./",
+  "scope": "./index.html",
   "display": "standalone",
   "orientation": "any",
   "background_color": "#070b14",

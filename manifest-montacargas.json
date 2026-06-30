@@ -1,8 +1,10 @@
 {
+  "id": "./montacargas.html?app=montacargas",
   "name": "Montacargas – INDUCASOS",
   "short_name": "Montacargas",
   "description": "Panel de rutas para montacarguistas",
   "start_url": "./montacargas.html",
+  "scope": "./montacargas.html",
   "display": "standalone",
   "background_color": "#0d0a1a",
   "theme_color": "#a855f7",

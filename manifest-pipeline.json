@@ -1,8 +1,10 @@
 {
+  "id": "./pipeline.html?app=picking",
   "name": "Picking – INDUCASOS",
   "short_name": "Picking",
   "description": "Panel de picking para operarios de bodega",
   "start_url": "./pipeline.html",
+  "scope": "./pipeline.html",
   "display": "standalone",
   "background_color": "#080d19",
   "theme_color": "#38bdf8",
