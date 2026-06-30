@@ -4,7 +4,8 @@
   "description": "",
   "main": "sw.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node shared/helpers-cedi.test.js",
+    "check": "node --check shared/config.js && node --check shared/helpers-cedi.js"
   },
   "repository": {
     "type": "git",

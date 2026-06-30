@@ -1,0 +1,21 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "claude/**"]
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Validar sintaxis de módulos compartidos
+        run: |
+          node --check shared/config.js
+          node --check shared/helpers-cedi.js
+      - name: Correr tests de lógica de negocio
+        run: node shared/helpers-cedi.test.js
