@@ -75,6 +75,7 @@ const fetchTurnos=()=>_go(`${SUPA_URL}/rest/v1/turnos?order=fecha_solicitud.asc`
 
 // ═══════════ HELPERS ═══════════
 const CALLE_NOM={B:"Calle 1",C:"Calle 2",D:"Calle 3",E:"Calle 4"};
+const pickingLabel=p=>p&&p.startsWith("UBI-MULTI-")?"🛒 Bajada múltiple":p;
 const CALLE_ORD={B:1,C:2,D:3,E:4};
 const esMDE=c=>{const x=String(c||"").toUpperCase().trim();return x==="MDE"||x.includes("MEDELL")||x==="ITAGUI"||x==="ITAGÜI"||x.includes("ITAGU");};
 const fmtHora=ts=>{if(!ts)return"";const d=new Date(ts);return d.toLocaleTimeString("es-CO",{hour:"2-digit",minute:"2-digit"});};
@@ -860,7 +861,7 @@ function MontacargasApp(){
                           const done=nB===nT;
                           return(
                             <span key={t.id} style={{fontFamily:"'JetBrains Mono',monospace",background:done?`${C.green}15`:C.bg3,border:`1px solid ${done?C.green+"40":C.b0}`,borderRadius:6,padding:"3px 10px",fontSize:11,color:done?C.green:C.teal,fontWeight:700}}>
-                              {t.picking} {done?"✓":`${nB}/${nT}`}
+                              {pickingLabel(t.picking)} {done?"✓":`${nB}/${nT}`}
                             </span>
                           );
                         })}
@@ -917,7 +918,7 @@ function MontacargasApp(){
                                       <div key={i} style={{background:p.urgente?`${C.red}12`:C.bg3,border:`1px solid ${p.urgente?C.red+"40":C.b0}`,borderRadius:7,padding:"5px 9px",display:"inline-flex",flexDirection:"column",gap:3}}>
                                         <div style={{display:"flex",alignItems:"center",gap:5}}>
                                           {p.urgente&&<span style={{color:C.red,fontSize:10}}>🚨</span>}
-                                          <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:11,color:p.urgente?C.red:C.teal,fontWeight:800}}>{p.picking}</span>
+                                          <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:11,color:p.urgente?C.red:C.teal,fontWeight:800}}>{pickingLabel(p.picking)}</span>
                                         </div>
                                         <div style={{display:"flex",gap:4,alignItems:"center",flexWrap:"wrap"}}>
                                           {p.operario&&<span style={{fontSize:10,color:C.t2,fontWeight:600}}>👷 {p.operario}</span>}
@@ -945,7 +946,7 @@ function MontacargasApp(){
                                       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
                                         <div style={{display:"flex",alignItems:"center",gap:6,flex:1,minWidth:0}}>
                                           {p.urgente&&!p.bajada&&<span style={{fontSize:10,color:C.red,flexShrink:0}}>🚨</span>}
-                                          <span style={{fontFamily:"'JetBrains Mono',monospace",color:p.bajada?C.green:p.fallo?C.red:C.teal,fontWeight:800,fontSize:14}}>{p.picking}</span>
+                                          <span style={{fontFamily:"'JetBrains Mono',monospace",color:p.bajada?C.green:p.fallo?C.red:C.teal,fontWeight:800,fontSize:14,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{pickingLabel(p.picking)}</span>
                                           {p.bajada&&<span style={{color:C.green,fontSize:11,fontWeight:700}}>✓ bajado</span>}
                                           {p.fallo&&<span style={{color:C.red,fontSize:10}}>⚠ {p.motivo_fallo||"fallo"}</span>}
                                         </div>
@@ -1071,7 +1072,7 @@ function MontacargasApp(){
                           </div>
                           {!exp&&<div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
                             {ubiEntry.posiciones.map((p,i)=>(
-                              <span key={i} style={{fontFamily:"'JetBrains Mono',monospace",background:p.urgente?`${C.red}15`:C.bg3,border:`1px solid ${p.urgente?C.red+"40":C.b0}`,borderRadius:4,padding:"2px 6px",fontSize:9,color:p.urgente?C.red:C.teal}}>{p.picking}</span>
+                              <span key={i} style={{fontFamily:"'JetBrains Mono',monospace",background:p.urgente?`${C.red}15`:C.bg3,border:`1px solid ${p.urgente?C.red+"40":C.b0}`,borderRadius:4,padding:"2px 6px",fontSize:9,color:p.urgente?C.red:C.teal}}>{pickingLabel(p.picking)}</span>
                             ))}
                           </div>}
                         </div>
@@ -1082,7 +1083,7 @@ function MontacargasApp(){
                                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
                                   <div style={{display:"flex",alignItems:"center",gap:5}}>
                                     {p.urgente&&<span style={{fontSize:9,color:C.red,fontWeight:800}}>🚨</span>}
-                                    <span style={{fontFamily:"'JetBrains Mono',monospace",color:C.teal,fontWeight:800,fontSize:12}}>{p.picking}</span>
+                                    <span style={{fontFamily:"'JetBrains Mono',monospace",color:C.teal,fontWeight:800,fontSize:12,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{pickingLabel(p.picking)}</span>
                                   </div>
                                   <span style={{color:C.t3,fontSize:10,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:120}}>{p.cliente}</span>
                                 </div>
