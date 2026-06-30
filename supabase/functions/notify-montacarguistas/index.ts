@@ -3,11 +3,14 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import webpush from "npm:web-push@3.6.7";
 
-webpush.setVapidDetails(
-  "mailto:sepulvedayeison98@gmail.com",
-  "BIkO5rFXvS_7NPyJSWIWyoUhafWswdr0ImaaYV2s8EvHVLiYxkHLQGcWUKOxII5fXlkL9-o4E38oKKy9qwZTspM",
-  "yHjfGZk9gw4a2stLfJe-p-ptmcnjCKEOzGMpUR4-gpw"
-);
+// Claves VAPID desde secrets (NO hardcodear). Configurar antes de desplegar:
+//   supabase secrets set VAPID_PUBLIC_KEY=... VAPID_PRIVATE_KEY=... VAPID_SUBJECT=mailto:...
+// IMPORTANTE: rotar el par de claves antiguo (estuvo versionado en git).
+const VAPID_PUBLIC = Deno.env.get("VAPID_PUBLIC_KEY")!;
+const VAPID_PRIVATE = Deno.env.get("VAPID_PRIVATE_KEY")!;
+const VAPID_SUBJECT = Deno.env.get("VAPID_SUBJECT") ?? "mailto:sepulvedayeison98@gmail.com";
+
+webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC, VAPID_PRIVATE);
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
