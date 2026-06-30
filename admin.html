@@ -924,8 +924,6 @@ function AdminApp(){
       {agendarModal&&(
         <AgendarTurnoModal
           usuarios={usuarios}
-          montacarguistas={montacarguistasActivos}
-          todosMonta={usuarios.filter(u=>u.rol==="montacarguista")}
           onGuardar={crearTurno}
           onCancelar={()=>setAgendarModal(false)}
         />
@@ -934,24 +932,29 @@ function AdminApp(){
   );
 }
 
-function AgendarTurnoModal({usuarios,montacarguistas,todosMonta,onGuardar,onCancelar}){
+function AgendarTurnoModal({usuarios,onGuardar,onCancelar}){
   const [picking,setPicking]=useState("");
-  const [cliente,setCliente]=useState("");
   const [operario,setOperario]=useState("");
-  const [monta,setMonta]=useState("");
   const [urgente,setUrgente]=useState(false);
   const [posiciones,setPosiciones]=useState([{ubi:"",skus:[{ref:"",cant:""}]}]);
   const [enviando,setEnviando]=useState(false);
   const [err,setErr]=useState("");
 
-  const operariosDisp=[...new Set(usuarios.filter(u=>u.rol==="operario"||u.rol==="picker").map(u=>u.nombre))].filter(Boolean).sort();
-  const montaDisp=[...new Set([...montacarguistas.map(u=>u.nombre),...todosMonta.map(u=>u.nombre)])].filter(Boolean).sort();
+  // Solo operarios activos en las últimas 8h
+  const operariosDisp=(()=>{
+    const cutoff=Date.now()-8*60*60*1000;
+    return[...new Map(
+      usuarios
+        .filter(u=>(u.rol==="operario"||u.rol==="picker")&&new Date(u.fecha_login)>=cutoff)
+        .sort((a,b)=>new Date(b.fecha_login)-new Date(a.fecha_login))
+        .map(u=>[u.nombre,u])
+    ).values()].map(u=>u.nombre);
+  })();
 
   const parseUbi=ubi=>{
     const u=(ubi||"").trim().toUpperCase();
-    const letra=u[0]||"";
     const nums=u.slice(1);
-    return{ubi:u,calleLetra:letra,modulo:parseInt(nums.slice(0,2))||0,nivel:parseInt(nums[2])||0};
+    return{ubi:u,calleLetra:u[0]||"",modulo:parseInt(nums.slice(0,2))||0,nivel:parseInt(nums[2])||0};
   };
 
   const addPos=()=>setPosiciones(p=>[...p,{ubi:"",skus:[{ref:"",cant:""}]}]);
@@ -962,7 +965,6 @@ function AgendarTurnoModal({usuarios,montacarguistas,todosMonta,onGuardar,onCanc
   const setSku=(pi,si,k,v)=>setPosiciones(p=>p.map((pos,idx)=>idx===pi?{...pos,skus:pos.skus.map((s,i)=>i===si?{...s,[k]:v}:s)}:pos));
 
   const handleGuardar=async()=>{
-    if(!picking.trim()){setErr("Falta el número de picking");return;}
     if(!operario.trim()){setErr("Falta el operario solicitante");return;}
     const posOk=posiciones.filter(p=>p.ubi.trim());
     if(!posOk.length){setErr("Agrega al menos una posición UBI");return;}
@@ -973,14 +975,11 @@ function AgendarTurnoModal({usuarios,montacarguistas,todosMonta,onGuardar,onCanc
       const totalSaldo=skusOk.reduce((s,k)=>s+(parseInt(k.cant)||0),0);
       return{...base,skus:skusOk.map(s=>({ref:s.ref.trim().toUpperCase(),desc:"",cant:parseInt(s.cant)||0,cajap:0})),totalSaldo,bajada:false,fallo:false};
     });
-    const tieneMonta=monta.trim();
     await onGuardar({
-      picking:picking.trim().toUpperCase(),
-      estado:tieneMonta?"en_proceso":"pendiente",
+      picking:picking.trim().toUpperCase()||`ADMIN-${Date.now()}`,
+      estado:"pendiente",
       posiciones:posData,
       operario_solicitante:operario.trim(),
-      montacarguista:tieneMonta||null,
-      cliente:cliente.trim()||null,
       ciudad:"Itagüí",
       es_mde:urgente,
       prioridad:urgente?"urgente":null,
@@ -992,7 +991,7 @@ function AgendarTurnoModal({usuarios,montacarguistas,todosMonta,onGuardar,onCanc
   const inp={background:C.bg0,border:`1px solid ${C.b1}`,borderRadius:8,padding:"9px 11px",fontSize:13,color:C.t1,width:"100%",marginTop:4};
   const lbl={fontSize:10,color:C.t4,fontWeight:700,textTransform:"uppercase",letterSpacing:".5px"};
   const chip=(val,cur,col,onClick)=>(
-    <button onClick={onClick} style={{padding:"3px 9px",background:cur===val?`${col}25`:C.bg3,border:`1px solid ${cur===val?col:C.b0}`,borderRadius:5,color:cur===val?col:C.t3,fontSize:9,cursor:"pointer"}}>{val}</button>
+    <button onClick={onClick} style={{padding:"4px 10px",background:cur===val?`${col}25`:C.bg3,border:`1px solid ${cur===val?col:C.b0}`,borderRadius:6,color:cur===val?col:C.t3,fontSize:10,cursor:"pointer"}}>{val}</button>
   );
 
   return(
@@ -1005,37 +1004,18 @@ function AgendarTurnoModal({usuarios,montacarguistas,todosMonta,onGuardar,onCanc
         <div style={{overflowY:"auto",padding:"14px 16px",display:"flex",flexDirection:"column",gap:13}}>
 
           <div>
-            <div style={lbl}>Nº Picking *</div>
-            <input value={picking} onChange={e=>setPicking(e.target.value)} placeholder="Ej: 789456"
-              style={{...inp,fontFamily:"'JetBrains Mono',monospace",fontSize:15,color:C.teal,fontWeight:800}}/>
-          </div>
-
-          <div>
-            <div style={lbl}>Cliente</div>
-            <input value={cliente} onChange={e=>setCliente(e.target.value)} placeholder="Nombre del cliente" style={inp}/>
+            <div style={lbl}>Nº Picking <span style={{color:C.t4,fontWeight:400,textTransform:"none"}}>(opcional)</span></div>
+            <input value={picking} onChange={e=>setPicking(e.target.value)} placeholder="Ej: 789456 — dejar vacío si no aplica"
+              style={{...inp,fontFamily:"'JetBrains Mono',monospace",fontSize:14,color:C.teal,fontWeight:800}}/>
           </div>
 
           <div>
             <div style={lbl}>Operario solicitante *</div>
-            <input value={operario} onChange={e=>setOperario(e.target.value)} placeholder="Picker que solicita" style={inp}/>
+            <input value={operario} onChange={e=>setOperario(e.target.value)} placeholder="Nombre del picker"
+              style={{...inp,marginBottom:operariosDisp.length?6:0}}/>
             {operariosDisp.length>0&&(
-              <div style={{display:"flex",gap:4,flexWrap:"wrap",marginTop:6}}>
+              <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
                 {operariosDisp.map(n=>chip(n,operario,C.teal,()=>setOperario(n)))}
-              </div>
-            )}
-          </div>
-
-          <div>
-            <div style={lbl}>Montacarguista <span style={{color:C.t4,fontWeight:400,textTransform:"none"}}>(vacío = queda pendiente)</span></div>
-            <input value={monta} onChange={e=>setMonta(e.target.value)} placeholder="Asignar directo a..." style={inp}/>
-            {montaDisp.length>0&&(
-              <div style={{display:"flex",gap:4,flexWrap:"wrap",marginTop:6}}>
-                {montaDisp.map(n=>chip(n,monta,C.purple,()=>setMonta(m=>m===n?"":n)))}
-              </div>
-            )}
-            {monta.trim()&&(
-              <div style={{marginTop:6,fontSize:9,color:C.purple,fontWeight:600}}>
-                ✓ Se creará directo en <strong>en proceso</strong> para {monta.trim()}
               </div>
             )}
           </div>
