@@ -625,7 +625,7 @@ function UBIModal({ ubiInfo, operario, onClose, onConfirm, onAddToCart }) {
 
   const [selSkus, setSelSkus] = React.useState(() => {
     const m = {};
-    skus.forEach(s => { m[s.ref] = { checked: true, cant: s.saldo }; });
+    skus.forEach(s => { m[s.ref] = { checked: false, cant: s.saldo }; });
     return m;
   });
   const toggle = ref => setSelSkus(p => ({ ...p, [ref]: { ...p[ref], checked: !p[ref].checked } }));

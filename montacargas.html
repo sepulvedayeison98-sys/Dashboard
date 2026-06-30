@@ -728,7 +728,7 @@ function MontacargasApp(){
                                              ⚠
                                            </button>
                                          </div>
-                                  :<span style={{fontFamily:"'JetBrains Mono',monospace",color:C.green,fontWeight:700,fontSize:12,flexShrink:0}}>{pos.totalSaldo}u</span>
+                                  :<span style={{fontFamily:"'JetBrains Mono',monospace",color:C.t4,fontWeight:700,fontSize:11,flexShrink:0}}>{(pos.skus||[]).length!==1?`${pos.totalSaldo}u`:""}</span>
                                 }
                               </div>
                               {!esBajada&&!esFalloPosicion&&!reportandoEstePosicion&&(pos.skus||[]).map((s,si)=>{
