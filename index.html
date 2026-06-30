@@ -484,21 +484,18 @@ async function processFiles(wbInv, wbFact, onStep, marcasActivas){
 
   // ── Construir pedidosActivos con cobertura piso/altura ───────────────────────
   const pedidosActivos=Object.values(pedidosRaw).map(p=>{
-    const TOPE_PISO=27; // máx 3 cajas (27u) de un mismo SKU desde piso
     const refs=p.rows.map(row=>{
       const pos=invBySKU[row.ref]||[];
       const stockPiso=pos.filter(x=>x.nivel<=1).reduce((t,x)=>t+x.saldo,0);
       const stockAlt =pos.filter(x=>x.nivel>=2).reduce((t,x)=>t+x.saldo,0);
-      // REGLA: del piso solo se pueden sacar máximo 27u (3 cajas) de un mismo SKU
-      const limitePiso=Math.min(stockPiso,TOPE_PISO);     // tope aplicado al piso
-      const cubPiso=Math.min(limitePiso,row.cant);        // cuánto cubre el piso (acotado a 27u)
-      const restoTrasPiso=row.cant-cubPiso;               // lo que falta tras agotar el piso permitido
+      // Sin tope de piso: el piso cubre con su saldo real completo (si hay 100u, cubre 100u)
+      const cubPiso=Math.min(stockPiso,row.cant);         // cuánto cubre el piso (saldo real)
+      const restoTrasPiso=row.cant-cubPiso;               // lo que falta tras agotar el piso
       const cubAlt =Math.min(stockAlt,restoTrasPiso);     // resto cubierto desde altura
-      // Excedente que SÍ obliga a bajar de altura (cuando pedido > 27u del mismo SKU)
       const cajasBajarAltura=restoTrasPiso>0?Math.ceil(restoTrasPiso/9):0;
       const uBajarAltura=cajasBajarAltura*9;
-      const topeAplicado=row.cant>TOPE_PISO&&stockPiso>TOPE_PISO; // se topó el piso por la regla
-      const hasPiso=cubPiso>=row.cant;       // piso cubre TODO lo requerido (≤27u)
+      const topeAplicado=false;                           // regla de tope de piso (27u) eliminada
+      const hasPiso=cubPiso>=row.cant;       // piso cubre TODO lo requerido
       const hasPisoParcial=cubPiso>0;
       const hasAlt =stockAlt>0;
       const sinStock=stockPiso===0&&stockAlt===0;
@@ -3835,18 +3832,16 @@ function CEDIDashboard(){
                                           <td style={{padding:"6px 10px",textAlign:"right",fontFamily:"'JetBrains Mono',monospace",color:stockA>0?C.purple:C.t4}}>{stockA||"—"}</td>
                                           <td style={{padding:"6px 10px",textAlign:"right"}}>
                                             {(()=>{
-                                              const TOPE_PISO=27; // máx 3 cajas del mismo SKU desde piso
-                                              const pisoUsable=Math.min(stockP,TOPE_PISO);   // lo que el piso PUEDE entregar
-                                              const faltaPiso=Math.max(0,r.cant-pisoUsable); // lo que falta tras tope de piso
+                                              const pisoUsable=stockP;                       // piso entrega su saldo real (sin tope)
+                                              const faltaPiso=Math.max(0,r.cant-pisoUsable); // lo que falta tras agotar el piso
                                               if(faltaPiso<=0)return(
                                                 <div>
                                                   <span style={{color:C.green,fontSize:11}}>✓ piso</span>
-                                                  {r.cant>TOPE_PISO?null:<div style={{fontSize:8,color:C.t4}}>{r.cant}u ≤ 27u</div>}
                                                 </div>
                                               );
                                               const bajar=Math.min(faltaPiso,stockA);
                                               const cajasBajar=Math.ceil(bajar/9);
-                                              const topado=r.cant>TOPE_PISO&&stockP>TOPE_PISO;
+                                              const topado=false;
                                               // ── REPARTO INTELIGENTE ──
                                               // 1) Agrupar cajas por ubicación (no repetir la misma posición)
                                               const porUbiAlt={};

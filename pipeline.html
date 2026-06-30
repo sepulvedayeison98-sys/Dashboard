@@ -405,8 +405,8 @@ function procesar(wbInv, wbFact) {
       const pos = invBySKU[row.ref] || [];
       const stockPiso = pos.filter(x => x.nivel <= 1).reduce((t, x) => t + x.saldo, 0);
       const stockAlt = pos.filter(x => x.nivel >= 2).reduce((t, x) => t + x.saldo, 0);
-      const limitePiso = Math.min(stockPiso, TOPE_PISO);
-      const cubPiso = Math.min(limitePiso, row.cant);
+      // Sin tope de piso: el piso cubre con su saldo real completo
+      const cubPiso = Math.min(stockPiso, row.cant);
       const restoTrasPiso = row.cant - cubPiso;
       const cubAlt = Math.min(stockAlt, restoTrasPiso);
       const hasPiso = cubPiso >= row.cant;
@@ -1160,8 +1160,8 @@ function PickingApp() {
           });
         }
       });
-      const libre = Math.max(0, Math.min(sm.stock, TOPE_PISO) - comprometido);
-      const gap = Math.max(0, comprometido - Math.min(sm.stock, TOPE_PISO));
+      const libre = Math.max(0, sm.stock - comprometido);
+      const gap = Math.max(0, comprometido - sm.stock);
       return {
         ref,
         desc: sm.desc,
@@ -1404,7 +1404,7 @@ function PickingApp() {
       const piso = pos.filter(p => p.nivel <= 1 && p.saldo > 0);
       const alt = pos.filter(p => p.nivel >= 2 && p.saldo > 0);
       const pisoDisp = piso.reduce((t, p) => t + p.saldo, 0);
-      const tomarPiso = Math.min(r.cant, pisoDisp, TOPE_PISO);
+      const tomarPiso = Math.min(r.cant, pisoDisp);
       if (tomarPiso > 0 && piso.length) {
         // agrupar por ubicación
         const grupos = {};
