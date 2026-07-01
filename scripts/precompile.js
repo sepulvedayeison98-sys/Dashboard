@@ -10,7 +10,7 @@ const ROOT = path.resolve(__dirname, "..");
 
 function extractBabel(html) {
   const open = html.indexOf('<script type="text/babel"');
-  if (open < 0) throw new Error("no se encontró <script type=text/babel>");
+  if (open < 0) return null; // ya swapeado a precompilado
   const gt = html.indexOf(">", open) + 1;
   const close = html.indexOf("</script>", gt);
   return html.slice(gt, close);
@@ -19,6 +19,7 @@ function extractBabel(html) {
 function compile(srcHtml, outJs) {
   const html = fs.readFileSync(path.join(ROOT, srcHtml), "utf8");
   const jsx = extractBabel(html);
+  if (jsx === null) { console.log(`${srcHtml}: ya usa precompilado, omitido`); return; }
   const out = babel.transformSync(jsx, {
     plugins: [["@babel/plugin-transform-react-jsx", {
       runtime: "classic", pragma: "React.createElement", pragmaFrag: "React.Fragment",
@@ -32,3 +33,4 @@ function compile(srcHtml, outJs) {
 
 compile("montacargas.html", "montacargas.app.js");
 compile("admin.html", "admin.app.js");
+compile("index.html", "index.app.js");
