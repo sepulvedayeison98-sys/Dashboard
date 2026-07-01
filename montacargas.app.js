@@ -342,6 +342,7 @@ function MontacargasApp() {
   const [operario, setOperario] = useState(null);
   const [turnos, setTurnos] = useState([]);
   const [tab, setTab] = useState("pendiente");
+  const [busquedaSku, setBusquedaSku] = useState("");
   const [expandido, setExpandido] = useState({});
   const [procesando, setProcesando] = useState({});
   const [ultimaAct, setUltimaAct] = useState(null);
@@ -715,6 +716,34 @@ function MontacargasApp() {
     });
     return m;
   }, [turnos]);
+  const skuResultados = useMemo(() => {
+    const q = busquedaSku.trim().toUpperCase();
+    if (!q) return [];
+    const hits = {};
+    turnos.filter(t => t.estado === "pendiente" || t.estado === "en_proceso").forEach(t => {
+      (t.posiciones || []).forEach(pos => {
+        (pos.skus || []).forEach(s => {
+          if ((s.ref || "").toUpperCase().includes(q) || (s.desc || "").toUpperCase().includes(q)) {
+            const k = s.ref || s.desc || "?";
+            if (!hits[k]) hits[k] = {ref: s.ref || k, desc: s.desc || "", items: []};
+            hits[k].items.push({
+              ubi: pos.ubi,
+              calleLetra: pos.calleLetra,
+              modulo: pos.modulo,
+              nivel: pos.nivel,
+              cant: s.cant || 0,
+              picking: t.picking,
+              operario: t.operario_solicitante || "—",
+              estado: t.estado,
+              bajada: pos.bajada || false,
+              fallo: pos.fallo || false
+            });
+          }
+        });
+      });
+    });
+    return Object.values(hits).sort((a, b) => a.ref.localeCompare(b.ref));
+  }, [turnos, busquedaSku]);
   if (!operario) return React.createElement(LoginForm, {
     onLogin: async nombre => {
       pedirPermiso(setPushOk);
@@ -951,6 +980,11 @@ function MontacargasApp() {
     lbl: "✅ Listo",
     n: null,
     col: C.green
+  }, {
+    key: "buscar",
+    lbl: "🔍 SKU",
+    n: null,
+    col: C.teal
   }].map(t => React.createElement("button", {
     key: t.key,
     onClick: () => setTab(t.key),
@@ -1019,7 +1053,7 @@ function MontacargasApp() {
       cursor: "pointer",
       padding: "0 4px"
     }
-  }, "✕")), tab !== "agrupado" && React.createElement(React.Fragment, null, tab === "completado" && listaRaw.length > 0 && React.createElement("div", {
+  }, "✕")), tab !== "agrupado" && tab !== "buscar" && React.createElement(React.Fragment, null, tab === "completado" && listaRaw.length > 0 && React.createElement("div", {
     style: {
       display: "flex",
       alignItems: "center",
@@ -1796,7 +1830,142 @@ function MontacargasApp() {
         fontWeight: 700
       }
     }, t.estado === "fallido" ? `⚠️ Reportado: ${t.motivo_fallo || "problema"}` : `✅ Completado a las ${fmtHora(t.fecha_completado)} · ${t.montacarguista}`)));
-  })), tab === "agrupado" && React.createElement(React.Fragment, null, misTurnosActivos.length > 0 ? ((() => {
+  })), tab === "buscar" && React.createElement("div", {style: {paddingTop: 4}},
+  React.createElement("div", {style: {fontWeight: 800, fontSize: 15, color: C.t1, marginBottom: 4}}, "🔍 Buscar SKU"),
+  React.createElement("div", {style: {color: C.t3, fontSize: 11, marginBottom: 10}}, "Busca entre los SKUs de todos los turnos pendientes y en curso"),
+  React.createElement("input", {
+    value: busquedaSku,
+    onChange: function(e) { setBusquedaSku(e.target.value); },
+    placeholder: "Ref del SKU, ej: ICH-100, T10...",
+    style: {
+      width: "100%",
+      background: C.bg2,
+      border: "1px solid " + (busquedaSku ? C.teal : C.b1),
+      borderRadius: 11,
+      padding: "11px 14px",
+      fontSize: 14,
+      color: C.t1,
+      outline: "none",
+      marginBottom: 12,
+      transition: "border-color .2s"
+    }
+  }),
+  !busquedaSku.trim()
+    ? React.createElement("div", {style: {textAlign: "center", color: C.t3, padding: "30px 0", fontSize: 12}}, "Escribe la referencia del SKU a buscar")
+    : skuResultados.length === 0
+      ? React.createElement("div", {style: {textAlign: "center", color: C.t3, padding: "30px 0"}},
+          React.createElement("div", {style: {fontSize: 28, marginBottom: 8}}, "🔍"),
+          React.createElement("div", {style: {fontSize: 13}}, "Sin resultados para \"" + busquedaSku.trim() + "\"")
+        )
+      : React.createElement("div", null,
+          React.createElement("div", {style: {fontSize: 10, color: C.t3, marginBottom: 8}}, skuResultados.length + " referencia" + (skuResultados.length !== 1 ? "s" : "") + " encontrada" + (skuResultados.length !== 1 ? "s" : "")),
+          skuResultados.map(function(r) {
+            var operariosDistinct = Array.from(new Set(r.items.map(function(i) { return i.operario; })));
+            var isConflict = operariosDistinct.length > 1;
+            var totalUnids = r.items.reduce(function(s, i) { return s + i.cant; }, 0);
+            return React.createElement("div", {
+              key: r.ref,
+              style: {
+                background: isConflict ? C.red + "08" : C.bg2,
+                borderRadius: 12,
+                marginBottom: 8,
+                border: "1px solid " + (isConflict ? C.red + "40" : C.b0),
+                borderLeft: "4px solid " + (isConflict ? C.red : C.teal),
+                overflow: "hidden",
+                animation: "fadeUp .2s ease both"
+              }
+            },
+              React.createElement("div", {style: {padding: "10px 13px"}},
+                React.createElement("div", {style: {display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6}},
+                  React.createElement("div", null,
+                    React.createElement("div", {style: {display: "flex", alignItems: "center", gap: 7, marginBottom: 2}},
+                      React.createElement("span", {style: {
+                        fontFamily: "'JetBrains Mono',monospace",
+                        color: isConflict ? C.red : C.teal,
+                        fontWeight: 800,
+                        fontSize: 15
+                      }}, r.ref),
+                      isConflict && React.createElement("span", {style: {
+                        background: C.red + "20",
+                        color: C.red,
+                        border: "1px solid " + C.red + "40",
+                        borderRadius: 4,
+                        padding: "1px 6px",
+                        fontSize: 8,
+                        fontWeight: 800,
+                        animation: "pop .3s ease"
+                      }}, "⚠ " + operariosDistinct.length + " ops. lo piden")
+                    ),
+                    r.desc && React.createElement("div", {style: {color: C.t3, fontSize: 10}}, r.desc)
+                  ),
+                  React.createElement("div", {style: {textAlign: "right", flexShrink: 0, marginLeft: 8}},
+                    React.createElement("div", {style: {
+                      fontFamily: "'JetBrains Mono',monospace",
+                      color: C.green,
+                      fontWeight: 800,
+                      fontSize: 14
+                    }}, totalUnids + "u"),
+                    React.createElement("div", {style: {color: C.t4, fontSize: 9}}, r.items.length + " ubic.")
+                  )
+                ),
+                r.items.map(function(item, ii) {
+                  return React.createElement("div", {
+                    key: ii,
+                    style: {
+                      background: item.bajada ? C.green + "08" : item.fallo ? C.red + "08" : C.bg3,
+                      borderRadius: 8,
+                      padding: "7px 10px",
+                      marginTop: 5,
+                      borderLeft: "3px solid " + (item.bajada ? C.green : item.fallo ? C.red : item.estado === "en_proceso" ? C.orange : C.t4),
+                      opacity: item.bajada || item.fallo ? 0.65 : 1
+                    }
+                  },
+                    React.createElement("div", {style: {display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 3}},
+                      React.createElement("div", {style: {display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap"}},
+                        React.createElement("span", {style: {
+                          fontFamily: "'JetBrains Mono',monospace",
+                          color: item.bajada ? C.green : item.fallo ? C.red : C.teal,
+                          fontWeight: 800,
+                          fontSize: 13
+                        }}, item.ubi),
+                        React.createElement("span", {style: {fontSize: 9, color: C.t3}},
+                          (CALLE_NOM[item.calleLetra] || item.calleLetra) + " · Mód " + item.modulo + " · Niv " + item.nivel
+                        )
+                      ),
+                      React.createElement("div", {style: {display: "flex", alignItems: "center", gap: 6, flexShrink: 0}},
+                        React.createElement("span", {style: {
+                          fontFamily: "'JetBrains Mono',monospace",
+                          color: C.yellow,
+                          fontWeight: 700,
+                          fontSize: 12
+                        }}, item.cant + "u"),
+                        React.createElement("span", {style: {
+                          background: item.estado === "en_proceso" ? C.orange + "20" : C.yellow + "15",
+                          color: item.estado === "en_proceso" ? C.orange : C.yellow,
+                          borderRadius: 4,
+                          padding: "1px 5px",
+                          fontSize: 7,
+                          fontWeight: 800
+                        }}, item.estado === "en_proceso" ? "🔄" : "⏳")
+                      )
+                    ),
+                    React.createElement("div", {style: {display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap"}},
+                      React.createElement("span", {style: {fontSize: 9, color: C.t3}}, "👷"),
+                      React.createElement("span", {style: {
+                        fontSize: 9,
+                        color: isConflict ? C.orange : C.t2,
+                        fontWeight: isConflict ? 700 : 400
+                      }}, item.operario),
+                      item.bajada && React.createElement("span", {style: {color: C.green, fontSize: 9, fontWeight: 700}}, "· ✓ bajado"),
+                      item.fallo && React.createElement("span", {style: {color: C.red, fontSize: 9}}, "· ⚠ fallo")
+                    )
+                  );
+                })
+              )
+            );
+          })
+        )
+), tab === "agrupado" && React.createElement(React.Fragment, null, misTurnosActivos.length > 0 ? ((() => {
     const totalPos = agrupadoPorUBI.reduce((s, u) => s + u.posiciones.length, 0);
     const bajadas = agrupadoPorUBI.reduce((s, u) => s + u.posiciones.filter(p => p.bajada || p.fallo).length, 0);
     const pct = totalPos > 0 ? Math.round(bajadas / totalPos * 100) : 0;
