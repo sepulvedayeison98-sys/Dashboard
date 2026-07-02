@@ -32370,10 +32370,11 @@ function HistoricoTab({
   const mesual = useMemo(() => hMes(snaps), [snaps]);
   const todosPeds = useMemo(() => hPedidosUnicos(snaps), [snaps]);
   const pedsFiltrados = useMemo(() => tipoHist === 'todos' ? todosPeds : todosPeds.filter(p => p.tp === tipoHist), [todosPeds, tipoHist]);
-  const clientesTotales = useMemo(() => hClientes(todosPeds), [todosPeds]);
-  const patronesTotales = useMemo(() => hPatrones(todosPeds), [todosPeds]);
   const clientes = useMemo(() => hClientes(pedsFiltrados), [pedsFiltrados]);
   const patrones = useMemo(() => rangoMode ? hPatronesRango(pedsFiltrados) : hPatrones(pedsFiltrados), [pedsFiltrados, rangoMode]);
+  // Con filtro "todos", los totales SON los filtrados: se reusa el memo (evita computar 2×)
+  const clientesTotales = useMemo(() => tipoHist === 'todos' ? clientes : hClientes(todosPeds), [tipoHist, clientes, todosPeds]);
+  const patronesTotales = useMemo(() => tipoHist === 'todos' && !rangoMode ? patrones : hPatrones(todosPeds), [tipoHist, rangoMode, patrones, todosPeds]);
   const descMap = useMemo(() => {
     const m = {};
     (data?.allItems || []).forEach(it => m[String(it.ref)] = it.desc);
@@ -32596,6 +32597,30 @@ function HistoricoTab({
     }
   }, "🔒 Bloquear"), React.createElement("button", {
     onClick: () => {
+      // Exporta la historia completa (respaldo ante pérdida de localStorage)
+      try {
+        const raw = localStorage.getItem('cedi_hist_v1') || '{}';
+        const blob = new Blob([raw], { type: 'application/json' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `historico_cedi_${new Date().toISOString().slice(0, 10)}.json`;
+        a.click();
+        URL.revokeObjectURL(a.href);
+      } catch (_) {
+        alert('No se pudo exportar la historia.');
+      }
+    },
+    style: {
+      background: 'transparent',
+      border: `1px solid ${C.b0}`,
+      color: C.teal,
+      borderRadius: 6,
+      padding: '5px 10px',
+      fontSize: 9,
+      cursor: 'pointer'
+    }
+  }, "💾 Exportar"), React.createElement("button", {
+    onClick: () => {
       if (window.confirm('¿Borrar todo el historial guardado? No se puede deshacer.')) onClear();
     },
     style: {
@@ -32813,13 +32838,13 @@ function HistoricoTab({
     }
   }, [{
     k: 'rup',
-    l: '🔴 Críticos'
+    l: '🔴 SKUs críticos'
   }, {
     k: 'sem',
-    l: '📅 Semana'
+    l: '📅 Por semana'
   }, {
     k: 'mes',
-    l: '📆 Mes'
+    l: '📆 Por mes'
   }, {
     k: 'cal',
     l: '🗓 Calendario'
@@ -32828,10 +32853,10 @@ function HistoricoTab({
     l: '👥 Clientes'
   }, {
     k: 'pat',
-    l: '🔁 Patrones'
+    l: '🔁 Frecuencia de compra'
   }, {
     k: 'evo',
-    l: '📉 SKU'
+    l: '📉 Evolución por SKU'
   }].map(t => React.createElement("button", {
     key: t.k,
     onClick: () => setVista(t.k),
@@ -35669,7 +35694,23 @@ function CEDIDashboard() {
   const [trendHover, setTrendHover] = useState(null);
   const [marcas, setMarcas] = useState(["ICH"]);
   const [planFam, setPlanFam] = useState("todas");
-  const [hechos, setHechos] = useState({});
+  const [hechos, setHechos] = useState(() => {
+    // Progreso del turno persistido por día: sobrevive recargas, arranca limpio al día siguiente
+    try {
+      const raw = JSON.parse(localStorage.getItem('cedi_hechos_v1') || '{}');
+      return raw.date === new Date().toISOString().slice(0, 10) ? raw.map || {} : {};
+    } catch (_) {
+      return {};
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem('cedi_hechos_v1', JSON.stringify({
+        date: new Date().toISOString().slice(0, 10),
+        map: hechos
+      }));
+    } catch (_) {}
+  }, [hechos]);
   const [planOrden, setPlanOrden] = useState("prioridad");
   const [planCompacto, setPlanCompacto] = useState(false);
   const [expandPlan, setExpandPlan] = useState(null);
