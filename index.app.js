@@ -31786,20 +31786,13 @@ async function processFiles(wbInv, wbFact, onStep, marcasActivas) {
       tieneHist: it.tieneHist,
       vel_dia: it.vel_dia,
       stock_piso: it.stock,
-      stock_res: Math.round(it.stock * 0.5),
       stock_alt: stockAltMap[it.ref] || 0,
       soloAltura: esSoloAltura(it.desc),
       familia: familia(it.desc),
       comp: it.comp,
       nota: false,
       ciudad: ciudadPorRef[it.ref]?.mde ? "MDE" : ciudadPorRef[it.ref]?.otra || "-",
-      tend: (it.tendencia || "estable").toUpperCase(),
-      calle: `C${i % 4 + 1}`,
-      m: i % 14 + 1,
-      qty90: it.stock,
-      ped: 0,
-      cli: 0,
-      frec: 0.7
+      tend: (it.tendencia || "estable").toUpperCase()
     };
   });
   const invBySKU = {};
@@ -39407,7 +39400,7 @@ function CEDIDashboard() {
           eM = sem[e],
           aM = abcCol[s.abc];
         const cs2 = cantSug(s, bufH, bufF),
-          cap = Math.min(100, Math.round(s.stock_res / Math.max(cs2, 1) * 100));
+          cap = Math.min(100, Math.round(s.stock_alt / Math.max(cs2, 1) * 100));
         const v = ventana(s),
           vM = vtCol[v.st],
           buf = Math.max(0, cs2 - g),
@@ -39733,7 +39726,7 @@ function CEDIDashboard() {
             fontSize: 10,
             color: C.t3
           }
-        }, "Reserva"), React.createElement("span", {
+        }, "Cubre altura"), React.createElement("span", {
           style: {
             fontFamily: "'JetBrains Mono',monospace",
             fontSize: 18,
@@ -39928,7 +39921,7 @@ function CEDIDashboard() {
         eM = sem[e],
         aM = abcCol[s.abc];
       const cs2 = cantSug(s, bufH, bufF),
-        cap = Math.min(100, Math.round(s.stock_res / Math.max(cs2, 1) * 100));
+        cap = Math.min(100, Math.round(s.stock_alt / Math.max(cs2, 1) * 100));
       const v = ventana(s),
         vM = vtCol[v.st],
         buf = Math.max(0, cs2 - g),
@@ -40254,7 +40247,7 @@ function CEDIDashboard() {
           fontSize: 10,
           color: C.t3
         }
-      }, "Reserva"), React.createElement("span", {
+      }, "Cubre altura"), React.createElement("span", {
         style: {
           fontFamily: "'JetBrains Mono',monospace",
           fontSize: 18,
