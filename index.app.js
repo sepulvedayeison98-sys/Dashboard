@@ -35711,6 +35711,62 @@ function CEDIDashboard() {
       }));
     } catch (_) {}
   }, [hechos]);
+  // ── Generar turno de montacargas desde el Plan de Viajes de Reposición ──
+  // Inserta en Supabase `turnos` (mismo esquema que pipeline) → le llega al montacarguista.
+  const [repoTurnos, setRepoTurnos] = useState({}); // ubi → loading | ok | ya | error
+  const generarTurnoRepo = useCallback(async v => {
+    const cfg = window.CEDI_CONFIG;
+    if (!cfg || !v?.ubi) return;
+    const k = v.ubi;
+    if (repoTurnos[k] === 'loading' || repoTurnos[k] === 'ok') return;
+    setRepoTurnos(o => ({ ...o, [k]: 'loading' }));
+    try {
+      let operario = localStorage.getItem('cedi_operario_nombre') || '';
+      if (!operario) {
+        operario = (window.prompt('Tu nombre (aparecerá como solicitante del turno):') || '').trim();
+        if (!operario) { setRepoTurnos(o => ({ ...o, [k]: undefined })); return; }
+        localStorage.setItem('cedi_operario_nombre', operario);
+      }
+      const picking = `REPO-${v.ubi}`;
+      // Guard: no duplicar si ya hay turno activo para esta posición
+      const { data: yaActivo } = await cfg._go(`${cfg.SUPA_URL}/rest/v1/turnos?picking=eq.${encodeURIComponent(picking)}&estado=in.(pendiente,en_proceso)&select=id&limit=1`);
+      if (yaActivo?.length) { setRepoTurnos(o => ({ ...o, [k]: 'ya' })); return; }
+      const skus = v.skus.map(s => ({
+        ref: s.ref,
+        desc: s.desc || '',
+        tipo: '',
+        cant: Math.min(s.uniReq || 0, s.stockAlt || s.uniReq || 0) || s.uniReq || 0,
+        saldo: s.stockAlt || 0
+      }));
+      const posicion = {
+        ubi: v.ubi,
+        calleLetra: v.ubi[0] || '',
+        modulo: parseInt(v.ubi.slice(1, 3)) || 0,
+        nivel: parseInt(v.ubi.slice(3, 4)) || 0,
+        skus,
+        totalSaldo: skus.reduce((t, s) => t + (s.cant || 0), 0)
+      };
+      const { error } = await cfg._go(`${cfg.SUPA_URL}/rest/v1/turnos`, {
+        method: 'POST',
+        headers: { ...cfg._H, Prefer: 'return=minimal' },
+        body: JSON.stringify({
+          picking,
+          pedido_siesa: '',
+          cliente: `Reposición · ${v.ubi} · ${skus.length} SKU${skus.length !== 1 ? 's' : ''}`,
+          ciudad: 'ITAGUÍ',
+          operario_solicitante: operario,
+          posiciones: [posicion],
+          estado: 'pendiente',
+          fecha_solicitud: new Date().toISOString(),
+          prioridad: 'normal',
+          es_mde: false
+        })
+      });
+      setRepoTurnos(o => ({ ...o, [k]: error ? 'error' : 'ok' }));
+    } catch (_) {
+      setRepoTurnos(o => ({ ...o, [k]: 'error' }));
+    }
+  }, [repoTurnos]);
   const [planOrden, setPlanOrden] = useState("prioridad");
   const [planCompacto, setPlanCompacto] = useState(false);
   const [expandPlan, setExpandPlan] = useState(null);
@@ -38888,7 +38944,32 @@ function CEDIDashboard() {
         fontSize: 10,
         color: C.t3
       }
-    }, v.totalUnid, " u · ", v.pedSet.size, " ped.")), React.createElement("div", {
+    }, v.totalUnid, " u · ", v.pedSet.size, " ped."), (() => {
+      const st = repoTurnos[v.ubi];
+      const cfgOk = !!window.CEDI_CONFIG;
+      const lbl = st === 'loading' ? '⏳ Enviando…' : st === 'ok' ? '✅ Turno enviado' : st === 'ya' ? '🔄 Ya hay turno activo' : st === 'error' ? '⚠ Error — reintentar' : '🏗️ Enviar a montacargas';
+      const col = st === 'ok' ? C.green : st === 'ya' ? C.yellow : st === 'error' ? C.red : C.purple;
+      if (!cfgOk) return null;
+      return React.createElement("button", {
+        onClick: e => {
+          e.stopPropagation();
+          generarTurnoRepo(v);
+        },
+        disabled: st === 'loading' || st === 'ok' || st === 'ya',
+        style: {
+          background: `${col}18`,
+          border: `1px solid ${col}50`,
+          color: col,
+          borderRadius: 7,
+          padding: "4px 10px",
+          fontSize: 10,
+          fontWeight: 800,
+          cursor: st === 'loading' || st === 'ok' || st === 'ya' ? 'default' : 'pointer',
+          fontFamily: "inherit",
+          flexShrink: 0
+        }
+      }, lbl);
+    })()), React.createElement("div", {
       style: {
         padding: "8px 12px",
         display: "flex",
