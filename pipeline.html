@@ -271,6 +271,9 @@ const esMDE = ciudad => {
   return x === "MDE" || x.includes("MEDELL") || x === "ITAGUI" || x === "ITAGÜI" || x.includes("ITAGU");
 };
 const tieneNota = n => String(n || "").trim().length > 0;
+// Pedidos marcados TECH en la nota: esa marca (T-10) está en Promical, NO en el CEDI.
+// No deben contarse como pedidos de Itagüí.
+const esNotaTech = n => /\btech\b/i.test(String(n || ""));
 const fmtHora = ts => {
   if (!ts) return "";
   const d = new Date(ts);
@@ -386,10 +389,12 @@ function procesar(wbInv, wbFact) {
         ciudad,
         fecha,
         nota: tieneNota(nota),
+        tech: esNotaTech(nota),
         tipoDocto,
         rows: []
       };
     }
+    if (esNotaTech(nota)) pedidosRaw[picking].tech = true;
     pedidosRaw[picking].rows.push({
       ref,
       desc,
@@ -399,8 +404,10 @@ function procesar(wbInv, wbFact) {
   }
 
   // ── Construir pedidosActivos con cobertura (idéntico al master) ──
+  // Excluir pedidos TECH (marca fuera del CEDI) del conteo de Itagüí
   const TOPE_PISO = 27;
-  const pedidosActivos = Object.values(pedidosRaw).map(p => {
+  const pedidosTech = Object.values(pedidosRaw).filter(p => p.tech);
+  const pedidosActivos = Object.values(pedidosRaw).filter(p => !p.tech).map(p => {
     const refs = p.rows.map(row => {
       const pos = invBySKU[row.ref] || [];
       const stockPiso = pos.filter(x => x.nivel <= 1).reduce((t, x) => t + x.saldo, 0);
@@ -487,6 +494,7 @@ function procesar(wbInv, wbFact) {
     invBySKU,
     stockMap,
     pedidos: pedidosActivos,
+    nTech: pedidosTech.length,
     multiMap,
     ubiMap
   };
@@ -3276,7 +3284,7 @@ function PickingApp() {
         fontSize: 11,
         color: C.t4
       }
-    }, data?.pedidos.length || 0, " pedidos disponibles"));
+    }, data?.pedidos.length || 0, " pedidos disponibles", data?.nTech ? ` · ${data.nTech} TECH excluidos (fuera del CEDI)` : ""));
     if (lista.length === 0) return /*#__PURE__*/React.createElement("div", {
       style: {
         textAlign: "center",
