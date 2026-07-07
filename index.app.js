@@ -31468,6 +31468,9 @@ const tieneNota = nota => {
   const n = String(nota || "").trim().toLowerCase();
   return n.length > 1 && !["n", "n.", ".", "-", "nan", "none"].includes(n);
 };
+// Pedidos marcados TECH en la nota: esa marca (T-10) está en Promical, NO en el CEDI.
+// No deben contarse como pedidos de Itagüí.
+const esNotaTech = n => /\btech\b/i.test(String(n || ""));
 async function processFiles(wbInv, wbFact, onStep, marcasActivas) {
   const MARCAS = marcasActivas || ["ICH"];
   onStep("Leyendo inventario...");
@@ -31577,6 +31580,7 @@ async function processFiles(wbInv, wbFact, onStep, marcasActivas) {
   const compMap = {};
   const ciudadPorRef = {};
   const pedidosRaw = {};
+  const pickingsTech = new Set(); // pedidos TECH (fuera del CEDI) → excluidos del conteo
   for (const r of allWmsRows) {
     const ref = String(r["referencia"] || "").trim();
     const cant = toNum(r["cantidad"]);
@@ -31590,6 +31594,8 @@ async function processFiles(wbInv, wbFact, onStep, marcasActivas) {
     const fecha = fpRaw instanceof Date && !isNaN(fpRaw) ? `${fpRaw.getFullYear()}-${String(fpRaw.getMonth() + 1).padStart(2, '0')}-${String(fpRaw.getDate()).padStart(2, '0')}` : fpRaw ? String(fpRaw).slice(0, 10) : "";
     const desc = String(r["descripcion"] || "").trim();
     const tipoDocto = String(r["TipoDocto"] || "").trim().toUpperCase();
+    const picking0 = String(r["Picking"] || r["PedidoSiesa"] || "").trim();
+    if (esNotaTech(nota) && picking0 && ref && cant > 0) pickingsTech.add(picking0);
     if (!ref || cant === 0 || !cascoRefs.has(ref)) continue;
     compMap[ref] = (compMap[ref] || 0) + cant;
     if (!ciudadPorRef[ref]) ciudadPorRef[ref] = {
@@ -31811,7 +31817,7 @@ async function processFiles(wbInv, wbFact, onStep, marcasActivas) {
       });
     }
   }
-  const pedidosActivos = Object.values(pedidosRaw).map(p => {
+  const pedidosActivos = Object.values(pedidosRaw).filter(p => !pickingsTech.has(p.id)).map(p => {
     const refs = p.rows.map(row => {
       const pos = invBySKU[row.ref] || [];
       const stockPiso = pos.filter(x => x.nivel <= 1).reduce((t, x) => t + x.saldo, 0);
@@ -32028,6 +32034,7 @@ async function processFiles(wbInv, wbFact, onStep, marcasActivas) {
     allItems: items,
     stats,
     pedidosActivos,
+    nTech: pickingsTech.size,
     invByModule,
     invBySKU,
     palletsSugeridos,
@@ -40629,7 +40636,12 @@ function CEDIDashboard() {
         color: C.t3,
         marginBottom: 10
       }
-    }, "Clic en cada estado para filtrar la tabla"), React.createElement("div", {
+    }, "Clic en cada estado para filtrar la tabla", data?.nTech ? React.createElement("span", {
+      style: {
+        color: C.orange,
+        fontWeight: 700
+      }
+    }, ` · ${data.nTech} TECH excluidos (fuera del CEDI)`) : null), React.createElement("div", {
       style: {
         display: "flex",
         alignItems: "center",
