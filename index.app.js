@@ -31471,6 +31471,20 @@ const tieneNota = nota => {
 // Pedidos marcados TECH en la nota: esa marca (T-10) está en Promical, NO en el CEDI.
 // No deben contarse como pedidos de Itagüí.
 const esNotaTech = n => /\btech\b/i.test(String(n || ""));
+// Clasifica la NOTA del pedido en una instrucción de despacho:
+//  retenido  → no despachar / hasta notificar / separar y no despachar
+//  recoge    → cliente recoge/retira en el CEDI
+//  programado→ despachar/facturar en fecha, día de semana o dentro de X días
+//  null      → nota informativa sin instrucción de despacho (o sin nota)
+const MESES_RE = "ENE|FEB|MAR|ABR|MAY|JUN|JUL|AGO|SEP|OCT|NOV|DIC";
+const notaEstado = txt => {
+  const u = String(txt || "").toUpperCase();
+  if (!u.trim()) return null;
+  if (/NO\s*DESPACH|NO\s*ENVIAR|NO\s*SACAR|NO\s*DESPACHAR|HASTA\s*(QUE\s*)?(NOTIFI|CONFIRM|AVIS|INDIQ)/.test(u)) return "retenido";
+  if (/RECOGE|RETIRA\s*EN|PASA\s*POR|CLIENTE\s*RECOGE/.test(u)) return "recoge";
+  if (new RegExp(`\\b\\d{1,2}\\s*(DE\\s*)?(${MESES_RE})|LUNES|MARTES|MI[EÉ]RCOLES|JUEVES|VIERNES|S[AÁ]BADO|DOMINGO|SEMANA|PR[OÓ]XIM|\\b\\d{1,2}[\\/\\-]\\d{1,2}\\b|8\\s*D[IÍ]AS|OCHO\\s*D[IÍ]AS`).test(u)) return "programado";
+  return null;
+};
 async function processFiles(wbInv, wbFact, onStep, marcasActivas) {
   const MARCAS = marcasActivas || ["ICH"];
   onStep("Leyendo inventario...");
@@ -31600,6 +31614,7 @@ async function processFiles(wbInv, wbFact, onStep, marcasActivas) {
   const ciudadPorRef = {};
   const pedidosRaw = {};
   const pickingsTech = new Set(); // pedidos TECH (fuera del CEDI) → excluidos del conteo
+  const notaPorPicking = {}; // texto de nota más informativo por pedido
   for (const r of allWmsRows) {
     const ref = String(r["referencia"] || "").trim();
     const cant = toNum(r["cantidad"]);
@@ -31615,6 +31630,10 @@ async function processFiles(wbInv, wbFact, onStep, marcasActivas) {
     const tipoDocto = String(r["TipoDocto"] || "").trim().toUpperCase();
     const picking0 = String(r["Picking"] || r["PedidoSiesa"] || "").trim();
     if (esNotaTech(nota) && picking0 && ref && cant > 0) pickingsTech.add(picking0);
+    if (picking0) {
+      const _nt = String(nota || "").trim();
+      if (_nt && _nt.length > (notaPorPicking[picking0] || "").length) notaPorPicking[picking0] = _nt;
+    }
     if (!ref || cant === 0 || !cascoRefs.has(ref)) continue;
     // Pedidos masivos NO alimentan comprometido/gap (no deben disparar reposición),
     // pero sí siguen registrados en pedidosRaw para Pipeline/CEDI Live normal.
@@ -31898,7 +31917,9 @@ async function processFiles(wbInv, wbFact, onStep, marcasActivas) {
       sinStock,
       cobertura,
       clasificacion,
-      esMasivo: pickingsMasivos.has(p.id)
+      esMasivo: pickingsMasivos.has(p.id),
+      notaTxt: notaPorPicking[p.id] || "",
+      notaEstado: notaEstado(notaPorPicking[p.id])
     };
   }).sort((a, b) => {
     const aMDE = esMDE(a.ciudad) ? 1 : 0,
@@ -40676,7 +40697,43 @@ function CEDIDashboard() {
         color: C.orange,
         fontWeight: 700
       }
-    }, ` · ${data.nTech} TECH excluidos (fuera del CEDI)`) : null), React.createElement("div", {
+    }, ` · ${data.nTech} TECH excluidos (fuera del CEDI)`) : null), (() => {
+      const peds = data?.pedidosActivos || [];
+      const nRet = peds.filter(p => p.notaEstado === "retenido").length;
+      const nProg = peds.filter(p => p.notaEstado === "programado").length;
+      const nRec = peds.filter(p => p.notaEstado === "recoge").length;
+      if (!nRet && !nProg && !nRec) return null;
+      const chips = [nRet && {
+        c: C.red,
+        l: `🔴 ${nRet} no despachar`
+      }, nProg && {
+        c: C.accent,
+        l: `📅 ${nProg} programado${nProg !== 1 ? "s" : ""}`
+      }, nRec && {
+        c: C.teal,
+        l: `📦 ${nRec} recoge`
+      }].filter(Boolean);
+      return React.createElement("div", {
+        style: {
+          display: "flex",
+          gap: 6,
+          flexWrap: "wrap",
+          marginBottom: 12
+        }
+      }, chips.map((ch, i) => React.createElement("span", {
+        key: i,
+        title: "Instrucción detectada en la nota del pedido",
+        style: {
+          background: `${ch.c}18`,
+          color: ch.c,
+          border: `1px solid ${ch.c}45`,
+          borderRadius: 6,
+          padding: "3px 9px",
+          fontSize: 10,
+          fontWeight: 700
+        }
+      }, ch.l)));
+    })(), React.createElement("div", {
       style: {
         display: "flex",
         alignItems: "center",
@@ -41214,26 +41271,40 @@ function CEDIDashboard() {
   }, {
     k: "PDE",
     l: "PDE"
-  }].map(f => React.createElement("button", {
-    key: f.k,
-    onClick: () => setTipoFiltro(f.k),
-    style: {
-      padding: "4px 9px",
-      borderRadius: 5,
-      background: tipoFiltro === f.k ? C.purple : "transparent",
-      color: tipoFiltro === f.k ? C.bg0 : C.t3,
-      border: "none",
-      fontSize: 9,
-      fontWeight: 700,
-      cursor: "pointer",
-      fontFamily: "inherit",
-      transition: "all .15s"
-    }
-  }, f.l))), React.createElement("button", {
+  }].map(f => {
+    const _peds = data?.pedidosActivos || [];
+    const cnt = f.k === "todos" ? _peds.length : _peds.filter(p => p.tipoDocto === f.k).length;
+    return React.createElement("button", {
+      key: f.k,
+      onClick: () => setTipoFiltro(f.k),
+      style: {
+        padding: "4px 9px",
+        borderRadius: 5,
+        background: tipoFiltro === f.k ? C.purple : "transparent",
+        color: tipoFiltro === f.k ? C.bg0 : C.t3,
+        border: "none",
+        fontSize: 9,
+        fontWeight: 700,
+        cursor: "pointer",
+        fontFamily: "inherit",
+        transition: "all .15s"
+      }
+    }, f.l, " ", React.createElement("span", {
+      style: {
+        opacity: 0.7,
+        fontFamily: "'JetBrains Mono',monospace"
+      }
+    }, cnt));
+  })), React.createElement("button", {
     onClick: () => {
       const peds = data?.pedidosActivos || [];
-      const rows = [["Picking", "PedidoSiesa", "Cliente", "Ciudad", "Fecha", "Estado", "Lineas", "Unidades", "%Piso", "%Altura", "Cobertura", "Nota"]];
-      peds.forEach(p => rows.push([p.id, p.pedidoSiesa || "", `"${(p.cliente || "").replace(/"/g, "'")}"`, p.ciudad || "", p.fecha || "", p.est, p.lineas || 0, p.uni || 0, p.pctPiso || 0, p.pctAlt || 0, p.cobertura, p.nota ? "CON NOTA" : "SIN NOTA"]));
+      const rows = [["Picking", "PedidoSiesa", "Tipo", "Cliente", "Ciudad", "Fecha", "Estado", "Lineas", "Unidades", "%Piso", "%Altura", "Cobertura", "Despacho", "Nota"]];
+      const NLBL = {
+        retenido: "NO DESPACHAR",
+        programado: "PROGRAMADO",
+        recoge: "RECOGE"
+      };
+      peds.forEach(p => rows.push([p.id, p.pedidoSiesa || "", p.tipoDocto || "", `"${(p.cliente || "").replace(/"/g, "'")}"`, p.ciudad || "", p.fecha || "", p.est, p.lineas || 0, p.uni || 0, p.pctPiso || 0, p.pctAlt || 0, p.cobertura, NLBL[p.notaEstado] || "", `"${(p.notaTxt || "").replace(/"/g, "'").replace(/[\r\n]+/g, " ")}"`]));
       const csv = rows.map(r => r.join(",")).join("\n");
       const blob = new Blob(["\ufeff" + csv], {
         type: "text/csv;charset=utf-8"
@@ -41506,12 +41577,62 @@ function CEDIDashboard() {
         c: C.yellow,
         fw: 700,
         fs: 13
-      }, p.uni || 0), React.createElement(TD, null, React.createElement(Badge, {
-        label: p.nota ? "CON NOTA" : "SIN NOTA",
-        c: p.nota ? C.yellow : C.green,
-        dim: p.nota ? C.yellowDim : C.greenDim,
-        sz: 8
-      })), React.createElement(TD, null, React.createElement("div", {
+      }, p.uni || 0), React.createElement(TD, {
+        style: {
+          maxWidth: 210
+        }
+      }, (() => {
+        const NEST = {
+          retenido: {
+            c: C.red,
+            l: "🔴 NO DESPACHAR"
+          },
+          programado: {
+            c: C.accent,
+            l: "📅 PROGRAMADO"
+          },
+          recoge: {
+            c: C.teal,
+            l: "📦 RECOGE"
+          }
+        };
+        const ne = p.notaEstado ? NEST[p.notaEstado] : null;
+        if (!p.notaTxt) return React.createElement("span", {
+          style: {
+            fontSize: 9,
+            color: C.t4
+          }
+        }, "—");
+        return React.createElement("div", {
+          style: {
+            display: "flex",
+            flexDirection: "column",
+            gap: 3
+          }
+        }, ne && React.createElement("span", {
+          style: {
+            alignSelf: "flex-start",
+            background: `${ne.c}20`,
+            color: ne.c,
+            border: `1px solid ${ne.c}55`,
+            borderRadius: 4,
+            padding: "1px 6px",
+            fontSize: 8,
+            fontWeight: 800,
+            whiteSpace: "nowrap"
+          }
+        }, ne.l), React.createElement("span", {
+          title: p.notaTxt,
+          style: {
+            fontSize: 9,
+            color: ne ? C.t2 : C.t3,
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            maxWidth: 200
+          }
+        }, p.notaTxt));
+      })()), React.createElement(TD, null, React.createElement("div", {
         style: {
           display: "flex",
           flexDirection: "column",
