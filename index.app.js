@@ -31577,6 +31577,25 @@ async function processFiles(wbInv, wbFact, onStep, marcasActivas) {
   }
   onStep("Calculando comprometido vs stock (todos los pedidos)...");
   await tick();
+  // Pedidos masivos (REQ internos o clientes industriales que piden pocas refs
+  // en cantidades enormes, ej. REQ Inducascos 4 refs/792u, motos 24 refs/2436u):
+  // no deben disparar reposición (siguen viéndose normales en Pipeline).
+  const UREF_MASIVO = 50; // unidades por referencia por encima de esto = masivo
+  const pedidoAgg = {};
+  for (const r of allWmsRows) {
+    const ref = String(r["referencia"] || "").trim();
+    const cant = toNum(r["cantidad"]);
+    const picking = String(r["Picking"] || r["PedidoSiesa"] || "").trim();
+    if (!ref || cant <= 0 || !picking || !cascoRefs.has(ref)) continue;
+    if (!pedidoAgg[picking]) pedidoAgg[picking] = { refs: new Set(), uni: 0 };
+    pedidoAgg[picking].refs.add(ref);
+    pedidoAgg[picking].uni += cant;
+  }
+  const pickingsMasivos = new Set();
+  for (const [pk, agg] of Object.entries(pedidoAgg)) {
+    const nRefs = agg.refs.size;
+    if (nRefs > 0 && agg.uni / nRefs > UREF_MASIVO) pickingsMasivos.add(pk);
+  }
   const compMap = {};
   const ciudadPorRef = {};
   const pedidosRaw = {};
@@ -31597,12 +31616,16 @@ async function processFiles(wbInv, wbFact, onStep, marcasActivas) {
     const picking0 = String(r["Picking"] || r["PedidoSiesa"] || "").trim();
     if (esNotaTech(nota) && picking0 && ref && cant > 0) pickingsTech.add(picking0);
     if (!ref || cant === 0 || !cascoRefs.has(ref)) continue;
-    compMap[ref] = (compMap[ref] || 0) + cant;
-    if (!ciudadPorRef[ref]) ciudadPorRef[ref] = {
-      mde: false,
-      otra: ""
-    };
-    if (esMDE(ciudad)) ciudadPorRef[ref].mde = true;else if (!ciudadPorRef[ref].otra) ciudadPorRef[ref].otra = ciudad;
+    // Pedidos masivos NO alimentan comprometido/gap (no deben disparar reposición),
+    // pero sí siguen registrados en pedidosRaw para Pipeline/CEDI Live normal.
+    if (!pickingsMasivos.has(picking)) {
+      compMap[ref] = (compMap[ref] || 0) + cant;
+      if (!ciudadPorRef[ref]) ciudadPorRef[ref] = {
+        mde: false,
+        otra: ""
+      };
+      if (esMDE(ciudad)) ciudadPorRef[ref].mde = true;else if (!ciudadPorRef[ref].otra) ciudadPorRef[ref].otra = ciudad;
+    }
     if (!pedidosRaw[picking]) {
       pedidosRaw[picking] = {
         id: picking,
@@ -31874,7 +31897,8 @@ async function processFiles(wbInv, wbFact, onStep, marcasActivas) {
       soloAlt,
       sinStock,
       cobertura,
-      clasificacion
+      clasificacion,
+      esMasivo: pickingsMasivos.has(p.id)
     };
   }).sort((a, b) => {
     const aMDE = esMDE(a.ciudad) ? 1 : 0,
@@ -32035,6 +32059,7 @@ async function processFiles(wbInv, wbFact, onStep, marcasActivas) {
     stats,
     pedidosActivos,
     nTech: pickingsTech.size,
+    nMasivos: pickingsMasivos.size,
     invByModule,
     invBySKU,
     palletsSugeridos,
@@ -38779,7 +38804,7 @@ function CEDIDashboard() {
       }
     }, "Reiniciar")));
   })(), (() => {
-    const reabasto = (data?.pedidosActivos || []).filter(p => p.clasificacion === "reabasto" || p.clasificacion === "parcial" || p.clasificacion === "ruptura");
+    const reabasto = (data?.pedidosActivos || []).filter(p => !p.esMasivo && (p.clasificacion === "reabasto" || p.clasificacion === "parcial" || p.clasificacion === "ruptura"));
     const skuMaestro = Object.fromEntries(sorted.map(x => [x.id, x]));
     const skuFalta = {};
     reabasto.forEach(p => {
@@ -38893,7 +38918,17 @@ function CEDIDashboard() {
         fontSize: 11,
         fontWeight: 700
       }
-    }, listaV.length, " SKUs"))), React.createElement("div", {
+    }, listaV.length, " SKUs"), data?.nMasivos ? React.createElement("span", {
+      title: "Pedidos masivos (pocas refs, muchas unidades) excluidos para no distorsionar la reposición",
+      style: {
+        background: `${C.yellow}22`,
+        color: C.yellow,
+        borderRadius: 6,
+        padding: "3px 10px",
+        fontSize: 11,
+        fontWeight: 700
+      }
+    }, data.nMasivos, " masivo", data.nMasivos !== 1 ? "s" : "", " excluidos") : null)), React.createElement("div", {
       style: {
         padding: "12px 14px",
         display: "flex",
