@@ -56,7 +56,10 @@ const api={
   asigs:     ()=>_go(`${SUPA_URL}/rest/v1/asignaciones?order=fecha_asignacion.desc`,{headers:_H}),
   usuarios:  ()=>_go(`${SUPA_URL}/rest/v1/usuarios?order=fecha_login.desc`,{headers:_H}),
   patchTurno:(id,body)=>_go(`${SUPA_URL}/rest/v1/turnos?id=eq.${id}`,{method:"PATCH",headers:{..._H,Prefer:"return=minimal"},body:JSON.stringify(body)}),
-  deleteTurno:(id)=>_go(`${SUPA_URL}/rest/v1/turnos?id=eq.${id}`,{method:"DELETE",headers:{..._H,Prefer:"return=minimal"}}),
+  // Borrado vía Edge Functions (service_role): el RLS bloquea DELETE para 'anon'.
+  borrarTurnos:(ids,borrarAsignaciones=false)=>_go(`${SUPA_URL}/functions/v1/admin-borrar-turnos`,{method:"POST",headers:{..._H},body:JSON.stringify({ids,borrarAsignaciones})}),
+  limpiarCompletados:()=>_go(`${SUPA_URL}/functions/v1/limpiar-bandeja`,{method:"POST",headers:{..._H}}),
+  deleteTurno:(id)=>_go(`${SUPA_URL}/functions/v1/admin-borrar-turnos`,{method:"POST",headers:{..._H},body:JSON.stringify({ids:[id],borrarAsignaciones:false})}),
   patchAsig: (id,body)=>_go(`${SUPA_URL}/rest/v1/asignaciones?id=eq.${id}`,{method:"PATCH",headers:{..._H,Prefer:"return=minimal"},body:JSON.stringify(body)}),
 };
 
@@ -97,10 +100,7 @@ function AdminApp(){
     const cutoff8h=new Date(Date.now()-8*60*60*1000).toISOString();
     const{data:viejos}=await _go(`${SUPA_URL}/rest/v1/turnos?estado=in.(completado,fallido)&fecha_completado=lt.${cutoff8h}&select=id,picking`);
     if(viejos?.length){
-      const ids=viejos.map(t=>t.id).join(",");
-      await _go(`${SUPA_URL}/rest/v1/turnos?id=in.(${ids})`,{method:"DELETE",headers:{..._H,Prefer:"return=minimal"}});
-      const picks=viejos.map(t=>t.picking).filter(Boolean).join(",");
-      if(picks)await _go(`${SUPA_URL}/rest/v1/asignaciones?picking=in.(${picks})`,{method:"DELETE",headers:{..._H,Prefer:"return=minimal"}});
+      await api.borrarTurnos(viejos.map(t=>t.id),true);
     }
     // Auto-completar asignaciones en_proceso con más de 5h
     const cutoff5h=new Date(Date.now()-5*60*60*1000).toISOString();
@@ -180,12 +180,9 @@ function AdminApp(){
   };
   const limpiarTodo=async()=>{
     if(!window.confirm("¿Eliminar todos los turnos completados y fallidos?\nEsta acción no se puede deshacer."))return;
-    const{data:doneT}=await _go(`${SUPA_URL}/rest/v1/turnos?estado=in.(completado,fallido)&select=id,picking`);
-    await _go(`${SUPA_URL}/rest/v1/turnos?estado=in.(completado,fallido)`,{method:"DELETE",headers:{..._H,Prefer:"return=minimal"}});
-    if(doneT?.length){
-      const picklist=doneT.map(t=>t.picking).join(",");
-      if(picklist)await _go(`${SUPA_URL}/rest/v1/asignaciones?picking=in.(${picklist})`,{method:"DELETE",headers:{..._H,Prefer:"return=minimal"}});
-    }
+    // Borrado vía Edge Function (service_role); el DELETE directo lo bloquea el RLS.
+    const{error}=await api.limpiarCompletados();
+    if(error){window.alert("No se pudo limpiar.\n"+(error.message||"Reintenta."));return;}
     await refrescar();
   };
   const liberarPedido=async(id)=>{

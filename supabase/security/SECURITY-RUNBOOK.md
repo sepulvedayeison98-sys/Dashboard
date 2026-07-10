@@ -51,17 +51,23 @@ error con un aviso. Solo falta **desplegarla**: `supabase functions deploy
 limpiar-bandeja` (Paso 4 bis). Si al desplegar la función rechaza la anon key
 (las nuevas `sb_publishable_…` no son JWT), desplegar con `--no-verify-jwt`.
 
-> ⚠️ **Gap detectado — otros DELETE que el RLS también romperá (fuera del runbook original):**
-> Al activar el RLS (Paso 2) se bloquea TODO DELETE de `anon` en las 4 tablas, no
-> solo "Limpiar bandeja". Quedan sin cubrir:
-> - **`admin.html`**: `deleteTurno`, borrado masivo de turnos, limpieza de
->   completados/fallidos y de asignaciones → dejarán de funcionar.
-> - **`pipeline.html` login**: borra el `usuario` operario antes de reinsertarlo
->   (limpieza de presencia). Con RLS el DELETE falla silencioso → **usuarios
->   duplicados**. Fix sugerido: cambiar delete+insert por upsert (merge-duplicates).
-> Decisión pendiente del dueño: crear Edge Functions equivalentes para admin, o
-> mover esas operaciones a un panel con service_role. **No aplicado aún** para no
-> ampliar alcance sin confirmación.
+### Paso 5 bis — Cubrir el resto de DELETE/escrituras que el RLS afecta  *(yo · HECHO en código)*
+Al activar el RLS se bloquea TODO DELETE de `anon` y (según policy) las escrituras a
+`usuarios`. Cubierto:
+- ✅ **`admin.html`**: `deleteTurno` y `autoLimpiar` → ahora usan la Edge Function
+  **`admin-borrar-turnos`** (service_role). `limpiarTodo` → reutiliza `limpiar-bandeja`.
+- ✅ **`pipeline.html` login (presencia)**: se quitó el `delete+insert` (que con RLS
+  dejaba usuarios duplicados). Ahora hace **update-or-insert** (sin DELETE).
+- ✅ **`rls-policies.sql`**: `usuarios` ahora permite SELECT/INSERT/UPDATE para `anon`
+  (registro de presencia), **DELETE sigue bloqueado**.
+- ✅ **`montacargas.html`**: no hace DELETE ni escribe `usuarios` → sin cambios.
+
+**Falta desplegar** la nueva función:
+```
+supabase functions deploy admin-borrar-turnos
+```
+(igual que `limpiar-bandeja`, agregar `--no-verify-jwt` si la anon key no es JWT).
+Guard opcional: `supabase secrets set ADMIN_SECRET=<...>` (y enviar `x-admin-secret`).
 
 ---
 
@@ -72,9 +78,9 @@ limpiar-bandeja` (Paso 4 bis). Si al desplegar la función rechaza la anon key
 - [ ] Edge Function push desplegada y push funcionando
 - [ ] Clave pública nueva en el front  ← **bloqueado: necesito la nueva VAPID_PUBLIC del Paso 3.1**
 - [x] "Limpiar bandeja" ya no usa DELETE directo (código)
-- [ ] Edge Function `limpiar-bandeja` desplegada
-- [ ] Decidir/cubrir DELETE de admin.html y presencia de operario (gap arriba)
-- [ ] Picking y Montacargas operan normal (prueba de humo)
+- [x] admin.html y presencia de operario cubiertos (código — Paso 5 bis)
+- [ ] Edge Functions `limpiar-bandeja` y `admin-borrar-turnos` desplegadas
+- [ ] Picking, Montacargas y Admin operan normal (prueba de humo)
 
 > Lo que necesita TU acceso a Supabase: pasos 1, 2, 3.2, 4 (+ deploy de `limpiar-bandeja`).
 > Lo que aplico yo en código: paso 5 ✅ · paso 3.3 (bloqueado hasta tener la nueva clave pública).

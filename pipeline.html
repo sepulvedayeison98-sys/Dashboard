@@ -1542,9 +1542,18 @@ function PickingApp() {
   // ═══════════ PANTALLAS ═══════════
   if (phase === "login") return /*#__PURE__*/React.createElement(LoginForm, {
     onLogin: nombre => {
-      // Fire-and-forget: no bloqueamos la carga con escrituras de presencia
-      _go(`${SUPA_URL}/rest/v1/usuarios?nombre=eq.${encodeURIComponent(nombre)}&rol=eq.operario`, {method:"DELETE",headers:{..._H,Prefer:"return=minimal"}});
-      sb.from("usuarios").insert({nombre, rol:"operario", activo:true, fecha_login:new Date().toISOString()});
+      // Presencia sin DELETE (bloqueado por RLS para 'anon'): actualiza si ya
+      // existe, si no inserta. Fire-and-forget: no bloqueamos la carga.
+      (async () => {
+        const filtro = `nombre=eq.${encodeURIComponent(nombre)}&rol=eq.operario`;
+        const payload = { activo: true, fecha_login: new Date().toISOString() };
+        const { data: existe } = await _go(`${SUPA_URL}/rest/v1/usuarios?${filtro}&select=nombre`);
+        if (existe && existe.length) {
+          _go(`${SUPA_URL}/rest/v1/usuarios?${filtro}`, {method:"PATCH",headers:{..._H,Prefer:"return=minimal"},body:JSON.stringify(payload)});
+        } else {
+          _go(`${SUPA_URL}/rest/v1/usuarios`, {method:"POST",headers:{..._H,Prefer:"return=minimal"},body:JSON.stringify({nombre, rol:"operario", ...payload})});
+        }
+      })();
       setOperario(nombre);
     }
   });

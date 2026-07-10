@@ -35,11 +35,17 @@ create policy asig_update on public.asignaciones for update to anon using (true)
 -- (sin DELETE para anon)
 
 -- ── usuarios ─────────────────────────────────────────────────────────────────
--- Solo lectura desde el cliente; alta/baja de usuarios desde el dashboard o Edge.
+-- Lectura + registro de presencia (login de operarios: insert/update de
+-- activo/fecha_login). Se BLOQUEA solo el DELETE (no se borran cuentas desde el
+-- cliente). El login ya no hace delete+insert, usa update-or-insert.
 alter table public.usuarios enable row level security;
 drop policy if exists usuarios_select on public.usuarios;
+drop policy if exists usuarios_insert on public.usuarios;
+drop policy if exists usuarios_update on public.usuarios;
 create policy usuarios_select on public.usuarios for select to anon using (true);
--- (sin INSERT/UPDATE/DELETE para anon)
+create policy usuarios_insert on public.usuarios for insert to anon with check (true);
+create policy usuarios_update on public.usuarios for update to anon using (true) with check (true);
+-- (sin DELETE para anon)
 
 -- ── push_subscriptions ───────────────────────────────────────────────────────
 -- El cliente registra su suscripción (insert/upsert) y puede leer la suya.
