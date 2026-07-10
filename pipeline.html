@@ -1355,25 +1355,23 @@ function PickingApp() {
   };
   const limpiarBandeja = async () => {
     if (!window.confirm("¿Limpiar todos los turnos completados y fallidos?\nEsta acción no se puede deshacer.")) return;
+    // El DELETE directo desde el cliente quedó bloqueado por RLS para 'anon'
+    // (ver supabase/security/SECURITY-RUNBOOK.md). El borrado pasa por la Edge
+    // Function 'limpiar-bandeja', que usa service_role de forma controlada.
     const {
-      data: doneT
-    } = await _go(`${SUPA_URL}/rest/v1/turnos?estado=in.(completado,fallido)&select=id,picking`);
-    if (!doneT?.length) return;
-    await _go(`${SUPA_URL}/rest/v1/turnos?estado=in.(completado,fallido)`, {
-      method: "DELETE",
+      data: res,
+      error
+    } = await _go(`${SUPA_URL}/functions/v1/limpiar-bandeja`, {
+      method: "POST",
       headers: {
-        ..._H,
-        Prefer: "return=minimal"
+        ..._H
       }
     });
-    const picklist = doneT.map(t => t.picking).join(",");
-    if (picklist) await _go(`${SUPA_URL}/rest/v1/asignaciones?picking=in.(${picklist})`, {
-      method: "DELETE",
-      headers: {
-        ..._H,
-        Prefer: "return=minimal"
-      }
-    });
+    if (error) {
+      window.alert("No se pudo limpiar la bandeja.\n" + (error.message || "Reintenta en un momento."));
+      return;
+    }
+    // Refrescar asignaciones en proceso tras el borrado en el servidor.
     const {
       data: rows
     } = await _go(`${SUPA_URL}/rest/v1/asignaciones?estado=eq.en_proceso&select=picking,operario,estado`);

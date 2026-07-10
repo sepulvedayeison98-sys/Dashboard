@@ -44,10 +44,24 @@ supabase functions deploy notify-montacarguistas
 > Importante: hacer el Paso 3.2 (secrets) ANTES de desplegar, o la función fallará por
 > falta de VAPID.
 
-## Paso 5 — Quitar el DELETE del cliente  *(yo · 15 min, de noche)*
-Con RLS bloqueando DELETE para `anon`, el botón "Limpiar bandeja" daría error.
-Lo reemplazo por una llamada a una Edge Function protegida (`limpiar-bandeja`,
-service_role) o lo retiro de la UI. → cambio de código que aplico de noche.
+## Paso 5 — Quitar el DELETE del cliente  *(yo · HECHO en código)*
+✅ **Aplicado.** `pipeline.html → limpiarBandeja` ya NO hace DELETE directo:
+llama a la Edge Function `limpiar-bandeja` (service_role) por POST y maneja el
+error con un aviso. Solo falta **desplegarla**: `supabase functions deploy
+limpiar-bandeja` (Paso 4 bis). Si al desplegar la función rechaza la anon key
+(las nuevas `sb_publishable_…` no son JWT), desplegar con `--no-verify-jwt`.
+
+> ⚠️ **Gap detectado — otros DELETE que el RLS también romperá (fuera del runbook original):**
+> Al activar el RLS (Paso 2) se bloquea TODO DELETE de `anon` en las 4 tablas, no
+> solo "Limpiar bandeja". Quedan sin cubrir:
+> - **`admin.html`**: `deleteTurno`, borrado masivo de turnos, limpieza de
+>   completados/fallidos y de asignaciones → dejarán de funcionar.
+> - **`pipeline.html` login**: borra el `usuario` operario antes de reinsertarlo
+>   (limpieza de presencia). Con RLS el DELETE falla silencioso → **usuarios
+>   duplicados**. Fix sugerido: cambiar delete+insert por upsert (merge-duplicates).
+> Decisión pendiente del dueño: crear Edge Functions equivalentes para admin, o
+> mover esas operaciones a un panel con service_role. **No aplicado aún** para no
+> ampliar alcance sin confirmación.
 
 ---
 
@@ -55,10 +69,12 @@ service_role) o lo retiro de la UI. → cambio de código que aplico de noche.
 - [ ] RLS habilitado en las 4 tablas
 - [ ] DELETE bloqueado para anon (verificado)
 - [ ] Claves VAPID rotadas y en secrets
-- [ ] Edge Function desplegada y push funcionando
-- [ ] Clave pública nueva en el front
-- [ ] "Limpiar bandeja" ya no usa DELETE directo
+- [ ] Edge Function push desplegada y push funcionando
+- [ ] Clave pública nueva en el front  ← **bloqueado: necesito la nueva VAPID_PUBLIC del Paso 3.1**
+- [x] "Limpiar bandeja" ya no usa DELETE directo (código)
+- [ ] Edge Function `limpiar-bandeja` desplegada
+- [ ] Decidir/cubrir DELETE de admin.html y presencia de operario (gap arriba)
 - [ ] Picking y Montacargas operan normal (prueba de humo)
 
-> Lo que necesita TU acceso a Supabase: pasos 1, 2, 3.2, 4.
-> Lo que aplico yo en código: pasos 3.3 y 5.
+> Lo que necesita TU acceso a Supabase: pasos 1, 2, 3.2, 4 (+ deploy de `limpiar-bandeja`).
+> Lo que aplico yo en código: paso 5 ✅ · paso 3.3 (bloqueado hasta tener la nueva clave pública).
