@@ -35605,19 +35605,75 @@ function ModulePanel({
     });
   })()));
 }
-// Export del Excel de Reposición con formato fijo (reglas del CEDI):
-//  1) Filtrar SIN ALTURA / Stock Altura 0 · columnas: SKU, Comprometido, Piso, Bajar(cajas), Posición
-//  2) Una fila por SKU
-//  3) Merge vertical de Posición cuando varios SKUs comparten posición + resaltado amarillo
-//  4) Orden por Calle (1→4) y luego por texto de posición
+// Fuente única de los "viajes" (bajar de altura) para la pantalla y el Excel.
+// Devuelve los SKUs que faltan en piso pero tienen altura, filtrados por Calle,
+// igual que el Plan de Viajes. Cada item: {ref, desc, uniReq, comp, stockPiso, mejorAlt, ...}
+function listaViajes(data, sorted, planCalle) {
+  const reabasto = (data?.pedidosActivos || []).filter(p => !p.esMasivo && (p.clasificacion === "reabasto" || p.clasificacion === "parcial" || p.clasificacion === "ruptura"));
+  const skuMaestro = Object.fromEntries(sorted.map(x => [x.id, x]));
+  const skuFalta = {};
+  reabasto.forEach(p => {
+    (p.refs || []).forEach(r => {
+      if (!r.hasPiso && r.hasAlt) {
+        if (!skuFalta[r.ref]) {
+          const _m = skuMaestro[r.ref] || {};
+          skuFalta[r.ref] = {
+            ref: r.ref,
+            desc: r.desc,
+            uniReq: 0,
+            pedidos: new Set(),
+            stockAlt: 0,
+            stockPiso: _m.stock_piso || 0,
+            comp: _m.comp || 0,
+            posPiso: [],
+            mejorAlt: null
+          };
+        }
+        skuFalta[r.ref].uniReq += r.cant;
+        skuFalta[r.ref].pedidos.add(p.id);
+        const pos = (data?.invBySKU || {})[r.ref] || [];
+        skuFalta[r.ref].stockAlt = pos.filter(x => x.nivel >= 2).reduce((t, x) => t + x.saldo, 0);
+        if (!skuFalta[r.ref].posPiso.length) {
+          skuFalta[r.ref].posPiso = pos.filter(x => x.nivel <= 1 && x.saldo > 0).sort((a, b) => b.saldo - a.saldo).slice(0, 3).map(x => x.ubi);
+        }
+        if (!skuFalta[r.ref].mejorAlt) {
+          const _pa = pos.filter(x => x.nivel >= 2 && x.saldo > 0).sort((a, b) => b.saldo - a.saldo);
+          if (_pa.length > 0) skuFalta[r.ref].mejorAlt = _pa[0].ubi;
+        }
+      }
+    });
+  });
+  let listaV = Object.values(skuFalta).map(s => ({
+    ...s,
+    nPedidos: s.pedidos.size,
+    pallets: Math.ceil(s.uniReq / 72)
+  })).sort((a, b) => b.uniReq - a.uniReq);
+  if (planCalle !== "todas") {
+    listaV = listaV.filter(s => {
+      const f = familia(s.desc) || "";
+      const d = (s.desc || "").toUpperCase();
+      if (planCalle === "C1") return ["3110", "102", "405"].includes(f);
+      if (planCalle === "C2") return f === "501" && /SP/.test(d) || f === "503";
+      if (planCalle === "C3") return f === "501" && !esCalle2(d);
+      if (planCalle === "C4") return ["321", "3130"].includes(f);
+      return true;
+    });
+  }
+  return listaV;
+}
+// Export del Excel de Reposición ("viajes" de bajar de altura) con formato fijo:
+//  1) Un SKU por fila (solo los que tienen posición de altura) · columnas:
+//     SKU, Familia, Comprometido, Piso, Bajar(cajas), Posición
+//  2) "Bajar (cajas)" = ceil(unidades requeridas por los pedidos / 9)
+//  3) Merge vertical de Posición cuando varios SKUs comparten posición (= mismo viaje) + amarillo
+//  4) Orden por Calle (B→E) y luego por texto de posición
 //  5) Encabezado azul 1F4E78, cuerpo Arial 10 centrado con bordes grises, borde medio por grupo,
 //     autofiltro, panel congelado en fila 1 y anchos fijos.
-async function exportarPlanTurno(sorted, data, bufH, bufF, calleSel = "todas") {
+async function exportarPlanTurno(items, calleSel = "todas") {
   if (!window.ExcelJS) {
     alert("Librería ExcelJS no disponible (no se pudo cargar). Reintenta con conexión.");
     return;
   }
-  const invBySKU = data?.invBySKU || {};
   const ahora = new Date();
   const CALLE_ORD = {
     B: 1,
@@ -35626,22 +35682,18 @@ async function exportarPlanTurno(sorted, data, bufH, bufF, calleSel = "todas") {
     E: 4
   };
 
-  // 1 · Filtrado + estructura: una fila por SKU con altura real
-  let filas = sorted.filter(s => gap(s) > 0).map(s => {
-    const g = gap(s);
-    const pos = invBySKU[s.id] || [];
-    const altura = pos.filter(p => p.nivel >= 2 && p.saldo > 0).sort((a, b) => b.saldo - a.saldo);
-    const mejorAlt = altura[0];
-    if (!mejorAlt) return null; // SIN ALTURA / Stock Altura 0 → excluir
-    const calleLetra = mejorAlt.ubi && mejorAlt.ubi[0] || "";
+  // 1 · Un SKU por fila, tomado de los mismos "viajes" que muestra la pantalla.
+  //     Solo los que tienen posición de altura (los que arman un viaje real).
+  let filas = (items || []).filter(s => s.mejorAlt).map(s => {
     // Posición tal cual aparece en el inventario (ej: B3121, C0121, D1532, E3451)
-    const posicion = String(mejorAlt.ubi || "").trim().toUpperCase();
+    const posicion = String(s.mejorAlt || "").trim().toUpperCase();
+    const calleLetra = posicion[0] || "";
     return {
-      sku: String(s.id),
-      familia: s.familia || "OTROS",
+      sku: String(s.ref),
+      familia: familia(s.desc) || "OTROS",
       comprometido: s.comp,
-      piso: s.stock_piso,
-      cajas: Math.ceil(g / 9),
+      piso: s.stockPiso,
+      cajas: Math.ceil((s.uniReq || 0) / 9),
       posicion,
       calleNum: CALLE_ORD[calleLetra] || 9
     };
@@ -38763,20 +38815,7 @@ function CEDIDashboard() {
       }
     }, k.s))));
   })(), (() => {
-    const accs = sorted.filter(s => {
-      if (!(gap(s) > 0)) return false;
-      if (planFam !== "todas" && s.familia !== planFam) return false;
-      // Respetar el filtro de Calle seleccionado (misma lógica que el Plan de Viajes)
-      if (planCalle !== "todas") {
-        const f = familia(s.desc) || "";
-        const d = (s.desc || "").toUpperCase();
-        if (planCalle === "C1") return ["3110", "102", "405"].includes(f);
-        if (planCalle === "C2") return f === "501" && /SP/.test(d) || f === "503";
-        if (planCalle === "C3") return f === "501" && !esCalle2(d);
-        if (planCalle === "C4") return ["321", "3130"].includes(f);
-      }
-      return true;
-    });
+    const accs = sorted.filter(s => gap(s) > 0 && (planFam === "todas" || s.familia === planFam));
     const totalAcc = accs.length;
     const doneAcc = accs.filter(s => hechos[s.id]).length;
     const pct = totalAcc > 0 ? Math.round(doneAcc / totalAcc * 100) : 0;
@@ -38882,7 +38921,7 @@ function CEDIDashboard() {
         fontFamily: "inherit"
       }
     }, l))), React.createElement("button", {
-      onClick: () => exportarPlanTurno(accs, data, bufH, bufF, planCalle),
+      onClick: () => exportarPlanTurno(listaViajes(data, sorted, planCalle), planCalle),
       style: {
         padding: "6px 12px",
         borderRadius: 8,
@@ -38956,56 +38995,8 @@ function CEDIDashboard() {
       }
     }, "Reiniciar")));
   })(), (() => {
-    const reabasto = (data?.pedidosActivos || []).filter(p => !p.esMasivo && (p.clasificacion === "reabasto" || p.clasificacion === "parcial" || p.clasificacion === "ruptura"));
-    const skuMaestro = Object.fromEntries(sorted.map(x => [x.id, x]));
-    const skuFalta = {};
-    reabasto.forEach(p => {
-      (p.refs || []).forEach(r => {
-        if (!r.hasPiso && r.hasAlt) {
-          if (!skuFalta[r.ref]) {
-            const _m = skuMaestro[r.ref] || {};
-            skuFalta[r.ref] = {
-              ref: r.ref,
-              desc: r.desc,
-              uniReq: 0,
-              pedidos: new Set(),
-              stockAlt: 0,
-              stockPiso: _m.stock_piso || 0,
-              comp: _m.comp || 0,
-              posPiso: [],
-              mejorAlt: null
-            };
-          }
-          skuFalta[r.ref].uniReq += r.cant;
-          skuFalta[r.ref].pedidos.add(p.id);
-          const pos = (data?.invBySKU || {})[r.ref] || [];
-          skuFalta[r.ref].stockAlt = pos.filter(x => x.nivel >= 2).reduce((t, x) => t + x.saldo, 0);
-          if (!skuFalta[r.ref].posPiso.length) {
-            skuFalta[r.ref].posPiso = pos.filter(x => x.nivel <= 1 && x.saldo > 0).sort((a, b) => b.saldo - a.saldo).slice(0, 3).map(x => x.ubi);
-          }
-          if (!skuFalta[r.ref].mejorAlt) {
-            const _pa = pos.filter(x => x.nivel >= 2 && x.saldo > 0).sort((a, b) => b.saldo - a.saldo);
-            if (_pa.length > 0) skuFalta[r.ref].mejorAlt = _pa[0].ubi;
-          }
-        }
-      });
-    });
-    let listaV = Object.values(skuFalta).map(s => ({
-      ...s,
-      nPedidos: s.pedidos.size,
-      pallets: Math.ceil(s.uniReq / 72)
-    })).sort((a, b) => b.uniReq - a.uniReq);
-    if (planCalle !== "todas") {
-      listaV = listaV.filter(s => {
-        const f = familia(s.desc) || "";
-        const d = (s.desc || "").toUpperCase();
-        if (planCalle === "C1") return ["3110", "102", "405"].includes(f);
-        if (planCalle === "C2") return f === "501" && /SP/.test(d) || f === "503";
-        if (planCalle === "C3") return f === "501" && !esCalle2(d);
-        if (planCalle === "C4") return ["321", "3130"].includes(f);
-        return true;
-      });
-    }
+    // Fuente única compartida con el Excel (botón 📥). Ver listaViajes().
+    const listaV = listaViajes(data, sorted, planCalle);
     if (listaV.length === 0) return null;
     const viajesMap = {};
     listaV.forEach(s => {
