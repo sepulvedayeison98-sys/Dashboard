@@ -35604,106 +35604,221 @@ function ModulePanel({
     });
   })()));
 }
-function exportarPlanTurno(sorted, data, bufH, bufF) {
-  if (!window.XLSX) {
-    alert("Librería Excel no disponible");
+// Export del Excel de Reposición con formato fijo (reglas del CEDI):
+//  1) Filtrar SIN ALTURA / Stock Altura 0 · columnas: SKU, Comprometido, Piso, Bajar(cajas), Posición
+//  2) Una fila por SKU
+//  3) Merge vertical de Posición cuando varios SKUs comparten posición + resaltado amarillo
+//  4) Orden por Calle (1→4) y luego por texto de posición
+//  5) Encabezado azul 1F4E78, cuerpo Arial 10 centrado con bordes grises, borde medio por grupo,
+//     autofiltro, panel congelado en fila 1 y anchos fijos.
+async function exportarPlanTurno(sorted, data, bufH, bufF) {
+  if (!window.ExcelJS) {
+    alert("Librería ExcelJS no disponible (no se pudo cargar). Reintenta con conexión.");
     return;
   }
   const invBySKU = data?.invBySKU || {};
   const ahora = new Date();
-  const fechaStr = ahora.toLocaleDateString("es-CO") + " " + ahora.toLocaleTimeString("es-CO", {
-    hour: "2-digit",
-    minute: "2-digit"
-  });
-  const acciones = sorted.filter(s => gap(s) > 0);
-  const ordEstado = {
-    ruptura: 0,
-    critico: 1,
-    preventivo: 2,
-    ok: 3
+  const CALLE_N = {
+    B: "Calle1",
+    C: "Calle2",
+    D: "Calle3",
+    E: "Calle4"
   };
-  const filas = acciones.map((s, i) => {
+  const CALLE_ORD = {
+    B: 1,
+    C: 2,
+    D: 3,
+    E: 4
+  };
+
+  // 1 · Filtrado + estructura: una fila por SKU con altura real
+  let filas = sorted.filter(s => gap(s) > 0).map(s => {
     const g = gap(s);
-    const cs = cantSug(s, bufH, bufF);
     const pos = invBySKU[s.id] || [];
     const altura = pos.filter(p => p.nivel >= 2 && p.saldo > 0).sort((a, b) => b.saldo - a.saldo);
     const mejorAlt = altura[0];
-    const CALLE_N = {
-      B: "Calle1",
-      C: "Calle2",
-      D: "Calle3",
-      E: "Calle4"
-    };
-    const ubiBajar = mejorAlt ? `M${String(mejorAlt.modulo).padStart(2, "0")}-${mejorAlt.nivel}-${mejorAlt.pos} (${CALLE_N[mejorAlt.ubi?.[0]] || ""})` : "SIN ALTURA";
-    const cajasBajar = Math.ceil(g / 9);
+    if (!mejorAlt) return null; // SIN ALTURA / Stock Altura 0 → excluir
+    const calleLetra = mejorAlt.ubi && mejorAlt.ubi[0] || "";
+    const posicion = `M${String(mejorAlt.modulo).padStart(2, "0")}-${mejorAlt.nivel}-${mejorAlt.pos} (${CALLE_N[calleLetra] || "?"})`;
     return {
-      prioridad: i + 1,
-      ciudad: s.ciudad === "MDE" ? "📍 MDE 11AM" : s.ciudad || "-",
-      estado: {
-        ruptura: "RUPTURA",
-        critico: "CRÍTICO",
-        preventivo: "PREVENTIVO",
-        ok: "OK"
-      }[estado(s)] || estado(s),
-      sku: s.id,
-      descripcion: s.label || "",
-      abc: s.abc || "",
-      stock_piso: s.stock_piso,
+      sku: String(s.id),
       comprometido: s.comp,
-      gap: -g,
-      reponer_u: cs,
-      bajar_cajas: cajasBajar,
-      bajar_unidades: cajasBajar * 9,
-      bajar_de: ubiBajar,
-      stock_altura: mejorAlt ? mejorAlt.saldo : 0
+      piso: s.stock_piso,
+      cajas: Math.ceil(g / 9),
+      posicion,
+      calleNum: CALLE_ORD[calleLetra] || 9
     };
+  }).filter(Boolean);
+
+  // 4 · Orden: por Calle, luego por texto de posición (numérico)
+  filas.sort((a, b) => a.calleNum - b.calleNum || a.posicion.localeCompare(b.posicion, "es", {
+    numeric: true
+  }));
+
+  // Workbook + hoja (panel congelado en fila 1)
+  const wb = new window.ExcelJS.Workbook();
+  const ws = wb.addWorksheet("Reposición", {
+    views: [{
+      state: "frozen",
+      ySplit: 1
+    }]
   });
-  const header = [["PLAN DE ABASTECIMIENTO DEL TURNO — CEDI INDUCASOS"], ["Generado:", fechaStr, "", "Total acciones:", acciones.length, "", "Buffer:", bufH + "h × " + bufF + "x"], [""], ["#", "Ciudad", "Estado", "SKU", "Descripción", "ABC", "Stock Piso", "Comprometido", "Gap", "Reponer (u)", "Bajar (cajas)", "Bajar (u)", "Bajar de posición", "Stock Altura"]];
-  const body = filas.map(f => [f.prioridad, f.ciudad, f.estado, f.sku, f.descripcion, f.abc, f.stock_piso, f.comprometido, f.gap, f.reponer_u, f.bajar_cajas, f.bajar_unidades, f.bajar_de, f.stock_altura]);
-  const aoa = [...header, ...body];
-  const ws = window.XLSX.utils.aoa_to_sheet(aoa);
-  ws["!cols"] = [{
-    wch: 4
+  ws.columns = [{
+    header: "SKU",
+    key: "sku",
+    width: 14
   }, {
-    wch: 12
+    header: "Comprometido",
+    key: "comprometido",
+    width: 15
   }, {
-    wch: 12
+    header: "Piso",
+    key: "piso",
+    width: 10
   }, {
-    wch: 10
+    header: "Bajar (cajas)",
+    key: "cajas",
+    width: 14
   }, {
-    wch: 42
-  }, {
-    wch: 5
-  }, {
-    wch: 10
-  }, {
-    wch: 13
-  }, {
-    wch: 8
-  }, {
-    wch: 11
-  }, {
-    wch: 12
-  }, {
-    wch: 9
-  }, {
-    wch: 24
-  }, {
-    wch: 12
+    header: "Posición",
+    key: "posicion",
+    width: 20
   }];
-  ws["!merges"] = [{
-    s: {
-      r: 0,
-      c: 0
-    },
-    e: {
-      r: 0,
-      c: 13
+
+  // Estilos reutilizables
+  const thinGray = {
+    style: "thin",
+    color: {
+      argb: "FFBFBFBF"
     }
-  }];
-  const wb = window.XLSX.utils.book_new();
-  window.XLSX.utils.book_append_sheet(wb, ws, "Plan Turno");
-  window.XLSX.writeFile(wb, `plan_turno_cedi_${ahora.toISOString().slice(0, 10)}_${String(ahora.getHours()).padStart(2, "0")}${String(ahora.getMinutes()).padStart(2, "0")}.xlsx`);
+  };
+  const medGray = {
+    style: "medium",
+    color: {
+      argb: "FF808080"
+    }
+  };
+  const bordeFino = {
+    top: thinGray,
+    bottom: thinGray,
+    left: thinGray,
+    right: thinGray
+  };
+  const centro = {
+    horizontal: "center",
+    vertical: "middle"
+  };
+  const NCOL = 5;
+
+  // 5 · Encabezado azul, texto blanco negrita centrado
+  const hRow = ws.getRow(1);
+  hRow.height = 20;
+  for (let col = 1; col <= NCOL; col++) {
+    const c = hRow.getCell(col);
+    c.font = {
+      name: "Arial",
+      size: 10,
+      bold: true,
+      color: {
+        argb: "FFFFFFFF"
+      }
+    };
+    c.fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: {
+        argb: "FF1F4E78"
+      }
+    };
+    c.alignment = centro;
+    c.border = bordeFino;
+  }
+
+  // Filas de datos
+  filas.forEach(f => ws.addRow({
+    sku: f.sku,
+    comprometido: f.comprometido,
+    piso: f.piso,
+    cajas: f.cajas,
+    posicion: f.posicion
+  }));
+
+  // 3 · Grupos contiguos por posición (ya ordenado)
+  const grupos = [];
+  let gi = 0;
+  while (gi < filas.length) {
+    let gj = gi;
+    while (gj + 1 < filas.length && filas[gj + 1].posicion === filas[gi].posicion) gj++;
+    grupos.push({
+      start: gi,
+      end: gj,
+      size: gj - gi + 1
+    });
+    gi = gj + 1;
+  }
+
+  // Cuerpo: Arial 10 centrado con bordes; resaltado amarillo + merge en posiciones compartidas
+  grupos.forEach(gr => {
+    const compartida = gr.size >= 2;
+    for (let r = gr.start; r <= gr.end; r++) {
+      const excelRow = r + 2; // fila 1 = encabezado
+      for (let col = 1; col <= NCOL; col++) {
+        const c = ws.getRow(excelRow).getCell(col);
+        c.font = {
+          name: "Arial",
+          size: 10
+        };
+        c.alignment = centro;
+        c.border = {
+          ...bordeFino
+        };
+        if (compartida) c.fill = {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: {
+            argb: "FFFFF2CC"
+          }
+        };
+      }
+    }
+    // Merge vertical de la celda Posición (col 5) cuando comparten
+    if (compartida) {
+      ws.mergeCells(gr.start + 2, NCOL, gr.end + 2, NCOL);
+      ws.getCell(gr.start + 2, NCOL).alignment = centro;
+    }
+    // Borde medio gris al final del grupo (separador visual)
+    const lastExcel = gr.end + 2;
+    for (let col = 1; col <= NCOL; col++) {
+      const c = ws.getRow(lastExcel).getCell(col);
+      c.border = {
+        ...(c.border || bordeFino),
+        bottom: medGray
+      };
+    }
+  });
+
+  // Autofiltro en el encabezado
+  ws.autoFilter = {
+    from: {
+      row: 1,
+      column: 1
+    },
+    to: {
+      row: 1,
+      column: NCOL
+    }
+  };
+
+  // Descargar
+  const buf = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buf], {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+  });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `reposicion_cedi_${ahora.toISOString().slice(0, 10)}_${String(ahora.getHours()).padStart(2, "0")}${String(ahora.getMinutes()).padStart(2, "0")}.xlsx`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 }
 function CEDIDashboard() {
   const [phase, setPhase] = useState("upload");
