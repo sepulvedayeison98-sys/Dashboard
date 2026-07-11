@@ -35618,12 +35618,6 @@ async function exportarPlanTurno(sorted, data, bufH, bufF) {
   }
   const invBySKU = data?.invBySKU || {};
   const ahora = new Date();
-  const CALLE_N = {
-    B: "Calle1",
-    C: "Calle2",
-    D: "Calle3",
-    E: "Calle4"
-  };
   const CALLE_ORD = {
     B: 1,
     C: 2,
@@ -35639,7 +35633,8 @@ async function exportarPlanTurno(sorted, data, bufH, bufF) {
     const mejorAlt = altura[0];
     if (!mejorAlt) return null; // SIN ALTURA / Stock Altura 0 → excluir
     const calleLetra = mejorAlt.ubi && mejorAlt.ubi[0] || "";
-    const posicion = `M${String(mejorAlt.modulo).padStart(2, "0")}-${mejorAlt.nivel}-${mejorAlt.pos} (${CALLE_N[calleLetra] || "?"})`;
+    // Posición tal cual aparece en el inventario (ej: B3121, C0121, D1532, E3451)
+    const posicion = String(mejorAlt.ubi || "").trim().toUpperCase();
     return {
       sku: String(s.id),
       familia: s.familia || "OTROS",
