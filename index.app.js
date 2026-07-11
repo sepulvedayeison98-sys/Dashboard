@@ -35642,6 +35642,7 @@ async function exportarPlanTurno(sorted, data, bufH, bufF) {
     const posicion = `M${String(mejorAlt.modulo).padStart(2, "0")}-${mejorAlt.nivel}-${mejorAlt.pos} (${CALLE_N[calleLetra] || "?"})`;
     return {
       sku: String(s.id),
+      familia: s.familia || "OTROS",
       comprometido: s.comp,
       piso: s.stock_piso,
       cajas: Math.ceil(g / 9),
@@ -35667,6 +35668,10 @@ async function exportarPlanTurno(sorted, data, bufH, bufF) {
     header: "SKU",
     key: "sku",
     width: 14
+  }, {
+    header: "Familia",
+    key: "familia",
+    width: 12
   }, {
     header: "Comprometido",
     key: "comprometido",
@@ -35708,7 +35713,7 @@ async function exportarPlanTurno(sorted, data, bufH, bufF) {
     horizontal: "center",
     vertical: "middle"
   };
-  const NCOL = 5;
+  const NCOL = 6; // SKU · Familia · Comprometido · Piso · Bajar(cajas) · Posición (última)
 
   // 5 · Encabezado azul, texto blanco negrita centrado
   const hRow = ws.getRow(1);
@@ -35737,6 +35742,7 @@ async function exportarPlanTurno(sorted, data, bufH, bufF) {
   // Filas de datos
   filas.forEach(f => ws.addRow({
     sku: f.sku,
+    familia: f.familia,
     comprometido: f.comprometido,
     piso: f.piso,
     cajas: f.cajas,
