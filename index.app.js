@@ -31828,6 +31828,7 @@ async function processFiles(wbInv, wbFact, onStep, marcasActivas) {
       id: it.ref,
       tipo: it.desc.includes("INTEGRAL") ? "INTEGRAL" : it.desc.includes("ABATIBLE") ? "ABATIBLE" : "ABIERTO",
       label: it.desc.slice(0, 35),
+      desc: it.desc,
       abc: eABC,
       tendencia: it.tendencia,
       proy_mes: it.proy_mes,
@@ -35611,7 +35612,7 @@ function ModulePanel({
 //  4) Orden por Calle (1→4) y luego por texto de posición
 //  5) Encabezado azul 1F4E78, cuerpo Arial 10 centrado con bordes grises, borde medio por grupo,
 //     autofiltro, panel congelado en fila 1 y anchos fijos.
-async function exportarPlanTurno(sorted, data, bufH, bufF) {
+async function exportarPlanTurno(sorted, data, bufH, bufF, calleSel = "todas") {
   if (!window.ExcelJS) {
     alert("Librería ExcelJS no disponible (no se pudo cargar). Reintenta con conexión.");
     return;
@@ -35652,8 +35653,9 @@ async function exportarPlanTurno(sorted, data, bufH, bufF) {
   }));
 
   // Workbook + hoja (panel congelado en fila 1)
+  const calleTag = calleSel && calleSel !== "todas" ? calleSel.toUpperCase() : "";
   const wb = new window.ExcelJS.Workbook();
-  const ws = wb.addWorksheet("Reposición", {
+  const ws = wb.addWorksheet(calleTag ? `Reposición ${calleTag}` : "Reposición", {
     views: [{
       state: "frozen",
       ySplit: 1
@@ -35817,7 +35819,7 @@ async function exportarPlanTurno(sorted, data, bufH, bufF) {
   });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = `reposicion_cedi_${ahora.toISOString().slice(0, 10)}_${String(ahora.getHours()).padStart(2, "0")}${String(ahora.getMinutes()).padStart(2, "0")}.xlsx`;
+  a.download = `reposicion_cedi_${calleTag ? calleTag + "_" : ""}${ahora.toISOString().slice(0, 10)}_${String(ahora.getHours()).padStart(2, "0")}${String(ahora.getMinutes()).padStart(2, "0")}.xlsx`;
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 }
@@ -38761,7 +38763,20 @@ function CEDIDashboard() {
       }
     }, k.s))));
   })(), (() => {
-    const accs = sorted.filter(s => gap(s) > 0 && (planFam === "todas" || s.familia === planFam));
+    const accs = sorted.filter(s => {
+      if (!(gap(s) > 0)) return false;
+      if (planFam !== "todas" && s.familia !== planFam) return false;
+      // Respetar el filtro de Calle seleccionado (misma lógica que el Plan de Viajes)
+      if (planCalle !== "todas") {
+        const f = familia(s.desc) || "";
+        const d = (s.desc || "").toUpperCase();
+        if (planCalle === "C1") return ["3110", "102", "405"].includes(f);
+        if (planCalle === "C2") return f === "501" && /SP/.test(d) || f === "503";
+        if (planCalle === "C3") return f === "501" && !esCalle2(d);
+        if (planCalle === "C4") return ["321", "3130"].includes(f);
+      }
+      return true;
+    });
     const totalAcc = accs.length;
     const doneAcc = accs.filter(s => hechos[s.id]).length;
     const pct = totalAcc > 0 ? Math.round(doneAcc / totalAcc * 100) : 0;
@@ -38867,7 +38882,7 @@ function CEDIDashboard() {
         fontFamily: "inherit"
       }
     }, l))), React.createElement("button", {
-      onClick: () => exportarPlanTurno(accs, data, bufH, bufF),
+      onClick: () => exportarPlanTurno(accs, data, bufH, bufF, planCalle),
       style: {
         padding: "6px 12px",
         borderRadius: 8,
