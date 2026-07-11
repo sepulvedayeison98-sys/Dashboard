@@ -35655,7 +35655,7 @@ function listaViajes(data, sorted, planCalle) {
       if (planCalle === "C1") return ["3110", "102", "405"].includes(f);
       if (planCalle === "C2") return f === "501" && /SP/.test(d) || f === "503";
       if (planCalle === "C3") return f === "501" && !esCalle2(d);
-      if (planCalle === "C4") return ["321", "3130"].includes(f);
+      if (planCalle === "C4") return ["3120", "3130"].includes(f);
       return true;
     });
   }
@@ -39455,7 +39455,7 @@ function CEDIDashboard() {
         if (planCalle === "C1") return ["3110", "102", "405"].includes(f);
         if (planCalle === "C2") return f === "501" && /SP/.test(d) || f === "503";
         if (planCalle === "C3") return f === "501" && !esCalle2(d);
-        if (planCalle === "C4") return ["321", "3130"].includes(f);
+        if (planCalle === "C4") return ["3120", "3130"].includes(f);
         return true;
       });
     }
