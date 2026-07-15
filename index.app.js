@@ -35648,17 +35648,12 @@ function ModulePanel({
     });
   })()));
 }
-// Elige la ubicación de altura que MEJOR cubre las unidades requeridas:
-// la más "ajustada" que alcance el objetivo (para no romper un pallet más
-// grande de lo necesario). Ej: si se necesitan 27u, prefiere una posición de
-// 27u antes que una de 72u. Si ninguna cubre el objetivo por sí sola, se
-// recomienda la de mayor stock (la que más acerca a cubrirlo).
-function mejorAltCubre(altByUbi, target) {
+// Recomienda la ubicación de altura MÁS LLENA (mayor stock total sumando sus
+// cajas). Así una sola bajada cubre la necesidad y los SKUs tienden a
+// agruparse en las posiciones grandes → menos viajes.
+function mejorAltCubre(altByUbi) {
   const entries = Object.entries(altByUbi || {});
   if (!entries.length) return null;
-  const t = target > 0 ? target : 1;
-  const cubren = entries.filter(([, s]) => s >= t).sort((a, b) => a[1] - b[1]);
-  if (cubren.length) return cubren[0][0];
   return entries.sort((a, b) => b[1] - a[1])[0][0];
 }
 // Fuente única de los "viajes" (bajar de altura) para la pantalla y el Excel.
@@ -35709,15 +35704,15 @@ function listaViajes(data, sorted, planCalle, planFam) {
     ...s,
     nPedidos: s.pedidos.size,
     pallets: Math.ceil(s.uniReq / 72),
-    // Mejor altura = la posición más ajustada que cubra las unidades requeridas
-    mejorAlt: mejorAltCubre(s.altByUbi, s.uniReq)
+    // Mejor altura = la posición más llena (mayor stock total) → menos viajes
+    mejorAlt: mejorAltCubre(s.altByUbi)
   })).sort((a, b) => b.uniReq - a.uniReq);
   if (planCalle !== "todas") {
     listaV = listaV.filter(s => {
       const f = familia(s.desc) || "";
       const d = (s.desc || "").toUpperCase();
       if (planCalle === "C1") return (f === "3110" && !es3110S(d)) || ["102", "405"].includes(f);
-      if (planCalle === "C2") return f === "501" && /SP/.test(d) || f === "503" || es3110S(d) || f === "101";
+      if (planCalle === "C2") return f === "501" && esCalle2(d) || f === "503" || es3110S(d) || f === "101";
       if (planCalle === "C3") return f === "501" && !esCalle2(d);
       if (planCalle === "C4") return ["3120", "3130", "3300"].includes(f);
       return true;
@@ -39526,14 +39521,13 @@ function CEDIDashboard() {
       const pos = invBySKU[s.id] || [];
       const piso = pos.filter(p => p.nivel <= 1 && p.saldo > 0);
       const alt = pos.filter(p => p.nivel >= 2 && p.saldo > 0).sort((a, b) => b.saldo - a.saldo);
-      // Mejor altura = la ubicación más ajustada que cubra el gap comprometido
-      // (sumando sus cajas), no la primera caja suelta ni siempre la más llena.
+      // Mejor altura = la ubicación más llena (mayor stock total sumando cajas)
       const altByUbi = {};
       alt.forEach(x => { altByUbi[x.ubi] = (altByUbi[x.ubi] || 0) + x.saldo; });
       const calleLet = (piso[0] || alt[0] || {}).calleKey ? (piso[0] || alt[0]).ubi?.[0] : null;
       return {
         calleLet,
-        mejorAlt: mejorAltCubre(altByUbi, gap(s))
+        mejorAlt: mejorAltCubre(altByUbi)
       };
     };
     if (planCalle !== "todas") {
@@ -39541,7 +39535,7 @@ function CEDIDashboard() {
         const f = s.familia || "";
         const d = (s.desc || s.label || "").toUpperCase();
         if (planCalle === "C1") return (f === "3110" && !es3110S(d)) || ["102", "405"].includes(f);
-        if (planCalle === "C2") return f === "501" && /SP/.test(d) || f === "503" || es3110S(d) || f === "101";
+        if (planCalle === "C2") return f === "501" && esCalle2(d) || f === "503" || es3110S(d) || f === "101";
         if (planCalle === "C3") return f === "501" && !esCalle2(d);
         if (planCalle === "C4") return ["3120", "3130", "3300"].includes(f);
         return true;
