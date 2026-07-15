@@ -31454,6 +31454,11 @@ const esCalle2 = d => {
   const u = (d || "").toUpperCase();
   return familia(u) === "501" && u.includes("SOLID") || u.includes("501_SP_S");
 };
+// El 3110 SOLID ("3110_S") pertenece a la Calle 2, no a la Calle 1.
+const es3110Solid = d => {
+  const u = (d || "").toUpperCase();
+  return familia(u) === "3110" && u.includes("SOLID");
+};
 const SOLO_ALTURA = ["520"];
 const esSoloAltura = d => SOLO_ALTURA.includes(familia(d));
 const CAJA = 9;
@@ -35668,8 +35673,8 @@ function listaViajes(data, sorted, planCalle, planFam) {
     listaV = listaV.filter(s => {
       const f = familia(s.desc) || "";
       const d = (s.desc || "").toUpperCase();
-      if (planCalle === "C1") return ["3110", "102", "405"].includes(f);
-      if (planCalle === "C2") return f === "501" && /SP/.test(d) || f === "503";
+      if (planCalle === "C1") return (f === "3110" && !es3110Solid(d)) || ["102", "405"].includes(f);
+      if (planCalle === "C2") return f === "501" && /SP/.test(d) || f === "503" || es3110Solid(d);
       if (planCalle === "C3") return f === "501" && !esCalle2(d);
       if (planCalle === "C4") return ["3120", "3130"].includes(f);
       return true;
@@ -36235,10 +36240,10 @@ function CEDIDashboard() {
     C4: C.purple
   };
   const calleSub = {
-    C1: "3110 · 102 · 405",
-    C2: "501-SP SOLID · 503",
+    C1: "3110 (no SOLID) · 102 · 405",
+    C2: "501-SP SOLID · 503 · 3110 SOLID",
     C3: "ICH-501",
-    C4: "321 · 3130"
+    C4: "3120 · 3130"
   };
   const rupturas = useMemo(() => data?.rupturas || [], [data]);
   const gapsR = useMemo(() => data?.gapsReport || [], [data]);
@@ -39472,8 +39477,8 @@ function CEDIDashboard() {
       lista = lista.filter(s => {
         const f = s.familia || "";
         const d = (s.desc || s.label || "").toUpperCase();
-        if (planCalle === "C1") return ["3110", "102", "405"].includes(f);
-        if (planCalle === "C2") return f === "501" && /SP/.test(d) || f === "503";
+        if (planCalle === "C1") return (f === "3110" && !es3110Solid(d)) || ["102", "405"].includes(f);
+        if (planCalle === "C2") return f === "501" && /SP/.test(d) || f === "503" || es3110Solid(d);
         if (planCalle === "C3") return f === "501" && !esCalle2(d);
         if (planCalle === "C4") return ["3120", "3130"].includes(f);
         return true;
