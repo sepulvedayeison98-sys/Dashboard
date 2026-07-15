@@ -31480,6 +31480,12 @@ const tieneNota = nota => {
 // Pedidos marcados TECH en la nota: esa marca (T-10) está en Promical, NO en el CEDI.
 // No deben contarse como pedidos de Itagüí.
 const esNotaTech = n => /\btech\b/i.test(String(n || ""));
+// REQ interna: requisición cuya nota trae un número tipo "REQ 8897" (REQ +
+// 4 o más dígitos). Esas SÍ cuentan para reposición (pedidos internos). El
+// resto de documentos REQ (fotos, traslados, etc.) se EXCLUYEN de reposición.
+const esReqInternaNota = n => /REQ[\s-]*\d{4,}/i.test(String(n || ""));
+// ¿Este pedido/fila debe excluirse de la reposición? Sí, si es REQ sin nota interna.
+const reqExcluida = (tipoDocto, nota) => String(tipoDocto || "").toUpperCase() === "REQ" && !esReqInternaNota(nota);
 // Clasifica la NOTA del pedido en una instrucción de despacho:
 //  retenido  → no despachar / hasta notificar / separar y no despachar
 //  recoge    → cliente recoge/retira en el CEDI
@@ -31646,7 +31652,8 @@ async function processFiles(wbInv, wbFact, onStep, marcasActivas) {
     if (!ref || cant === 0 || !cascoRefs.has(ref)) continue;
     // Pedidos masivos NO alimentan comprometido/gap (no deben disparar reposición),
     // pero sí siguen registrados en pedidosRaw para Pipeline/CEDI Live normal.
-    if (!pickingsMasivos.has(picking)) {
+    // Las REQ no-internas tampoco alimentan comprometido/gap (excluidas de reposición).
+    if (!pickingsMasivos.has(picking) && !reqExcluida(tipoDocto, nota)) {
       compMap[ref] = (compMap[ref] || 0) + cant;
       if (!ciudadPorRef[ref]) ciudadPorRef[ref] = {
         mde: false,
@@ -35647,7 +35654,7 @@ function mejorAltCubre(altByUbi, target) {
 // Devuelve los SKUs que faltan en piso pero tienen altura, filtrados por Calle,
 // igual que el Plan de Viajes. Cada item: {ref, desc, uniReq, comp, stockPiso, mejorAlt, ...}
 function listaViajes(data, sorted, planCalle, planFam) {
-  const reabasto = (data?.pedidosActivos || []).filter(p => !p.esMasivo && (p.clasificacion === "reabasto" || p.clasificacion === "parcial" || p.clasificacion === "ruptura"));
+  const reabasto = (data?.pedidosActivos || []).filter(p => !p.esMasivo && !reqExcluida(p.tipoDocto, p.notaTxt) && (p.clasificacion === "reabasto" || p.clasificacion === "parcial" || p.clasificacion === "ruptura"));
   const skuMaestro = Object.fromEntries(sorted.map(x => [x.id, x]));
   const skuFalta = {};
   reabasto.forEach(p => {
