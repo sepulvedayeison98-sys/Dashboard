@@ -31454,10 +31454,15 @@ const esCalle2 = d => {
   const u = (d || "").toUpperCase();
   return familia(u) === "501" && u.includes("SOLID") || u.includes("501_SP_S");
 };
-// El código "3110S" (la S es parte del código: ICH-3110S / ICH-3110S_EXPO_...)
-// es una línea distinta del 3110 normal y pertenece a la Calle 2, no a la 1.
-// OJO: es la S PEGADA al código, no la sublínea "SOLID" (ICH-3110 SOLID = color).
-const es3110S = d => /ICH-?3110S/i.test(d || "");
+// El "3110 S" pertenece a la Calle 2, no a la Calle 1. En el scanner la
+// descripción "ICH-3110 SOLID …" se ve recortada como "ICH-3110 S", así que
+// "3110 S" = la sublínea SOLID del 3110. También cubrimos el código literal
+// 3110S (S pegada: ICH-3110S SAILORS/DRIPPOP…) por si acaso. El 3110 normal
+// (SPEED_UP, LAP_RUSH, REPLACED, TREAT, BUMERANG…) sí queda en Calle 1.
+const es3110S = d => {
+  const u = (d || "").toUpperCase();
+  return familia(u) === "3110" && (/\bSOLID\b/.test(u) || /ICH-?3110S\b/.test(u) || /ICH-?3110S[_ ]/.test(u));
+};
 const SOLO_ALTURA = ["520"];
 const esSoloAltura = d => SOLO_ALTURA.includes(familia(d));
 const CAJA = 9;
