@@ -35675,7 +35675,7 @@ function listaViajes(data, sorted, planCalle, planFam) {
       if (planCalle === "C1") return (f === "3110" && !es3110S(d)) || ["102", "405"].includes(f);
       if (planCalle === "C2") return f === "501" && /SP/.test(d) || f === "503" || es3110S(d) || f === "101";
       if (planCalle === "C3") return f === "501" && !esCalle2(d);
-      if (planCalle === "C4") return ["3120", "3130"].includes(f);
+      if (planCalle === "C4") return ["3120", "3130", "3300"].includes(f);
       return true;
     });
   }
@@ -36242,7 +36242,7 @@ function CEDIDashboard() {
     C1: "3110 · 102 · 405",
     C2: "501-SP SOLID · 503 · 3110S · 101",
     C3: "ICH-501",
-    C4: "3120 · 3130"
+    C4: "3120 · 3130 · 3300"
   };
   const rupturas = useMemo(() => data?.rupturas || [], [data]);
   const gapsR = useMemo(() => data?.gapsReport || [], [data]);
@@ -39479,7 +39479,7 @@ function CEDIDashboard() {
         if (planCalle === "C1") return (f === "3110" && !es3110S(d)) || ["102", "405"].includes(f);
         if (planCalle === "C2") return f === "501" && /SP/.test(d) || f === "503" || es3110S(d) || f === "101";
         if (planCalle === "C3") return f === "501" && !esCalle2(d);
-        if (planCalle === "C4") return ["3120", "3130"].includes(f);
+        if (planCalle === "C4") return ["3120", "3130", "3300"].includes(f);
         return true;
       });
     }
