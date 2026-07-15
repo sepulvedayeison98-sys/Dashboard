@@ -35630,6 +35630,19 @@ function ModulePanel({
     });
   })()));
 }
+// Elige la ubicación de altura que MEJOR cubre las unidades requeridas:
+// la más "ajustada" que alcance el objetivo (para no romper un pallet más
+// grande de lo necesario). Ej: si se necesitan 27u, prefiere una posición de
+// 27u antes que una de 72u. Si ninguna cubre el objetivo por sí sola, se
+// recomienda la de mayor stock (la que más acerca a cubrirlo).
+function mejorAltCubre(altByUbi, target) {
+  const entries = Object.entries(altByUbi || {});
+  if (!entries.length) return null;
+  const t = target > 0 ? target : 1;
+  const cubren = entries.filter(([, s]) => s >= t).sort((a, b) => a[1] - b[1]);
+  if (cubren.length) return cubren[0][0];
+  return entries.sort((a, b) => b[1] - a[1])[0][0];
+}
 // Fuente única de los "viajes" (bajar de altura) para la pantalla y el Excel.
 // Devuelve los SKUs que faltan en piso pero tienen altura, filtrados por Calle,
 // igual que el Plan de Viajes. Cada item: {ref, desc, uniReq, comp, stockPiso, mejorAlt, ...}
@@ -35651,6 +35664,7 @@ function listaViajes(data, sorted, planCalle, planFam) {
             stockPiso: _m.stock_piso || 0,
             comp: _m.comp || 0,
             posPiso: [],
+            altByUbi: null,
             mejorAlt: null
           };
         }
@@ -35661,16 +35675,14 @@ function listaViajes(data, sorted, planCalle, planFam) {
         if (!skuFalta[r.ref].posPiso.length) {
           skuFalta[r.ref].posPiso = pos.filter(x => x.nivel <= 1 && x.saldo > 0).sort((a, b) => b.saldo - a.saldo).slice(0, 3).map(x => x.ubi);
         }
-        if (!skuFalta[r.ref].mejorAlt) {
-          // Recomendar la posición de altura con MÁS stock TOTAL (sumando las
-          // cajas de una misma ubicación), no la primera caja suelta. Así una
-          // sola bajada alcanza a cubrir el gap comprometido.
+        if (!skuFalta[r.ref].altByUbi) {
+          // Stock de altura agrupado por ubicación (suma de sus cajas). La
+          // posición recomendada se decide DESPUÉS con las unidades requeridas.
           const _byUbi = {};
           pos.filter(x => x.nivel >= 2 && x.saldo > 0).forEach(x => {
             _byUbi[x.ubi] = (_byUbi[x.ubi] || 0) + x.saldo;
           });
-          const _best = Object.entries(_byUbi).sort((a, b) => b[1] - a[1])[0];
-          if (_best) skuFalta[r.ref].mejorAlt = _best[0];
+          skuFalta[r.ref].altByUbi = _byUbi;
         }
       }
     });
@@ -35678,7 +35690,9 @@ function listaViajes(data, sorted, planCalle, planFam) {
   let listaV = Object.values(skuFalta).map(s => ({
     ...s,
     nPedidos: s.pedidos.size,
-    pallets: Math.ceil(s.uniReq / 72)
+    pallets: Math.ceil(s.uniReq / 72),
+    // Mejor altura = la posición más ajustada que cubra las unidades requeridas
+    mejorAlt: mejorAltCubre(s.altByUbi, s.uniReq)
   })).sort((a, b) => b.uniReq - a.uniReq);
   if (planCalle !== "todas") {
     listaV = listaV.filter(s => {
@@ -39478,15 +39492,14 @@ function CEDIDashboard() {
       const pos = invBySKU[s.id] || [];
       const piso = pos.filter(p => p.nivel <= 1 && p.saldo > 0);
       const alt = pos.filter(p => p.nivel >= 2 && p.saldo > 0).sort((a, b) => b.saldo - a.saldo);
-      // Mejor altura = la ubicación con MÁS stock total (sumando sus cajas),
-      // no la primera caja suelta — una sola bajada cubre el gap.
+      // Mejor altura = la ubicación más ajustada que cubra el gap comprometido
+      // (sumando sus cajas), no la primera caja suelta ni siempre la más llena.
       const altByUbi = {};
       alt.forEach(x => { altByUbi[x.ubi] = (altByUbi[x.ubi] || 0) + x.saldo; });
-      const altBest = Object.entries(altByUbi).sort((a, b) => b[1] - a[1])[0];
       const calleLet = (piso[0] || alt[0] || {}).calleKey ? (piso[0] || alt[0]).ubi?.[0] : null;
       return {
         calleLet,
-        mejorAlt: altBest ? altBest[0] : null
+        mejorAlt: mejorAltCubre(altByUbi, gap(s))
       };
     };
     if (planCalle !== "todas") {
