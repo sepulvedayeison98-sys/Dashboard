@@ -35662,8 +35662,15 @@ function listaViajes(data, sorted, planCalle, planFam) {
           skuFalta[r.ref].posPiso = pos.filter(x => x.nivel <= 1 && x.saldo > 0).sort((a, b) => b.saldo - a.saldo).slice(0, 3).map(x => x.ubi);
         }
         if (!skuFalta[r.ref].mejorAlt) {
-          const _pa = pos.filter(x => x.nivel >= 2 && x.saldo > 0).sort((a, b) => b.saldo - a.saldo);
-          if (_pa.length > 0) skuFalta[r.ref].mejorAlt = _pa[0].ubi;
+          // Recomendar la posición de altura con MÁS stock TOTAL (sumando las
+          // cajas de una misma ubicación), no la primera caja suelta. Así una
+          // sola bajada alcanza a cubrir el gap comprometido.
+          const _byUbi = {};
+          pos.filter(x => x.nivel >= 2 && x.saldo > 0).forEach(x => {
+            _byUbi[x.ubi] = (_byUbi[x.ubi] || 0) + x.saldo;
+          });
+          const _best = Object.entries(_byUbi).sort((a, b) => b[1] - a[1])[0];
+          if (_best) skuFalta[r.ref].mejorAlt = _best[0];
         }
       }
     });
@@ -39471,10 +39478,15 @@ function CEDIDashboard() {
       const pos = invBySKU[s.id] || [];
       const piso = pos.filter(p => p.nivel <= 1 && p.saldo > 0);
       const alt = pos.filter(p => p.nivel >= 2 && p.saldo > 0).sort((a, b) => b.saldo - a.saldo);
+      // Mejor altura = la ubicación con MÁS stock total (sumando sus cajas),
+      // no la primera caja suelta — una sola bajada cubre el gap.
+      const altByUbi = {};
+      alt.forEach(x => { altByUbi[x.ubi] = (altByUbi[x.ubi] || 0) + x.saldo; });
+      const altBest = Object.entries(altByUbi).sort((a, b) => b[1] - a[1])[0];
       const calleLet = (piso[0] || alt[0] || {}).calleKey ? (piso[0] || alt[0]).ubi?.[0] : null;
       return {
         calleLet,
-        mejorAlt: alt[0] ? alt[0].ubi : null
+        mejorAlt: altBest ? altBest[0] : null
       };
     };
     if (planCalle !== "todas") {
