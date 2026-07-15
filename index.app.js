@@ -31463,6 +31463,17 @@ const es3110S = d => {
   const u = (d || "").toUpperCase();
   return familia(u) === "3110" && (/\bSOLID\b/.test(u) || /ICH-?3110S\b/.test(u) || /ICH-?3110S[_ ]/.test(u));
 };
+// Sublínea del casco (SOLID, SPEED_UP, TREAT, LAP_RUSH, REPLACED, BUMERANG…):
+// es la palabra que va justo después del código ICH-<familia>[S][_EXPO_XXX].
+// Sirve para distinguir en pantalla las que el scanner recorta a "3110 S".
+const SL_IGNORAR = ["NG", "BL", "GR", "AZ", "RJ", "SM", "SL", "TR", "XL", "DO", "N", "MR", "FC", "VD", "NJ"];
+const subLinea = desc => {
+  const u = (desc || "").toUpperCase();
+  const m = u.match(/ICH[- ]?\d{2,4}S?(?:_EXPO_[A-Z0-9]+)?\s+([A-Z][A-Z_]+)/);
+  if (!m) return "";
+  const t = m[1];
+  return SL_IGNORAR.includes(t) ? "" : t;
+};
 const SOLO_ALTURA = ["520"];
 const esSoloAltura = d => SOLO_ALTURA.includes(familia(d));
 const CAJA = 9;
@@ -39269,7 +39280,23 @@ function CEDIDashboard() {
           color: C.teal,
           flexShrink: 0
         }
-      }, s.ref), React.createElement("span", {
+      }, s.ref), (() => {
+        const sl = subLinea(s.desc);
+        return sl ? React.createElement("span", {
+          style: {
+            fontFamily: "'JetBrains Mono',monospace",
+            fontSize: 9,
+            fontWeight: 800,
+            color: C.purple,
+            background: `${C.purple}1e`,
+            border: `1px solid ${C.purple}45`,
+            borderRadius: 4,
+            padding: "1px 6px",
+            flexShrink: 0,
+            letterSpacing: "0.3px"
+          }
+        }, sl) : null;
+      })(), React.createElement("span", {
         style: {
           fontSize: 10,
           color: C.t2,
