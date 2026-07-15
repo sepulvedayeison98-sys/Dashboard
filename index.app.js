@@ -35624,7 +35624,7 @@ function ModulePanel({
 // Fuente única de los "viajes" (bajar de altura) para la pantalla y el Excel.
 // Devuelve los SKUs que faltan en piso pero tienen altura, filtrados por Calle,
 // igual que el Plan de Viajes. Cada item: {ref, desc, uniReq, comp, stockPiso, mejorAlt, ...}
-function listaViajes(data, sorted, planCalle) {
+function listaViajes(data, sorted, planCalle, planFam) {
   const reabasto = (data?.pedidosActivos || []).filter(p => !p.esMasivo && (p.clasificacion === "reabasto" || p.clasificacion === "parcial" || p.clasificacion === "ruptura"));
   const skuMaestro = Object.fromEntries(sorted.map(x => [x.id, x]));
   const skuFalta = {};
@@ -35674,6 +35674,10 @@ function listaViajes(data, sorted, planCalle) {
       if (planCalle === "C4") return ["3120", "3130"].includes(f);
       return true;
     });
+  }
+  // Filtro por familia (dropdown "Todas familias / Familia XXX")
+  if (planFam && planFam !== "todas") {
+    listaV = listaV.filter(s => (familia(s.desc) || "") === planFam);
   }
   return listaV;
 }
@@ -38937,7 +38941,7 @@ function CEDIDashboard() {
         fontFamily: "inherit"
       }
     }, l))), React.createElement("button", {
-      onClick: () => exportarPlanTurno(listaViajes(data, sorted, planCalle), planCalle),
+      onClick: () => exportarPlanTurno(listaViajes(data, sorted, planCalle, planFam), planCalle),
       style: {
         padding: "6px 12px",
         borderRadius: 8,
@@ -39012,7 +39016,7 @@ function CEDIDashboard() {
     }, "Reiniciar")));
   })(), (() => {
     // Fuente única compartida con el Excel (botón 📥). Ver listaViajes().
-    const listaV = listaViajes(data, sorted, planCalle);
+    const listaV = listaViajes(data, sorted, planCalle, planFam);
     if (listaV.length === 0) return null;
     const viajesMap = {};
     listaV.forEach(s => {
