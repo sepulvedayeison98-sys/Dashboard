@@ -32063,16 +32063,32 @@ async function processFiles(wbInv, wbFact, onStep, marcasActivas) {
         calleLetra: p.calleLetra,
         modulo: p.modulo,
         nivel: p.nivel,
-        skus: []
+        skus: [],
+        _skuIdx: {}
       };
-      if (p.saldo > 0) ubiMap[p.ubi].skus.push({
-        ref,
-        desc,
-        saldo: p.saldo,
-        cajap: p.cajap || ""
-      });
+      if (p.saldo > 0) {
+        const bucket = ubiMap[p.ubi];
+        // Agrupar el MISMO ref en una sola tarjeta (una posición puede tener
+        // varias filas/lotes del mismo SKU). Sumamos el saldo y conservamos
+        // la primera unidad de empaque conocida.
+        const existing = bucket._skuIdx[ref];
+        if (existing) {
+          existing.saldo += p.saldo;
+          if (!existing.cajap && p.cajap) existing.cajap = p.cajap;
+        } else {
+          const entry = {
+            ref,
+            desc,
+            saldo: p.saldo,
+            cajap: p.cajap || ""
+          };
+          bucket._skuIdx[ref] = entry;
+          bucket.skus.push(entry);
+        }
+      }
     }
   }
+  for (const b of Object.values(ubiMap)) delete b._skuIdx;
   return {
     SKUS: skusMotor,
     pisoItems,
