@@ -41869,9 +41869,9 @@ function CEDIDashboard() {
         }
       }, p.id), p.tipoDocto && React.createElement("span", {
         style: {
-          background: p.tipoDocto === "PDV" ? C.purpleDim : p.tipoDocto === "REQ" ? C.accentDim : C.tealDim,
-          color: p.tipoDocto === "PDV" ? C.purple : p.tipoDocto === "REQ" ? C.accent : C.teal,
-          border: `1px solid ${p.tipoDocto === "PDV" ? C.purple : p.tipoDocto === "REQ" ? C.accent : C.teal}35`,
+          background: p.tipoDocto === "PDV" ? C.purpleDim : p.tipoDocto === "REQ" ? C.accentDim : p.tipoDocto === "PDE" ? C.tealDim : C.bg3,
+          color: p.tipoDocto === "PDV" ? C.purple : p.tipoDocto === "REQ" ? C.accent : p.tipoDocto === "PDE" ? C.teal : C.t3,
+          border: `1px solid ${p.tipoDocto === "PDV" ? C.purple : p.tipoDocto === "REQ" ? C.accent : p.tipoDocto === "PDE" ? C.teal : C.t3}35`,
           borderRadius: 4,
           padding: "1px 5px",
           fontSize: 8,
@@ -43386,7 +43386,7 @@ function CEDIDashboard() {
       color: C.t3,
       fontSize: 11
     }
-  }, (st?.totalSKUs || 0).toLocaleString(), " SKUs · EXPO excluido")), stockTbl && React.createElement("div", {
+  }, (st?.totalSKUs || 0) > 60 ? `muestra 60 de ${(st?.totalSKUs || 0).toLocaleString()}` : `${(st?.totalSKUs || 0).toLocaleString()} SKUs`, " · EXPO excluido")), stockTbl && React.createElement("div", {
     style: {
       overflowX: "auto",
       WebkitOverflowScrolling: "touch"
