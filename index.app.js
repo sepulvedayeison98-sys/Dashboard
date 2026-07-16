@@ -38116,10 +38116,11 @@ function CEDIDashboard() {
     if (!cs) return null;
     const letraCalle = DASH_TO_LETRA[callePanel];
     const skusEnCalle = [...new Set(Object.entries(invByModule).flatMap(([mod, rows]) => mod[0] === letraCalle ? rows.map(r => r.ref) : []))];
-    const skusGap = skusEnCalle.filter(ref => {
+    const skusGapAll = skusEnCalle.filter(ref => {
       const s = SKUS.find(x => x.id === ref);
       return s && s.comp > 0 && s.stock_piso < s.comp;
-    }).slice(0, 10);
+    });
+    const skusGap = skusGapAll.slice(0, 10);
     const estCols = {
       ok: C.green,
       preventivo: C.yellow,
@@ -38194,7 +38195,7 @@ function CEDIDashboard() {
         color: c,
         fontWeight: 700
       }
-    }, l)))), skusGap.length > 0 && React.createElement("div", null, React.createElement("div", {
+    }, l)))), skusGapAll.length > 0 && React.createElement("div", null, React.createElement("div", {
       style: {
         fontSize: 9,
         fontWeight: 700,
@@ -38203,7 +38204,7 @@ function CEDIDashboard() {
         letterSpacing: "0.7px",
         marginBottom: 8
       }
-    }, "SKUs con gap en esta calle (", skusGap.length, ")"), React.createElement("div", {
+    }, "SKUs con gap en esta calle (", skusGapAll.length, skusGapAll.length > 10 ? " · muestra 10" : "", ")"), React.createElement("div", {
       style: {
         display: "flex",
         flexWrap: "wrap",
@@ -38231,7 +38232,7 @@ function CEDIDashboard() {
           marginLeft: 3
         }
       }, s ? `-${Math.max(0, s.comp - s.stock_piso)}` : ""));
-    }))), skusGap.length === 0 && React.createElement("div", {
+    }))), skusGapAll.length === 0 && React.createElement("div", {
       style: {
         color: C.green,
         fontSize: 11,
@@ -42616,7 +42617,7 @@ function CEDIDashboard() {
         flexDirection: "column",
         gap: 5
       }
-    }, (topGapFilt.length ? topGapFilt : topGap).slice(0, 15).map((it, i) => {
+    }, topGapFilt.slice(0, 15).map((it, i) => {
       const effGap = stockInclAlt ? Math.max(0, it.comp - (it.stock + (it.stock_alt || 0))) : it.gap;
       return React.createElement("div", {
         key: it.ref,
