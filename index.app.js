@@ -31512,8 +31512,6 @@ const notaEstado = txt => {
   if (new RegExp(`\\b\\d{1,2}\\s*(DE\\s*)?(${MESES_RE})|LUNES|MARTES|MI[EÉ]RCOLES|JUEVES|VIERNES|S[AÁ]BADO|DOMINGO|SEMANA|PR[OÓ]XIM|\\b\\d{1,2}[\\/\\-]\\d{1,2}\\b|8\\s*D[IÍ]AS|OCHO\\s*D[IÍ]AS`).test(u)) return "programado";
   return null;
 };
-// Pedido masivo/atípico por la nota: "PED-PLANO" (pedidos plano / mayorista).
-const esNotaMasiva = n => /PED[\s-]*PLANO/i.test(String(n || ""));
 // Intenta leer una fecha de despacho de la nota (ej. "facturar 21 de julio",
 // "MARTES 21 JULIO", "21/07"). Devuelve un Date (a medianoche) o null.
 const MESES_MAP = { ene: 0, feb: 1, mar: 2, abr: 3, may: 4, jun: 5, jul: 6, ago: 7, sep: 8, set: 8, oct: 9, nov: 10, dic: 11 };
@@ -31649,34 +31647,26 @@ async function processFiles(wbInv, wbFact, onStep, marcasActivas) {
   }
   onStep("Calculando comprometido vs stock (todos los pedidos)...");
   await tick();
-  // Pedidos masivos (REQ internos o clientes industriales que piden pocas refs
-  // en cantidades enormes, ej. REQ Inducascos 4 refs/792u, motos 24 refs/2436u):
-  // no deben disparar reposición (siguen viéndose normales en Pipeline).
-  const UREF_MASIVO = 50; // unidades por referencia por encima de esto = masivo (bulto)
-  const UNI_MASIVO = 200; // unidades totales del pedido por encima de esto = masivo
+  // Pedidos masivos/atípicos: los que por su TAMAÑO no se pueden cubrir desde
+  // piso y distorsionarían el reabasto (ej. mayoristas de Bogotá con cientos/
+  // miles de unidades). Se definen SOLO por unidades totales del pedido. No se
+  // usa la marca PED-PLANO ni u/ref porque hay pedidos plano pequeños (45-126u)
+  // que la empresa NO considera masivos.
+  const UNI_MASIVO = 200; // unidades totales del pedido: >= esto = masivo
   const pedidoAgg = {};
   for (const r of allWmsRows) {
     const ref = String(r["referencia"] || "").trim();
     const cant = toNum(r["cantidad"]);
     const picking = String(r["Picking"] || r["PedidoSiesa"] || "").trim();
     if (!ref || cant <= 0 || !picking || !cascoRefs.has(ref)) continue;
-    if (!pedidoAgg[picking]) pedidoAgg[picking] = { refs: new Set(), uni: 0, nota: "" };
+    if (!pedidoAgg[picking]) pedidoAgg[picking] = { refs: new Set(), uni: 0 };
     pedidoAgg[picking].refs.add(ref);
     pedidoAgg[picking].uni += cant;
-    const _nt = String(r["notas"] || "").trim();
-    if (_nt.length > pedidoAgg[picking].nota.length) pedidoAgg[picking].nota = _nt;
   }
-  // Masivo/atípico si: nota PED-PLANO (mayorista) · o ≥200 u totales · o >50 u/ref
-  // (bulto). No dispara reposición: no se cubre en piso y distorsiona el reabasto.
   const pickingsMasivos = new Set();
   const motivoMasivo = {};
   for (const [pk, agg] of Object.entries(pedidoAgg)) {
-    const nRefs = agg.refs.size;
-    let motivo = null;
-    if (esNotaMasiva(agg.nota)) motivo = "PED-PLANO";
-    else if (agg.uni >= UNI_MASIVO) motivo = `${agg.uni.toLocaleString()} u`;
-    else if (nRefs > 0 && agg.uni / nRefs > UREF_MASIVO) motivo = `${Math.round(agg.uni / nRefs)} u/ref`;
-    if (motivo) { pickingsMasivos.add(pk); motivoMasivo[pk] = motivo; }
+    if (agg.uni >= UNI_MASIVO) { pickingsMasivos.add(pk); motivoMasivo[pk] = `${agg.uni.toLocaleString()} u`; }
   }
   const compMap = {};
   const ciudadPorRef = {};
