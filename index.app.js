@@ -44559,7 +44559,7 @@ function CEDIDashboard() {
       c: C.green
     }, {
       l: "Módulos con mezcla",
-      v: `${calle.mezcla}/42`,
+      v: `${calle.mezcla}/${ocupados}`,
       c: pctMezcla > 80 ? C.red : C.orange
     }, {
       l: "Sin mezcla",
