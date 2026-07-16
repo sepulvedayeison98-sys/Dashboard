@@ -31960,10 +31960,15 @@ async function processFiles(wbInv, wbFact, onStep, marcasActivas) {
     const sinStock = refs.filter(r => r.sinStock).length;
     const pctPiso = uni > 0 ? Math.round(uniPiso / uni * 100) : 0;
     const pctAlt = uni > 0 ? Math.round(uniAlt / uni * 100) : 0;
+    // "Despachable" se decide por la condición EXACTA (todas las unidades cubiertas
+    // en piso), no por el % redondeado: 99.6% redondeaba a 100 y marcaba despachable.
+    const cubreTotal = uni > 0 && uniPiso >= uni;
     let cobertura = "SIN STOCK";
-    if (pctPiso === 100) cobertura = "PISO";else if (pctPiso === 0 && uniAlt > 0) cobertura = "ALTURA";else if (pctPiso > 0) cobertura = "MIXTO";
+    if (cubreTotal) cobertura = "PISO";else if (uniPiso === 0 && uniAlt > 0) cobertura = "ALTURA";else if (uniPiso > 0) cobertura = "MIXTO";
+    // clasificacion alineada con cobertura: si hay algo de piso (y no cubre todo)
+    // es "parcial", nunca "ruptura" (mostraba RUPTURA con 30% de piso).
     let clasificacion = "ruptura";
-    if (pctPiso === 100) clasificacion = "despachable";else if (pctPiso >= 40) clasificacion = "parcial";else if (uniAlt > 0) clasificacion = "reabasto";
+    if (cubreTotal) clasificacion = "despachable";else if (pctPiso >= 40) clasificacion = "parcial";else if (uniAlt > 0) clasificacion = "reabasto";else if (uniPiso > 0) clasificacion = "parcial";
     return {
       ...p,
       refs,
@@ -32093,6 +32098,9 @@ async function processFiles(wbInv, wbFact, onStep, marcasActivas) {
     totalStock: items.reduce((t, it) => t + it.stock, 0),
     totalStockAlt: Object.values(stockAltMap).reduce((t, v) => t + v, 0),
     totalGap: items.reduce((t, it) => t + it.gap, 0),
+    // Gap real considerando altura, sumado POR SKU (el sobrestock de uno no
+    // cancela el déficit de otro), consistente con el Top-15 de mayor gap.
+    totalGapAlt: items.reduce((t, it) => t + Math.max(0, (it.comp || 0) - (it.stock || 0) - (stockAltMap[it.ref] || 0)), 0),
     totalCajas: alturaItems.reduce((t, s) => t + s.cajas_sub, 0),
     totalUSubir: alturaItems.reduce((t, s) => t + s.u_subir, 0),
     pedidosActivos: pedidosActivos.length,
@@ -41128,13 +41136,13 @@ function CEDIDashboard() {
         color: C.t1,
         marginBottom: 2
       }
-    }, "Unidades comprometidas"), React.createElement("div", {
+    }, "Unidades en pedidos activos"), React.createElement("div", {
       style: {
         fontSize: 10,
         color: C.t3,
         marginBottom: 12
       }
-    }, "Total de unidades en pedidos activos y su composición"), React.createElement("div", {
+    }, "Todos los pedidos (incl. masivos/programados). El comprometido de Stock excluye esos"), React.createElement("div", {
       style: {
         display: "flex",
         alignItems: "baseline",
@@ -41575,7 +41583,22 @@ function CEDIDashboard() {
     }, cnt));
   })), React.createElement("button", {
     onClick: () => {
-      const peds = data?.pedidosActivos || [];
+      // Exporta lo que se ve: aplica los MISMOS filtros que la tabla de abajo.
+      const q = pedSearch.trim().toLowerCase();
+      const peds = (data?.pedidosActivos || []).filter(p => {
+        if (pedFiltro === "despachable" && p.clasificacion !== "despachable") return false;
+        if (pedFiltro === "reabasto" && p.clasificacion !== "reabasto" && p.clasificacion !== "parcial") return false;
+        if (pedFiltro === "ruptura" && p.clasificacion !== "ruptura") return false;
+        if (tipoFiltro !== "todos" && p.tipoDocto !== tipoFiltro) return false;
+        if (filtroEst === "sin_planear" && p.est !== "sin_planear") return false;
+        if (filtroEst === "planeado" && p.est !== "planeado" && p.est !== "en_picking") return false;
+        if (filtroMDE && !esMDE(p.ciudad)) return false;
+        if (q) {
+          const hay = (p.cliente || "").toLowerCase().includes(q) || (p.ciudad || "").toLowerCase().includes(q) || (p.id || "").toLowerCase().includes(q) || (p.refs || []).some(r => (r.ref || "").toLowerCase().includes(q));
+          if (!hay) return false;
+        }
+        return true;
+      });
       const rows = [["Picking", "PedidoSiesa", "Tipo", "Cliente", "Ciudad", "Fecha", "Estado", "Lineas", "Unidades", "%Piso", "%Altura", "Cobertura", "Despacho", "Nota"]];
       const NLBL = {
         retenido: "NO DESPACHAR",
@@ -42282,7 +42305,7 @@ function CEDIDashboard() {
     }
   }, (() => {
     const stockV = stockInclAlt ? (st?.totalStock || 0) + (st?.totalStockAlt || 0) : st?.totalStock || 0;
-    const gapV = stockInclAlt ? Math.max(0, (st?.totalComp || 0) - stockV) : st?.totalGap || 0;
+    const gapV = stockInclAlt ? st?.totalGapAlt || 0 : st?.totalGap || 0;
     return [{
       l: stockInclAlt ? "Stock Piso + Altura" : "Total Stock Piso",
       v: stockV.toLocaleString(),
