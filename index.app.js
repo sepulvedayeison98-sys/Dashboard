@@ -31511,6 +31511,37 @@ const notaEstado = txt => {
   if (new RegExp(`\\b\\d{1,2}\\s*(DE\\s*)?(${MESES_RE})|LUNES|MARTES|MI[EÉ]RCOLES|JUEVES|VIERNES|S[AÁ]BADO|DOMINGO|SEMANA|PR[OÓ]XIM|\\b\\d{1,2}[\\/\\-]\\d{1,2}\\b|8\\s*D[IÍ]AS|OCHO\\s*D[IÍ]AS`).test(u)) return "programado";
   return null;
 };
+// Pedido masivo/atípico por la nota: "PED-PLANO" (pedidos plano / mayorista).
+const esNotaMasiva = n => /PED[\s-]*PLANO/i.test(String(n || ""));
+// Intenta leer una fecha de despacho de la nota (ej. "facturar 21 de julio",
+// "MARTES 21 JULIO", "21/07"). Devuelve un Date (a medianoche) o null.
+const MESES_MAP = { ene: 0, feb: 1, mar: 2, abr: 3, may: 4, jun: 5, jul: 6, ago: 7, sep: 8, set: 8, oct: 9, nov: 10, dic: 11 };
+const parseFechaNota = (txt, hoy) => {
+  const u = String(txt || "").toLowerCase();
+  let m = u.match(/\b(\d{1,2})\s*(?:de\s*)?(ene|feb|mar|abr|may|jun|jul|ago|sep|set|oct|nov|dic)/);
+  if (m) {
+    const dia = parseInt(m[1]), mes = MESES_MAP[m[2]];
+    let d = new Date(hoy.getFullYear(), mes, dia);
+    // Si la fecha quedó muy en el pasado (>60 días), probablemente es del próximo año
+    if ((hoy - d) / 86400000 > 60) d = new Date(hoy.getFullYear() + 1, mes, dia);
+    return d;
+  }
+  m = u.match(/\b(\d{1,2})[\/\-](\d{1,2})\b/);
+  if (m) {
+    const dia = parseInt(m[1]), mes = parseInt(m[2]) - 1;
+    if (mes >= 0 && mes <= 11 && dia >= 1 && dia <= 31) return new Date(hoy.getFullYear(), mes, dia);
+  }
+  return null;
+};
+// ¿El pedido está PROGRAMADO para una fecha futura? → no cuenta en reabasto aún.
+const programadoFuturo = txt => {
+  if (notaEstado(txt) !== "programado") return false;
+  const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+  const d = parseFechaNota(txt, hoy);
+  if (!d) return false; // programado sin fecha legible → no se excluye (se muestra)
+  d.setHours(0, 0, 0, 0);
+  return d.getTime() > hoy.getTime();
+};
 async function processFiles(wbInv, wbFact, onStep, marcasActivas) {
   const MARCAS = marcasActivas || ["ICH"];
   onStep("Leyendo inventario...");
@@ -31620,21 +31651,31 @@ async function processFiles(wbInv, wbFact, onStep, marcasActivas) {
   // Pedidos masivos (REQ internos o clientes industriales que piden pocas refs
   // en cantidades enormes, ej. REQ Inducascos 4 refs/792u, motos 24 refs/2436u):
   // no deben disparar reposición (siguen viéndose normales en Pipeline).
-  const UREF_MASIVO = 50; // unidades por referencia por encima de esto = masivo
+  const UREF_MASIVO = 50; // unidades por referencia por encima de esto = masivo (bulto)
+  const UNI_MASIVO = 200; // unidades totales del pedido por encima de esto = masivo
   const pedidoAgg = {};
   for (const r of allWmsRows) {
     const ref = String(r["referencia"] || "").trim();
     const cant = toNum(r["cantidad"]);
     const picking = String(r["Picking"] || r["PedidoSiesa"] || "").trim();
     if (!ref || cant <= 0 || !picking || !cascoRefs.has(ref)) continue;
-    if (!pedidoAgg[picking]) pedidoAgg[picking] = { refs: new Set(), uni: 0 };
+    if (!pedidoAgg[picking]) pedidoAgg[picking] = { refs: new Set(), uni: 0, nota: "" };
     pedidoAgg[picking].refs.add(ref);
     pedidoAgg[picking].uni += cant;
+    const _nt = String(r["notas"] || "").trim();
+    if (_nt.length > pedidoAgg[picking].nota.length) pedidoAgg[picking].nota = _nt;
   }
+  // Masivo/atípico si: nota PED-PLANO (mayorista) · o ≥200 u totales · o >50 u/ref
+  // (bulto). No dispara reposición: no se cubre en piso y distorsiona el reabasto.
   const pickingsMasivos = new Set();
+  const motivoMasivo = {};
   for (const [pk, agg] of Object.entries(pedidoAgg)) {
     const nRefs = agg.refs.size;
-    if (nRefs > 0 && agg.uni / nRefs > UREF_MASIVO) pickingsMasivos.add(pk);
+    let motivo = null;
+    if (esNotaMasiva(agg.nota)) motivo = "PED-PLANO";
+    else if (agg.uni >= UNI_MASIVO) motivo = `${agg.uni.toLocaleString()} u`;
+    else if (nRefs > 0 && agg.uni / nRefs > UREF_MASIVO) motivo = `${Math.round(agg.uni / nRefs)} u/ref`;
+    if (motivo) { pickingsMasivos.add(pk); motivoMasivo[pk] = motivo; }
   }
   const compMap = {};
   const ciudadPorRef = {};
@@ -31663,8 +31704,9 @@ async function processFiles(wbInv, wbFact, onStep, marcasActivas) {
     if (!ref || cant === 0 || !cascoRefs.has(ref)) continue;
     // Pedidos masivos NO alimentan comprometido/gap (no deben disparar reposición),
     // pero sí siguen registrados en pedidosRaw para Pipeline/CEDI Live normal.
-    // Las REQ no-internas tampoco alimentan comprometido/gap (excluidas de reposición).
-    if (!pickingsMasivos.has(picking) && !reqExcluida(tipoDocto, nota)) {
+    // Las REQ no-internas tampoco. Los pedidos PROGRAMADOS para una fecha futura
+    // se excluyen del reabasto hasta ese día (no cuentan al comprometido aún).
+    if (!pickingsMasivos.has(picking) && !reqExcluida(tipoDocto, nota) && !programadoFuturo(nota)) {
       compMap[ref] = (compMap[ref] || 0) + cant;
       if (!ciudadPorRef[ref]) ciudadPorRef[ref] = {
         mde: false,
@@ -31946,6 +31988,8 @@ async function processFiles(wbInv, wbFact, onStep, marcasActivas) {
       cobertura,
       clasificacion,
       esMasivo: pickingsMasivos.has(p.id),
+      motivoMasivo: motivoMasivo[p.id] || null,
+      programadoFuturo: programadoFuturo(notaPorPicking[p.id]),
       notaTxt: notaPorPicking[p.id] || "",
       notaEstado: notaEstado(notaPorPicking[p.id])
     };
@@ -35660,7 +35704,7 @@ function mejorAltCubre(altByUbi) {
 // Devuelve los SKUs que faltan en piso pero tienen altura, filtrados por Calle,
 // igual que el Plan de Viajes. Cada item: {ref, desc, uniReq, comp, stockPiso, mejorAlt, ...}
 function listaViajes(data, sorted, planCalle, planFam) {
-  const reabasto = (data?.pedidosActivos || []).filter(p => !p.esMasivo && !reqExcluida(p.tipoDocto, p.notaTxt) && (p.clasificacion === "reabasto" || p.clasificacion === "parcial" || p.clasificacion === "ruptura"));
+  const reabasto = (data?.pedidosActivos || []).filter(p => !p.esMasivo && !p.programadoFuturo && !reqExcluida(p.tipoDocto, p.notaTxt) && (p.clasificacion === "reabasto" || p.clasificacion === "parcial" || p.clasificacion === "ruptura"));
   const skuMaestro = Object.fromEntries(sorted.map(x => [x.id, x]));
   const skuFalta = {};
   reabasto.forEach(p => {
@@ -40825,6 +40869,35 @@ function CEDIDashboard() {
       animation: "fadeUp .3s ease"
     }
   }, (() => {
+    // ── Panel: Pedidos EXCLUIDOS del reabasto (masivos/atípicos y programados) ──
+    const peds = data?.pedidosActivos || [];
+    const masivos = peds.filter(p => p.esMasivo).sort((a, b) => (b.uni || 0) - (a.uni || 0));
+    const progs = peds.filter(p => p.programadoFuturo).sort((a, b) => (b.uni || 0) - (a.uni || 0));
+    if (!masivos.length && !progs.length) return null;
+    const fila = (p, extra) => React.createElement("div", {
+      key: p.id,
+      style: { display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderBottom: `1px solid ${C.bg3}`, fontSize: 11 }
+    }, React.createElement("span", { style: { fontFamily: "'JetBrains Mono',monospace", color: C.teal, fontWeight: 700, flexShrink: 0 } }, p.id),
+      React.createElement("span", { style: { color: C.t2, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, (p.cliente || "").slice(0, 22)),
+      React.createElement("span", { style: { fontFamily: "'JetBrains Mono',monospace", color: C.t1, fontWeight: 700, flexShrink: 0 } }, (p.uni || 0).toLocaleString(), "u"),
+      extra);
+    const card = (titulo, color, icono, lista, mkExtra, nota) => React.createElement("div", {
+      style: { background: C.bg2, border: `1px solid ${color}35`, borderTop: `2px solid ${color}`, borderRadius: 12, padding: "12px 14px", minWidth: 0 }
+    }, React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, marginBottom: 8 } },
+      React.createElement("span", { style: { fontSize: 15 } }, icono),
+      React.createElement("span", { style: { fontSize: 12, fontWeight: 800, color: color } }, titulo),
+      React.createElement("span", { style: { marginLeft: "auto", background: `${color}20`, color: color, fontWeight: 800, fontSize: 11, borderRadius: 6, padding: "2px 8px" } }, lista.length)),
+      React.createElement("div", { style: { fontSize: 10, color: C.t3, marginBottom: 8 } }, nota),
+      React.createElement("div", { style: { maxHeight: 200, overflowY: "auto" } }, lista.map(p => fila(p, mkExtra(p)))));
+    return React.createElement("div", {
+      style: { display: "grid", gridTemplateColumns: isMobile ? "1fr" : (masivos.length && progs.length ? "1fr 1fr" : "1fr"), gap: 12, marginBottom: 14 }
+    }, masivos.length ? card("Pedidos masivos / atípicos", C.purple, "📦", masivos,
+      p => React.createElement("span", { style: { background: `${C.purple}20`, color: C.purple, fontSize: 9, fontWeight: 700, borderRadius: 4, padding: "2px 6px", flexShrink: 0 } }, p.motivoMasivo || "masivo"),
+      "Excluidos del reabasto: no se cubren en piso y distorsionan la reposición.") : null,
+      progs.length ? card("Programados (facturar después)", C.yellow, "📅", progs,
+      p => React.createElement("span", { style: { color: C.yellow, fontSize: 9, fontWeight: 700, flexShrink: 0, maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, (p.notaTxt || "").slice(0, 26)),
+      "No cuentan en el reabasto hasta su fecha de despacho.") : null);
+  })(), (() => {
     const peds = data?.pedidosActivos || [];
     const cats = [{
       k: "despachable",
