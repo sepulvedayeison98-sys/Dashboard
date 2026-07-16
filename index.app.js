@@ -31920,14 +31920,36 @@ async function processFiles(wbInv, wbFact, onStep, marcasActivas) {
       });
     }
   }
-  const pedidosActivos = Object.values(pedidosRaw).filter(p => !pickingsTech.has(p.id)).map(p => {
+  // ── Despachabilidad con RESERVA de stock entre pedidos ──
+  // El stock de piso/altura se asigna en orden de prioridad (Medellín primero,
+  // luego fecha más antigua) y se DESCUENTA: dos pedidos que compiten por la
+  // misma referencia ya no aparecen ambos como "despachables". Los pedidos
+  // masivos/programados-futuros/REQ excluidas NO reservan (no deben acaparar el
+  // stock de los normales): se calculan contra el stock total.
+  const _remPiso = {}, _remAlt = {};
+  const _initRem = ref => {
+    if (ref in _remPiso) return;
+    const pos = invBySKU[ref] || [];
+    _remPiso[ref] = pos.filter(x => x.nivel <= 1).reduce((t, x) => t + x.saldo, 0);
+    _remAlt[ref] = pos.filter(x => x.nivel >= 2).reduce((t, x) => t + x.saldo, 0);
+  };
+  const _participaReserva = p => !pickingsMasivos.has(p.id) && !programadoFuturo(notaPorPicking[p.id]) && !reqExcluida(p.tipoDocto, notaPorPicking[p.id]);
+  const _mkPedido = (p, reserva) => {
     const refs = p.rows.map(row => {
       const pos = invBySKU[row.ref] || [];
-      const stockPiso = pos.filter(x => x.nivel <= 1).reduce((t, x) => t + x.saldo, 0);
-      const stockAlt = pos.filter(x => x.nivel >= 2).reduce((t, x) => t + x.saldo, 0);
+      let stockPiso, stockAlt;
+      if (reserva) {
+        _initRem(row.ref);
+        stockPiso = _remPiso[row.ref];
+        stockAlt = _remAlt[row.ref];
+      } else {
+        stockPiso = pos.filter(x => x.nivel <= 1).reduce((t, x) => t + x.saldo, 0);
+        stockAlt = pos.filter(x => x.nivel >= 2).reduce((t, x) => t + x.saldo, 0);
+      }
       const cubPiso = Math.min(stockPiso, row.cant);
       const restoTrasPiso = row.cant - cubPiso;
       const cubAlt = Math.min(stockAlt, restoTrasPiso);
+      if (reserva) { _remPiso[row.ref] = stockPiso - cubPiso; _remAlt[row.ref] = stockAlt - cubAlt; }
       const cajasBajarAltura = restoTrasPiso > 0 ? Math.ceil(restoTrasPiso / 9) : 0;
       const uBajarAltura = cajasBajarAltura * 9;
       const topeAplicado = false;
@@ -31989,7 +32011,17 @@ async function processFiles(wbInv, wbFact, onStep, marcasActivas) {
       notaTxt: notaPorPicking[p.id] || "",
       notaEstado: notaEstado(notaPorPicking[p.id])
     };
-  }).sort((a, b) => {
+  };
+  const _activos = Object.values(pedidosRaw).filter(p => !pickingsTech.has(p.id));
+  // Orden de ASIGNACIÓN del stock: Medellín (corte 11AM) primero, luego la
+  // fecha de pedido más antigua.
+  const _ordenReserva = (a, b) => {
+    const am = esMDE(a.ciudad) ? 0 : 1, bm = esMDE(b.ciudad) ? 0 : 1;
+    if (am !== bm) return am - bm;
+    const af = a.fecha || "9999-99-99", bf = b.fecha || "9999-99-99";
+    return af < bf ? -1 : af > bf ? 1 : 0;
+  };
+  const pedidosActivos = [...(_activos.filter(_participaReserva).sort(_ordenReserva).map(p => _mkPedido(p, true))), ...(_activos.filter(p => !_participaReserva(p)).map(p => _mkPedido(p, false)))].sort((a, b) => {
     const aMDE = esMDE(a.ciudad) ? 1 : 0,
       bMDE = esMDE(b.ciudad) ? 1 : 0;
     if (aMDE !== bMDE) return bMDE - aMDE;
