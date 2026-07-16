@@ -42769,9 +42769,13 @@ function CEDIDashboard() {
   })(), (() => {
     const S = SERIE_TEMP;
     if (!S || !S.dias) return null;
-    const desde = trendDesde || S.dias[0];
-    const hasta = trendHasta || S.dias[S.dias.length - 1];
-    const idxIni = S.dias.findIndex(d => d >= desde);
+    let desde = trendDesde || S.dias[0];
+    let hasta = trendHasta || S.dias[S.dias.length - 1];
+    // Si el usuario invierte el rango (desde > hasta), lo normalizamos en vez de
+    // reventar. Las fechas son "YYYY-MM-DD", así que la comparación léxica sirve.
+    if (desde > hasta) { const _t = desde; desde = hasta; hasta = _t; }
+    let idxIni = S.dias.findIndex(d => d >= desde);
+    if (idxIni < 0) idxIni = 0;
     let idxFin = S.dias.length - 1;
     for (let i = S.dias.length - 1; i >= 0; i--) {
       if (S.dias[i] <= hasta) {
@@ -42779,6 +42783,7 @@ function CEDIDashboard() {
         break;
       }
     }
+    if (idxFin < idxIni) idxFin = idxIni;
     const diasR = S.dias.slice(idxIni, idxFin + 1);
     const rawSerie = trendFam === "total" ? S.total : S.data[trendFam] || S.total;
     const serieR = rawSerie.slice(idxIni, idxFin + 1);
@@ -42819,6 +42824,9 @@ function CEDIDashboard() {
       v,
       lbl: labels[i]
     }));
+    if (!pts.length) return React.createElement("div", {
+      style: { background: C.bg2, border: `1px solid ${C.b0}`, borderRadius: 13, padding: "24px", textAlign: "center", color: C.t3, fontSize: 12 }
+    }, "Sin datos en el rango de fechas seleccionado.");
     const path = pts.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(" ");
     const area = `${path} L ${pts[pts.length - 1].x.toFixed(1)} ${H - pad} L ${pts[0].x.toFixed(1)} ${H - pad} Z`;
     const totalR = vals.reduce((t, v) => t + v, 0);
