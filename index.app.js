@@ -32065,7 +32065,7 @@ async function processFiles(wbInv, wbFact, onStep, marcasActivas) {
       modulos: mods,
       stockPiso: mods.reduce((t, m) => t + m.stockP, 0),
       mezcla: mods.filter(m => m.skusPiso > 18).length,
-      sinMezcla: mods.filter(m => m.skusPiso === 1).length,
+      sinMezcla: mods.filter(m => m.skusPiso >= 1 && m.skusPiso <= 18).length,
       vacios: 42 - mods.length,
       conGap: mods.filter(m => m.gapMod > 0).length
     };
@@ -37178,9 +37178,21 @@ function CEDIDashboard() {
     }
   }, (() => {
     const UMBRAL = 30;
-    const desc = (st?.familias || []).filter(f => f.comp > 0).map(f => ({
+    // Cobertura CAPADA por SKU (min(stock,comp)) para que el sobrestock de un
+    // SKU no enmascare la ruptura de otro de la misma familia. Igual criterio
+    // que "Cumplimiento por Familia".
+    const _fam = {};
+    (data?.SKUS || []).forEach(s => {
+      const c = s.comp || 0;
+      if (c <= 0) return;
+      const f = s.familia || "OTRO";
+      if (!_fam[f]) _fam[f] = { familia: f, comp: 0, abast: 0 };
+      _fam[f].comp += c;
+      _fam[f].abast += Math.min(s.stock_piso || 0, c);
+    });
+    const desc = Object.values(_fam).map(f => ({
       ...f,
-      cob: Math.round(f.stock / f.comp * 100)
+      cob: Math.round(f.abast / f.comp * 100)
     })).filter(f => f.cob < UMBRAL).sort((a, b) => a.cob - b.cob);
     if (desc.length === 0) return null;
     return React.createElement("div", {
@@ -37242,7 +37254,7 @@ function CEDIDashboard() {
         color: C.t3,
         marginLeft: 5
       }
-    }, "(", f.stock.toLocaleString(), "/", f.comp.toLocaleString(), "u)"))))));
+    }, "(", f.abast.toLocaleString(), "/", f.comp.toLocaleString(), "u)"))))));
   })(), React.createElement("div", {
     style: {
       display: "grid",
@@ -42798,19 +42810,16 @@ function CEDIDashboard() {
     // Si el usuario invierte el rango (desde > hasta), lo normalizamos en vez de
     // reventar. Las fechas son "YYYY-MM-DD", así que la comparación léxica sirve.
     if (desde > hasta) { const _t = desde; desde = hasta; hasta = _t; }
-    let idxIni = S.dias.findIndex(d => d >= desde);
-    if (idxIni < 0) idxIni = 0;
-    let idxFin = S.dias.length - 1;
+    const idxIni = S.dias.findIndex(d => d >= desde); // -1 si 'desde' es posterior a todos los datos
+    let idxFin = -1;
     for (let i = S.dias.length - 1; i >= 0; i--) {
-      if (S.dias[i] <= hasta) {
-        idxFin = i;
-        break;
-      }
+      if (S.dias[i] <= hasta) { idxFin = i; break; } // -1 si 'hasta' es anterior a todos los datos
     }
-    if (idxFin < idxIni) idxFin = idxIni;
-    const diasR = S.dias.slice(idxIni, idxFin + 1);
+    // Rango válido sólo si ambos extremos existen y no están cruzados; si no, vacío.
+    const rangoOk = idxIni >= 0 && idxFin >= 0 && idxIni <= idxFin;
     const rawSerie = trendFam === "total" ? S.total : S.data[trendFam] || S.total;
-    const serieR = rawSerie.slice(idxIni, idxFin + 1);
+    const diasR = rangoOk ? S.dias.slice(idxIni, idxFin + 1) : [];
+    const serieR = rangoOk ? rawSerie.slice(idxIni, idxFin + 1) : [];
     let labels = [],
       vals = [];
     if (trendGran === "dia") {
