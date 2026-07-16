@@ -36026,6 +36026,27 @@ function CEDIDashboard() {
   const [factFile, setFactFile] = useState(null);
   const [data, setData] = useState(null);
   const [tab, setTab] = useState("dashboard");
+  // Pestañas protegidas con contraseña (solo CEDI Live y Reposición quedan libres).
+  // Reutiliza la misma llave 'hist_ok' del histórico → una sola contraseña por sesión.
+  const TABS_BLOQUEADAS = ["pipeline", "stock", "slotting", "reporte", "historico"];
+  const [tabsDesbloqueadas, setTabsDesbloqueadas] = useState(() => {
+    try { return sessionStorage.getItem('hist_ok') === '1'; } catch (_) { return false; }
+  });
+  const irATab = k => {
+    if (TABS_BLOQUEADAS.includes(k) && !tabsDesbloqueadas) {
+      const p = window.prompt("🔒 Sección restringida. Ingresa la contraseña:");
+      if (p === null) return;
+      if (histCheckPass(p.trim())) {
+        try { sessionStorage.setItem('hist_ok', '1'); } catch (_) {}
+        setTabsDesbloqueadas(true);
+        setTab(k);
+      } else {
+        window.alert("Contraseña incorrecta.");
+      }
+      return;
+    }
+    setTab(k);
+  };
   const [bufH, setBufH] = useState(2);
   const [bufF, setBufF] = useState(1.2);
   const [cfgOpen, setCfgOpen] = useState(false);
@@ -37187,7 +37208,7 @@ function CEDIDashboard() {
     l: "📈 Histórico"
   }].map(t => React.createElement("button", {
     key: t.k,
-    onClick: () => setTab(t.k),
+    onClick: () => irATab(t.k),
     style: {
       padding: "6px 14px",
       borderRadius: 7,
@@ -37201,7 +37222,7 @@ function CEDIDashboard() {
       transition: "all .15s",
       whiteSpace: "nowrap"
     }
-  }, t.l)))), tab === "dashboard" && React.createElement("div", {
+  }, TABS_BLOQUEADAS.includes(t.k) && !tabsDesbloqueadas ? "🔒 " + t.l : t.l)))), tab === "dashboard" && React.createElement("div", {
     style: {
       display: "flex",
       flexDirection: "column",
@@ -37300,7 +37321,7 @@ function CEDIDashboard() {
     c: C.green,
     ic: "✓",
     act: () => {
-      setTab("pipeline");
+      irATab("pipeline");
       setPedFiltro("despachable");
     }
   }, {
@@ -37310,7 +37331,7 @@ function CEDIDashboard() {
     c: C.orange,
     ic: "⬇",
     act: () => {
-      setTab("pipeline");
+      irATab("pipeline");
       setPedFiltro("reabasto");
     }
   }, {
@@ -37320,7 +37341,7 @@ function CEDIDashboard() {
     c: C.red,
     ic: "⚠",
     act: () => {
-      setTab("pipeline");
+      irATab("pipeline");
       setPedFiltro("ruptura");
     }
   }, {
@@ -37329,7 +37350,7 @@ function CEDIDashboard() {
     sub: "piso=0 con demanda",
     c: C.purple,
     ic: "▦",
-    act: () => setTab("stock")
+    act: () => irATab("stock")
   }].map((k, i) => React.createElement("button", {
     key: i,
     onClick: k.act,
@@ -38298,6 +38319,9 @@ function CEDIDashboard() {
       }
     }, "pedidos despachables ahora (piso cubre todo)"));
   })(), (() => {
+    // Panel "Estado de Abastecimiento" retirado del CEDI Live (a solicitud).
+    // Se deja el código desactivado por si se quiere restaurar más adelante.
+    return null;
     const peds = data?.pedidosActivos || [];
     const desp = peds.filter(p => p.clasificacion === "despachable").length;
     const parc = peds.filter(p => p.clasificacion === "parcial").length;
