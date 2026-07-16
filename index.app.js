@@ -38862,8 +38862,12 @@ function CEDIDashboard() {
       })));
     })());
   })(), planSubTab === "lista" && React.createElement(React.Fragment, null, (() => {
-    const totalAcc = st?.totalGaps || 0;
-    const doneAcc = Object.keys(hechos).length;
+    // Definición ÚNICA de "acción de reposición": SKU con gap en piso Y con
+    // stock en altura para bajar (si no hay altura, no es reposición → compra).
+    // Misma base que la barra de progreso y respeta el filtro de familia.
+    const accs = sorted.filter(s => gap(s) > 0 && s.stock_alt > 0 && (planFam === "todas" || s.familia === planFam));
+    const totalAcc = accs.length;
+    const doneAcc = accs.filter(s => hechos[s.id]).length;
     const pendAcc = Math.max(0, totalAcc - doneAcc);
     const pct = totalAcc > 0 ? Math.round(doneAcc / totalAcc * 100) : 0;
     return React.createElement("div", {
@@ -38877,7 +38881,7 @@ function CEDIDashboard() {
       l: "Acciones totales",
       v: totalAcc,
       c: C.teal,
-      s: "SKUs con gap en piso"
+      s: "SKUs con gap y altura"
     }, {
       l: "Pendientes",
       v: pendAcc,
@@ -38929,7 +38933,7 @@ function CEDIDashboard() {
       }
     }, k.s))));
   })(), (() => {
-    const accs = sorted.filter(s => gap(s) > 0 && (planFam === "todas" || s.familia === planFam));
+    const accs = sorted.filter(s => gap(s) > 0 && s.stock_alt > 0 && (planFam === "todas" || s.familia === planFam));
     const totalAcc = accs.length;
     const doneAcc = accs.filter(s => hechos[s.id]).length;
     const pct = totalAcc > 0 ? Math.round(doneAcc / totalAcc * 100) : 0;
@@ -38951,7 +38955,7 @@ function CEDIDashboard() {
         fontSize: 11,
         color: C.t3
       }
-    }, st?.totalGaps || 0, " acciones · Buffer ", bufH, "h×", bufF, "x · 🔬 vel. histórica 3m · R3: EXPO excluido"), React.createElement("div", {
+    }, totalAcc, " acciones · Buffer ", bufH, "h×", bufF, "x · 🔬 vel. histórica 3m · R3: EXPO excluido"), React.createElement("div", {
       style: {
         display: "flex",
         gap: 6,
