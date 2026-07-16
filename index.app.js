@@ -103,7 +103,8 @@ const semCol = {
   preventivo: C.yellow,
   critico: C.orange,
   ruptura: C.red,
-  proceso: C.accent
+  proceso: C.accent,
+  vacio: C.bg3
 };
 const R9 = n => Math.ceil(Math.max(0, n) / 9) * 9,
   LEAD = 12,
@@ -36271,8 +36272,10 @@ function CEDIDashboard() {
           return s && s.comp > 0 && s.stock_piso < s.comp;
         }).length;
         const pctRestock = skusTotal > 0 ? Math.round(skusNecesitan / skusTotal * 100) : 0;
-        let est = "ok";
-        if (rows.length === 0) est = "ok";else if (pctRestock >= 60) est = "ruptura";else if (pctRestock >= 40) est = "critico";else if (pctRestock >= 20) est = "preventivo";else est = "ok";
+        // Un módulo sin producto en piso (vacío o solo altura) NO está "abastecido":
+        // es un slot disponible, no un módulo sano. Estado propio "vacio".
+        let est;
+        if (skusTotal === 0) est = "vacio";else if (pctRestock >= 60) est = "ruptura";else if (pctRestock >= 40) est = "critico";else if (pctRestock >= 20) est = "preventivo";else est = "ok";
         const skus = skusTotal;
         return {
           n,
@@ -36290,15 +36293,19 @@ function CEDIDashboard() {
         preventivo: 0,
         critico: 0,
         ruptura: 0,
-        proceso: 0
+        proceso: 0,
+        vacio: 0
       };
       mods.forEach(m => cnt[m.est]++);
       const abst = cnt.ok + cnt.proceso;
+      const ocupados = 42 - cnt.vacio;
       return {
         c,
         mods,
         cnt,
         abst,
+        vacios: cnt.vacio,
+        ocupados,
         pct: Math.round(abst / 42 * 100)
       };
     });
@@ -38136,7 +38143,7 @@ function CEDIDashboard() {
         fontSize: 10,
         marginTop: 2
       }
-    }, cs.abst, "/42 módulos abastecidos · ", cs.pct, "% cobertura")), React.createElement("button", {
+    }, cs.abst, "/", cs.ocupados, " módulos sanos · ", cs.vacios, " vacíos · ", cs.pct, "% cobertura")), React.createElement("button", {
       onClick: () => setCallePanel(null),
       style: {
         background: "transparent",
