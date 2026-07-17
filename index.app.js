@@ -36050,7 +36050,6 @@ function CEDIDashboard() {
   const [bufH, setBufH] = useState(2);
   const [bufF, setBufF] = useState(1.2);
   const [cfgOpen, setCfgOpen] = useState(false);
-  const [tareas, setTareas] = useState({});
   const [slotFilt, setSlotFilt] = useState("todos");
   const [slotBusca, setSlotBusca] = useState("");
   const [slotFam, setSlotFam] = useState("todas");
@@ -36157,7 +36156,7 @@ function CEDIDashboard() {
   const [stockInclAlt, setStockInclAlt] = useState(false);
   const [stockFamFiltro, setStockFamFiltro] = useState(null);
   const [planCalle, setPlanCalle] = useState("todas");
-  const [planSubTab, setPlanSubTab] = useState("lista");
+  const [planSubTab, setPlanSubTab] = useState("viajes");
   const [planUbiBusca, setPlanUbiBusca] = useState("");
   const [pedOrden, setPedOrden] = useState({
     col: null,
@@ -38621,11 +38620,17 @@ function CEDIDashboard() {
       width: "fit-content"
     }
   }, [{
-    k: "lista",
-    l: "📋 Reposición"
+    k: "viajes",
+    l: "🚚 Plan de Viajes",
+    c: C.purple
+  }, {
+    k: "checklist",
+    l: "☑ Checklist SKU",
+    c: C.teal
   }, {
     k: "ubi",
-    l: "📍 Consultar UBI"
+    l: "📍 Consultar UBI",
+    c: C.orange
   }].map(t => React.createElement("button", {
     key: t.k,
     onClick: () => setPlanSubTab(t.k),
@@ -38637,7 +38642,7 @@ function CEDIDashboard() {
       fontSize: 11,
       fontWeight: 700,
       fontFamily: "inherit",
-      background: planSubTab === t.k ? t.k === "ubi" ? C.orange : C.teal : "transparent",
+      background: planSubTab === t.k ? t.c : "transparent",
       color: planSubTab === t.k ? C.bg0 : C.t3,
       transition: "all .15s"
     }
@@ -38928,7 +38933,7 @@ function CEDIDashboard() {
         }, "unidades")));
       })));
     })());
-  })(), planSubTab === "lista" && React.createElement(React.Fragment, null, (() => {
+  })(), planSubTab === "checklist" && React.createElement(React.Fragment, null, (() => {
     // Definición ÚNICA de "acción de reposición": SKU con gap en piso Y con
     // stock en altura para bajar (si no hay altura, no es reposición → compra).
     // Misma base que la barra de progreso y respeta el filtro de familia.
@@ -39179,7 +39184,7 @@ function CEDIDashboard() {
         fontFamily: "inherit"
       }
     }, "Reiniciar")));
-  })(), (() => {
+  })()), planSubTab === "viajes" && React.createElement(React.Fragment, null, (() => {
     // Fuente única compartida con el Excel (botón 📥). Ver listaViajes().
     const listaV = listaViajes(data, sorted, planCalle, planFam);
     if (listaV.length === 0) return null;
@@ -39631,7 +39636,7 @@ function CEDIDashboard() {
         color: C.orange
       }
     }, s.uniReq, "u")))))));
-  })(), (() => {
+  })()), planSubTab === "checklist" && React.createElement(React.Fragment, null, (() => {
     let lista = sorted.filter(s => gap(s) > 0 && (planFam === "todas" || s.familia === planFam));
     const CALLE_LET = {
       B: "Calle 1",
@@ -40041,24 +40046,7 @@ function CEDIDashboard() {
             cursor: "pointer",
             fontFamily: "inherit"
           }
-        }, isHecho ? "✓ Repuesto" : "Marcar hecho"), !isOk && React.createElement("button", {
-          onClick: () => setTareas(t => ({
-            ...t,
-            [s.id]: !t[s.id]
-          })),
-          style: {
-            padding: "12px 18px",
-            minHeight: 44,
-            borderRadius: 9,
-            background: tareas[s.id] ? C.bg3 : C.teal,
-            border: `1px solid ${C.teal}`,
-            color: tareas[s.id] ? C.teal : C.bg0,
-            fontWeight: 700,
-            fontSize: 12,
-            cursor: "pointer",
-            fontFamily: "inherit"
-          }
-        }, tareas[s.id] ? "✓ Asignada" : "Asignar"))), !isOk && estaExpandida && React.createElement("div", {
+        }, isHecho ? "✓ Repuesto" : "Marcar hecho"))), !isOk && estaExpandida && React.createElement("div", {
           style: {
             borderTop: `1px solid ${C.b0}`,
             display: "grid",
@@ -40562,24 +40550,7 @@ function CEDIDashboard() {
           cursor: "pointer",
           fontFamily: "inherit"
         }
-      }, isHecho ? "✓ Repuesto" : "Marcar hecho"), !isOk && React.createElement("button", {
-        onClick: () => setTareas(t => ({
-          ...t,
-          [s.id]: !t[s.id]
-        })),
-        style: {
-          padding: "12px 18px",
-          minHeight: 44,
-          borderRadius: 9,
-          background: tareas[s.id] ? C.bg3 : C.teal,
-          border: `1px solid ${C.teal}`,
-          color: tareas[s.id] ? C.teal : C.bg0,
-          fontWeight: 700,
-          fontSize: 12,
-          cursor: "pointer",
-          fontFamily: "inherit"
-        }
-      }, tareas[s.id] ? "✓ Asignada" : "Asignar"))), !isOk && estaExpandida && React.createElement("div", {
+      }, isHecho ? "✓ Repuesto" : "Marcar hecho"))), !isOk && estaExpandida && React.createElement("div", {
         style: {
           borderTop: `1px solid ${C.b0}`,
           display: "grid",
