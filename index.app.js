@@ -504,7 +504,10 @@ async function processFiles(wbInv, wbFact, onStep, marcasActivas) {
     // OJO: vel_hist === 0 es un dato REAL (sin movimiento confirmado), no "sin
     // historial". Antes se trataba igual que null y caía al respaldo (comp/1),
     // mostrando velocidades inventadas para SKUs que en realidad no rotan.
-    const vel_dia = vel_hist != null ? +vel_hist.toFixed(2) : comp > 0 ? +(comp / 1).toFixed(1) : 1;
+    // Sin historial Y sin pedidos → no hay ninguna base real para estimar
+    // velocidad: 0 u/día (coincide con la etiqueta "Sin movimiento"), no un
+    // valor inventado. Antes caía a "1" fijo, contradiciendo esa etiqueta.
+    const vel_dia = vel_hist != null ? +vel_hist.toFixed(2) : comp > 0 ? +(comp / 1).toFixed(1) : 0;
     const tieneHist = vel_hist != null;
     const tendencia = h ? {
       C: "creciente",
