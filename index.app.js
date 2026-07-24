@@ -11291,16 +11291,26 @@ function CEDIDashboard() {
     }, i + 1), React.createElement(TD, {
       mono: true,
       c: C.teal,
-      fw: 700
-    }, React.createElement("span", {
+      fw: 700,
+      style: { padding: 0 }
+    }, React.createElement("button", {
       onClick: () => setSelSKU(s.ref),
       style: {
         cursor: "pointer",
         textDecoration: "underline",
-        textDecorationColor: `${C.teal}40`
+        textDecorationColor: `${C.teal}40`,
+        background: "transparent",
+        border: "none",
+        color: "inherit",
+        font: "inherit",
+        padding: "9px 14px",
+        minHeight: 44,
+        display: "block",
+        width: "100%",
+        textAlign: "left"
       },
       title: "Ver ubicaciones y cantidades"
-    }, s.ref)), React.createElement(TD, {
+    }, "🔍 ", s.ref)), React.createElement(TD, {
       style: {
         maxWidth: 200
       }
