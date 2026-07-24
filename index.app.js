@@ -496,7 +496,10 @@ async function processFiles(wbInv, wbFact, onStep, marcasActivas) {
     const g = Math.max(0, comp - it.stock);
     const h = VEL_HIST[it.ref];
     const vel_hist = h ? h.v : null;
-    const vel_dia = vel_hist != null && vel_hist > 0 ? +vel_hist.toFixed(2) : comp > 0 ? +(comp / 1).toFixed(1) : 1;
+    // OJO: vel_hist === 0 es un dato REAL (sin movimiento confirmado), no "sin
+    // historial". Antes se trataba igual que null y caía al respaldo (comp/1),
+    // mostrando velocidades inventadas para SKUs que en realidad no rotan.
+    const vel_dia = vel_hist != null ? +vel_hist.toFixed(2) : comp > 0 ? +(comp / 1).toFixed(1) : 1;
     const tieneHist = vel_hist != null;
     const tendencia = h ? {
       C: "creciente",
@@ -11100,7 +11103,7 @@ function CEDIDashboard() {
     }
   }, "Cantidades en ×9 · Operario elige ubicación"), React.createElement("div", {
     style: { color: C.t4, fontSize: 9, marginTop: 3 }
-  }, "⚠ Rotación estimada con movimiento de inventario de las últimas 3 semanas (sin histórico de ventas aún). Se afina con cada actualización · reemplazar cuando haya export real de despachos.")), React.createElement("div", {
+  }, "⚠ Rotación estimada con movimiento de inventario del 2 al 23 de julio (histórico de Git, sin ventas reales aún). Es una FOTO FIJA: no se recalcula sola al subir archivos nuevos — pide una actualización manual de esta tabla cuando quieras extender la ventana, o reemplázala en cuanto haya un export real de despachos.")), React.createElement("div", {
     style: {
       display: "flex",
       gap: 4
@@ -11137,7 +11140,7 @@ function CEDIDashboard() {
     }
   }, React.createElement("span", {
     style: { fontSize: 9, color: C.t4, fontWeight: 600, marginRight: 2 }
-  }, "ROTACIÓN (últ. 3 sem.):"), [{
+  }, "ROTACIÓN (2-23 jul, foto fija):"), [{
     k: "todas",
     l: "Todas",
     c: C.t3
