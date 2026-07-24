@@ -598,22 +598,34 @@ async function processFiles(wbInv, wbFact, onStep, marcasActivas) {
         nivel: row.nivel,
         pos: row.pos,
         skus: [],
+        _skuIdx: {},
         totalStock: 0
       };
       const comp = compMap[row.ref] || 0;
       const stockPiso = stockMap[row.ref]?.stock || 0;
       const g = Math.max(0, comp - stockPiso);
       alturaPos[ubi].totalStock += row.saldo;
-      alturaPos[ubi].skus.push({
-        ref: row.ref,
-        desc: row.desc,
-        saldo: row.saldo,
-        comp,
-        stockPiso,
-        gap: g
-      });
+      // Agrupar el MISMO ref dentro de la misma posición: el inventario puede
+      // traer varias filas/lotes del mismo SKU en una sola ubicación de altura.
+      const bucket = alturaPos[ubi];
+      const existing = bucket._skuIdx[row.ref];
+      if (existing) {
+        existing.saldo += row.saldo;
+      } else {
+        const entry = {
+          ref: row.ref,
+          desc: row.desc,
+          saldo: row.saldo,
+          comp,
+          stockPiso,
+          gap: g
+        };
+        bucket._skuIdx[row.ref] = entry;
+        bucket.skus.push(entry);
+      }
     }
   }
+  for (const p of Object.values(alturaPos)) delete p._skuIdx;
   const palletsSugeridos = Object.values(alturaPos).map(p => {
     const needed = p.skus.filter(s => s.gap > 0 && esSlottable(s.desc)).map(s => {
       const cajasGap = Math.max(1, Math.ceil(s.gap / CAJA));
@@ -11280,7 +11292,15 @@ function CEDIDashboard() {
       mono: true,
       c: C.teal,
       fw: 700
-    }, s.ref), React.createElement(TD, {
+    }, React.createElement("span", {
+      onClick: () => setSelSKU(s.ref),
+      style: {
+        cursor: "pointer",
+        textDecoration: "underline",
+        textDecorationColor: `${C.teal}40`
+      },
+      title: "Ver ubicaciones y cantidades"
+    }, s.ref)), React.createElement(TD, {
       style: {
         maxWidth: 200
       }
