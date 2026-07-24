@@ -4815,6 +4815,139 @@ async function exportarPlanTurno(items, calleSel = "todas") {
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 }
+// Descarga de resultados de Slotting (exporta la tabla YA filtrada/ordenada
+// que se ve en pantalla). Misma lógica visual que exportarPlanTurno (Reposición):
+// ExcelJS, encabezado azul, bordes, autofiltro, fila congelada.
+const ROT_LBL_XLS = { alta: "Alta", media: "Media", baja: "Baja", sin_movimiento: "Sin movimiento" };
+async function exportarSlotting(items, filtroTag = "") {
+  if (!window.ExcelJS) {
+    alert("Librería ExcelJS no disponible (no se pudo cargar). Reintenta con conexión.");
+    return;
+  }
+  const ahora = new Date();
+  const filas = (items || []).map(s => {
+    let recomendacion;
+    if (s.cajas_sub === 0) recomendacion = "NO MOVER";else if (s.pallet_completo) recomendacion = `SUBIR ${s.pallets_subir} PALLET${s.pallets_subir > 1 ? "S" : ""}`;else recomendacion = `${s.cajas_sub} CAJAS -> PALLET MIXTO`;
+    return {
+      sku: String(s.ref),
+      desc: s.desc || "",
+      rotacion: ROT_LBL_XLS[s.rot_hist || "sin_movimiento"],
+      velDia: s.vel_dia || 0,
+      stockPiso: s.stock || 0,
+      cajasDisp: s.cajas_disp || 0,
+      fraccion: s.fraccion || 0,
+      cajasSubir: s.cajas_sub || 0,
+      uSubir: s.u_subir || 0,
+      razon: s.razon || "",
+      recomendacion
+    };
+  });
+
+  const wb = new window.ExcelJS.Workbook();
+  const ws = wb.addWorksheet(filtroTag ? `Slotting ${filtroTag}` : "Slotting", {
+    views: [{
+      state: "frozen",
+      ySplit: 1
+    }]
+  });
+  ws.columns = [{
+    header: "SKU",
+    key: "sku",
+    width: 12
+  }, {
+    header: "Descripción",
+    key: "desc",
+    width: 42
+  }, {
+    header: "Rotación",
+    key: "rotacion",
+    width: 14
+  }, {
+    header: "u/día",
+    key: "velDia",
+    width: 9
+  }, {
+    header: "Stock Piso",
+    key: "stockPiso",
+    width: 11
+  }, {
+    header: "Cajas",
+    key: "cajasDisp",
+    width: 9
+  }, {
+    header: "Fracción",
+    key: "fraccion",
+    width: 10
+  }, {
+    header: "A Subir (cajas)",
+    key: "cajasSubir",
+    width: 14
+  }, {
+    header: "A Subir (u)",
+    key: "uSubir",
+    width: 11
+  }, {
+    header: "Razón",
+    key: "razon",
+    width: 28
+  }, {
+    header: "Recomendación",
+    key: "recomendacion",
+    width: 22
+  }];
+
+  const thinGray = {
+    style: "thin",
+    color: { argb: "FFBFBFBF" }
+  };
+  const bordeFino = {
+    top: thinGray,
+    bottom: thinGray,
+    left: thinGray,
+    right: thinGray
+  };
+  const centro = {
+    horizontal: "center",
+    vertical: "middle"
+  };
+  const NCOL = 11;
+
+  const hRow = ws.getRow(1);
+  hRow.height = 20;
+  for (let col = 1; col <= NCOL; col++) {
+    const c = hRow.getCell(col);
+    c.font = { name: "Arial", size: 10, bold: true, color: { argb: "FFFFFFFF" } };
+    c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1F4E78" } };
+    c.alignment = centro;
+    c.border = bordeFino;
+  }
+
+  filas.forEach(f => ws.addRow(f));
+
+  for (let r = 2; r <= filas.length + 1; r++) {
+    for (let col = 1; col <= NCOL; col++) {
+      const c = ws.getRow(r).getCell(col);
+      c.font = { name: "Arial", size: 10 };
+      c.alignment = col === 2 || col === 10 ? { vertical: "middle" } : centro;
+      c.border = { ...bordeFino };
+    }
+  }
+
+  ws.autoFilter = {
+    from: { row: 1, column: 1 },
+    to: { row: 1, column: NCOL }
+  };
+
+  const buf = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buf], {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+  });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `slotting_cedi_${filtroTag ? filtroTag + "_" : ""}${ahora.toISOString().slice(0, 10)}_${String(ahora.getHours()).padStart(2, "0")}${String(ahora.getMinutes()).padStart(2, "0")}.xlsx`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
 function CEDIDashboard() {
   const [phase, setPhase] = useState("upload");
   const [loadStep, setLoadStep] = useState("");
@@ -11287,7 +11420,24 @@ function CEDIDashboard() {
       cursor: "pointer",
       fontFamily: "inherit"
     }
-  }, l))))), React.createElement("div", {
+  }, l)), React.createElement("button", {
+    onClick: () => {
+      const tag = [slotRot !== "todas" ? slotRot : "", slotFam !== "todas" ? slotFam : ""].filter(Boolean).join("_");
+      exportarSlotting(altFilt, tag);
+    },
+    style: {
+      padding: "6px 12px",
+      borderRadius: 8,
+      background: C.green,
+      border: "none",
+      color: C.bg0,
+      fontWeight: 700,
+      fontSize: 10,
+      cursor: "pointer",
+      fontFamily: "inherit",
+      marginLeft: 6
+    }
+  }, "📥 Excel")))), React.createElement("div", {
     style: {
       overflowX: "auto",
       WebkitOverflowScrolling: "touch"
