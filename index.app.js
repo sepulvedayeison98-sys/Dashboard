@@ -3342,8 +3342,23 @@ function SKUPanel({
     D: "Calle 3",
     E: "Calle 4"
   };
-  const piso = pos.filter(p => p.nivel <= 1);
-  const altura = pos.filter(p => p.nivel >= 2);
+  // Una misma posición puede traer varias filas/lotes del mismo SKU; se
+  // agrupan por ubicación sumando el saldo para no repetir la misma posición
+  // varias veces en el panel.
+  const agruparPorUbi = arr => {
+    const idx = {};
+    const out = [];
+    for (const p of arr) {
+      if (idx[p.ubi]) idx[p.ubi].saldo += p.saldo;else {
+        const entry = { ...p };
+        idx[p.ubi] = entry;
+        out.push(entry);
+      }
+    }
+    return out;
+  };
+  const piso = agruparPorUbi(pos.filter(p => p.nivel <= 1));
+  const altura = agruparPorUbi(pos.filter(p => p.nivel >= 2));
   const stockPiso = piso.reduce((t, p) => t + p.saldo, 0);
   const stockAltura = altura.reduce((t, p) => t + p.saldo, 0);
   const eOP = {
