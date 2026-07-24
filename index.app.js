@@ -3342,21 +3342,26 @@ function SKUPanel({
     D: "Calle 3",
     E: "Calle 4"
   };
-  // Una misma posición puede traer varias filas/lotes del mismo SKU; se
-  // agrupan por ubicación sumando el saldo para no repetir la misma posición
-  // varias veces en el panel.
+  // Una misma posición puede traer varias filas/lotes (cajas) del mismo SKU;
+  // se agrupan por ubicación sumando el saldo para no repetir la misma
+  // posición varias veces, pero conservando el detalle de cada caja para
+  // poder desplegarlo (número de caja + cantidad).
   const agruparPorUbi = arr => {
     const idx = {};
     const out = [];
     for (const p of arr) {
-      if (idx[p.ubi]) idx[p.ubi].saldo += p.saldo;else {
-        const entry = { ...p };
+      if (idx[p.ubi]) {
+        idx[p.ubi].saldo += p.saldo;
+        if (p.cajap) idx[p.ubi].cajas.push({ cajap: p.cajap, saldo: p.saldo });
+      } else {
+        const entry = { ...p, cajas: p.cajap ? [{ cajap: p.cajap, saldo: p.saldo }] : [] };
         idx[p.ubi] = entry;
         out.push(entry);
       }
     }
     return out;
   };
+  const [cajasAbiertas, setCajasAbiertas] = React.useState({});
   const piso = agruparPorUbi(pos.filter(p => p.nivel <= 1));
   const altura = agruparPorUbi(pos.filter(p => p.nivel >= 2));
   const stockPiso = piso.reduce((t, p) => t + p.saldo, 0);
@@ -3899,61 +3904,74 @@ function SKUPanel({
     list: altura,
     title: "Altura (Nivel 3-5)",
     c: C.purple
-  }].map(({
-    list,
-    title,
-    c
-  }) => list.length > 0 && React.createElement("div", {
-    key: title
-  }, React.createElement("div", {
-    style: {
-      padding: "7px 16px",
-      fontSize: 9,
-      color: c,
-      fontWeight: 700,
-      textTransform: "uppercase",
-      letterSpacing: "0.8px",
-      background: C.bg1,
-      borderBottom: `1px solid ${C.b0}`,
-      position: "sticky",
-      top: 0
-    }
-  }, title, " · ", list.length, " posiciones · ", list.reduce((t, p) => t + p.saldo, 0), "u total"), list.map((p, i) => React.createElement("div", {
-    key: i,
-    style: {
-      padding: "9px 16px",
-      borderBottom: `1px solid ${C.bg3}`,
-      display: "flex",
-      justifyContent: "space-between",
-      alignItems: "center",
-      background: i % 2 === 0 ? C.bg1 : "transparent"
-    }
-  }, React.createElement("div", {
-    style: {
-      display: "flex",
-      gap: 10,
-      alignItems: "center"
-    }
-  }, React.createElement("span", {
-    style: {
-      fontFamily: "'JetBrains Mono',monospace",
-      color: C.teal,
-      fontWeight: 700,
-      fontSize: 12
-    }
-  }, p.ubi), React.createElement("span", {
-    style: {
-      color: C.t3,
-      fontSize: 10
-    }
-  }, CALLE_NOMBRES[p.calleLetra], " · M", String(p.modulo).padStart(2, "0"), " · Niv ", p.nivel)), React.createElement("span", {
-    style: {
-      fontFamily: "'JetBrains Mono',monospace",
-      fontSize: 16,
-      fontWeight: 800,
-      color: c
-    }
-  }, p.saldo, "u")))))))));
+  }].map(({ list, title, c }) => {
+    if (list.length === 0) return null;
+    const header = React.createElement("div", {
+      key: "h",
+      style: {
+        padding: "7px 16px",
+        fontSize: 9,
+        color: c,
+        fontWeight: 700,
+        textTransform: "uppercase",
+        letterSpacing: "0.8px",
+        background: C.bg1,
+        borderBottom: `1px solid ${C.b0}`,
+        position: "sticky",
+        top: 0
+      }
+    }, title, " · ", list.length, " posiciones · ", list.reduce((t, p) => t + p.saldo, 0), "u total");
+    const filas = list.map((p, i) => {
+      const key = `${title}-${p.ubi}`;
+      const abierto = cajasAbiertas[key];
+      const tieneCajas = p.cajas && p.cajas.length > 0;
+      const izquierda = React.createElement("div", {
+        style: { display: "flex", gap: 10, alignItems: "center" }
+      }, tieneCajas && React.createElement("span", {
+        style: {
+          color: C.t3,
+          fontSize: 9,
+          transform: abierto ? "rotate(90deg)" : "none",
+          transition: "transform .2s",
+          display: "inline-block"
+        }
+      }, "▶"), React.createElement("span", {
+        style: { fontFamily: "'JetBrains Mono',monospace", color: C.teal, fontWeight: 700, fontSize: 12 }
+      }, p.ubi), React.createElement("span", {
+        style: { color: C.t3, fontSize: 10 }
+      }, CALLE_NOMBRES[p.calleLetra], " · M", String(p.modulo).padStart(2, "0"), " · Niv ", p.nivel));
+      const derecha = React.createElement("div", {
+        style: { display: "flex", gap: 8, alignItems: "center" }
+      }, tieneCajas && React.createElement("span", {
+        style: { color: C.t4, fontSize: 9 }
+      }, p.cajas.length, " caja", p.cajas.length > 1 ? "s" : ""), React.createElement("span", {
+        style: { fontFamily: "'JetBrains Mono',monospace", fontSize: 16, fontWeight: 800, color: c }
+      }, p.saldo, "u"));
+      const cabecera = React.createElement("div", {
+        key: "row",
+        onClick: () => tieneCajas && setCajasAbiertas(o => ({ ...o, [key]: !o[key] })),
+        style: {
+          padding: "9px 16px",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          cursor: tieneCajas ? "pointer" : "default"
+        }
+      }, izquierda, derecha);
+      const detalle = !(abierto && tieneCajas) ? null : React.createElement("div", {
+        key: "det",
+        style: { padding: "0 16px 9px 32px" }
+      }, p.cajas.map((cj, ci) => React.createElement("div", {
+        key: ci,
+        style: { display: "flex", justifyContent: "space-between", padding: "3px 0", fontSize: 10, fontFamily: "'JetBrains Mono',monospace" }
+      }, React.createElement("span", { style: { color: C.accent } }, "📦 ", cj.cajap), React.createElement("span", { style: { color: C.t3 } }, cj.saldo, "u"))));
+      return React.createElement("div", {
+        key: i,
+        style: { borderBottom: `1px solid ${C.bg3}`, background: i % 2 === 0 ? C.bg1 : "transparent" }
+      }, cabecera, detalle);
+    });
+    return React.createElement("div", { key: title }, header, filas);
+  })))));
 }
 function ModulePanel({
   modKey,
