@@ -1,1 +1,4 @@
 node_modules/
+
+# Salida generada por scripts/ingest-despachos.js (se regenera, no se versiona)
+despachos-carga.sql
