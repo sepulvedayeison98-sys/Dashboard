@@ -5036,7 +5036,8 @@ async function exportarOtrasBodegas(filas, filtroTag = "") {
   });
   ws.columns = [
     { header: "Grupo", key: "grupo", width: 22 },
-    { header: "Bodega", key: "bodega", width: 16 },
+    { header: "Bodega", key: "bodega", width: 18 },
+    { header: "Ubicación", key: "ubi", width: 14 },
     { header: "SKU", key: "sku", width: 12 },
     { header: "Descripción", key: "desc", width: 52 },
     { header: "Caja", key: "caja", width: 14 },
@@ -5047,7 +5048,8 @@ async function exportarOtrasBodegas(filas, filtroTag = "") {
   for (const f of filas || []) {
     ws.addRow({
       grupo: f.grupo || "",
-      bodega: String(f.bod || f.ubi || "").trim().toUpperCase(),
+      bodega: String(f.bod || f.ubi || "").trim(),
+      ubi: String(f.ubiRaw || f.ubi || "").trim().toUpperCase(),
       sku: String(f.ref),
       desc: f.desc || "",
       caja: f.cajap || "",
@@ -5070,7 +5072,7 @@ async function exportarOtrasBodegas(filas, filtroTag = "") {
   for (let i = 2; i <= ws.rowCount; i++) {
     ws.getRow(i).eachCell((c, col) => {
       c.font = { name: "Arial", size: 10 };
-      c.alignment = { horizontal: col === 4 ? "left" : "center", vertical: "middle" };
+      c.alignment = { horizontal: col === 5 ? "left" : "center", vertical: "middle" };
       c.border = {
         top: { style: "thin", color: { argb: "FFD9D9D9" } },
         left: { style: "thin", color: { argb: "FFD9D9D9" } },
@@ -5126,6 +5128,9 @@ const OB_GRUPO_COL = {
   "Herramienta": "#78716c"
 };
 const obGrupoCol = g => OB_GRUPO_COL[g] || "#475569";
+// Posiciones de la calle A del CEDI (A0211, A1011…). parseUbi solo reconoce
+// B-E, así que estas caían como "bodegas" independientes una por posición.
+const esUbiCEDI = u => /^A\d{4}$/.test(String(u || "").trim().toUpperCase());
 
 function OtrasBodegasPanel({ rows, isMobile }) {
   const [vista, setVista] = useState("grupos");
@@ -5139,7 +5144,12 @@ function OtrasBodegasPanel({ rows, isMobile }) {
 
   const enrich = useMemo(() => rows.map(r => ({
     ...r,
-    bod: r.enRack ? "RACK (calles)" : norm(r.ubi),
+    // Las posiciones A#### (A0211, A1011…) son del CEDI: la calle A, que
+    // parseUbi no mapea porque solo cubre B-E. Antes salían como 19 "bodegas"
+    // sueltas; se unifican bajo CEDI y la posición exacta queda en la columna
+    // Ubicación. Siguen fuera de CEDI Live: no son piso ni altura del rack.
+    bod: r.enRack ? "CEDI · rack B-E" : (esUbiCEDI(r.ubi) ? "CEDI · calle A" : norm(r.ubi)),
+    ubiRaw: norm(r.ubi),
     fam: familia(r.desc),
     dudoso: r.saldo >= OB_SOSPECHOSO
   })), [rows]);
@@ -5489,6 +5499,7 @@ function OtrasBodegasPanel({ rows, isMobile }) {
                 React.createElement(TH, null, "#"),
                 React.createElement(TH, null, "Grupo"),
                 React.createElement(TH, null, "Bodega"),
+                React.createElement(TH, null, "Ubicación"),
                 React.createElement(TH, null, "Ref."),
                 React.createElement(TH, null, "Descripción"),
                 React.createElement(TH, { right: true }, "Saldo")
@@ -5509,6 +5520,7 @@ function OtrasBodegasPanel({ rows, isMobile }) {
                   )
                 ),
                 React.createElement(TD, { mono: true, c: C.accent, fs: 11, fw: 700 }, r.bod),
+                React.createElement(TD, { mono: true, c: C.t3, fs: 10 }, r.ubiRaw),
                 React.createElement(TD, { mono: true, c: C.teal, fw: 700 }, r.ref),
                 React.createElement(TD, { style: { maxWidth: 280 } },
                   React.createElement("div", {
