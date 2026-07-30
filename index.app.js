@@ -290,6 +290,31 @@ const programadoFuturo = txt => {
   d.setHours(0, 0, 0, 0);
   return d.getTime() > hoy.getTime();
 };
+/* Clasifica en un grupo legible el inventario que el CEDI NO analiza. El
+ * dashboard solo mira CASCO de las marcas activas y sin EXPO; todo lo demás
+ * (exportaciones, TECH, repuestos, maleteros, accesorios…) quedaba invisible.
+ * Se agrupa por Linea del WMS, salvo el CASCO, que se parte por EXPO/marca
+ * porque ahí la línea sola no distingue nada. */
+const GRUPO_LINEA = {
+  REPUE: "Repuestos / Visores",
+  MALET: "Maleteros",
+  ACCES: "Accesorios",
+  TEXTIL: "Textil",
+  SOUVENIR: "Souvenir",
+  OBSEQ: "Obsequios",
+  EXHIB: "Exhibición",
+  PUBLI: "Publicidad",
+  HERRA: "Herramienta"
+};
+const grupoExcluido = (linea, desc, marca) => {
+  const L = String(linea || "").trim().toUpperCase();
+  if (L === "CASCO") {
+    if (esEXPO(desc)) return "Exportación";
+    if (marca === "TECH") return "TECH";
+    return "Otras marcas casco";
+  }
+  return GRUPO_LINEA[L] || `Otros (${L || "sin línea"})`;
+};
 async function processFiles(wbInv, wbFact, onStep, marcasActivas) {
   const MARCAS = marcasActivas || ["ICH"];
   onStep("Leyendo inventario...");
@@ -356,7 +381,12 @@ async function processFiles(wbInv, wbFact, onStep, marcasActivas) {
     if (!ref) continue;
     const p = parseUbi(ubi);
     if (!p && ubi && saldo > 0) {
-      otrasBodegas.push({ ref, desc, saldo, ubi, cajap });
+      otrasBodegas.push({
+        ref, desc, saldo, ubi, cajap,
+        grupo: "CASCO (en análisis)",
+        linea: "CASCO",
+        enRack: false
+      });
     }
     if (!stockMap[ref]) stockMap[ref] = {
       ref,
@@ -382,6 +412,33 @@ async function processFiles(wbInv, wbFact, onStep, marcasActivas) {
         cajap
       });
     }
+  }
+  // Inventario que el CEDI NO analiza: todo lo que quedó fuera de invCasco
+  // (exportaciones, TECH, repuestos, maleteros, accesorios, souvenir…).
+  // Se calcula como el complemento exacto de invCasco, así respeta solo el
+  // filtro de marcas activas sin duplicar sus reglas. Va a un array aparte que
+  // NADIE mas consume: no toca stockMap, cascoRefs, comprometido ni reposición,
+  // así que no puede alterar ningún número de CEDI Live.
+  const invCascoSet = new Set(invCasco);
+  for (const r of invRows) {
+    if (invCascoSet.has(r)) continue;
+    const saldo = toNum(r["saldo"]);
+    if (saldo <= 0) continue;
+    const ref = String(r["Referencia"] || "").trim();
+    if (!ref) continue;
+    const desc = String(r["Descripcion"] || "").trim();
+    const linea = String(r["Linea"] || "").trim();
+    const ubi = String(r["ubicacion"] || "").trim();
+    otrasBodegas.push({
+      ref,
+      desc,
+      saldo,
+      ubi: ubi || "(sin ubicación)",
+      cajap: String(r["cajap"] || "").trim(),
+      grupo: grupoExcluido(linea, desc, marcaDe(desc)),
+      linea: linea || "(sin línea)",
+      enRack: !!parseUbi(ubi)
+    });
   }
   const cascoRefs = new Set(Object.keys(stockMap));
   onStep(`${cascoRefs.size.toLocaleString()} SKUs CASCO encontrados. Leyendo pedidos ITAGUÍ...`);
@@ -809,8 +866,15 @@ async function processFiles(wbInv, wbFact, onStep, marcasActivas) {
   // Unidades de cada referencia que están FUERA del rack (Recibo, Magic, etc.).
   // Sirve para no afirmar "sin stock en ningún lado" cuando en realidad el
   // producto está recibido pero todavía sin ubicar en las calles.
+  // OJO: solo cuentan las filas del CASCO que el CEDI SÍ analiza. otrasBodegas
+  // ahora también trae inventario excluido (EXPO, TECH, repuestos…); si esas
+  // unidades entraran aquí, una referencia en ruptura podría declararse
+  // "disponible en otra bodega" por stock de un producto distinto.
   const fueraMap = {};
-  for (const o of otrasBodegas) fueraMap[o.ref] = (fueraMap[o.ref] || 0) + o.saldo;
+  for (const o of otrasBodegas) {
+    if (o.grupo !== "CASCO (en análisis)") continue;
+    fueraMap[o.ref] = (fueraMap[o.ref] || 0) + o.saldo;
+  }
   const rupturas = items.filter(it => it.comp > 0 && it.stock === 0).map(it => ({
     ...it,
     stock_alt: stockAltMap[it.ref] || 0,
@@ -4971,6 +5035,7 @@ async function exportarOtrasBodegas(filas, filtroTag = "") {
     views: [{ state: "frozen", ySplit: 1 }]
   });
   ws.columns = [
+    { header: "Grupo", key: "grupo", width: 22 },
     { header: "Bodega", key: "bodega", width: 16 },
     { header: "SKU", key: "sku", width: 12 },
     { header: "Descripción", key: "desc", width: 52 },
@@ -4981,7 +5046,8 @@ async function exportarOtrasBodegas(filas, filtroTag = "") {
   const SOSPECHOSO = 100000;
   for (const f of filas || []) {
     ws.addRow({
-      bodega: String(f.ubi || "").trim().toUpperCase(),
+      grupo: f.grupo || "",
+      bodega: String(f.bod || f.ubi || "").trim().toUpperCase(),
       sku: String(f.ref),
       desc: f.desc || "",
       caja: f.cajap || "",
@@ -5004,7 +5070,7 @@ async function exportarOtrasBodegas(filas, filtroTag = "") {
   for (let i = 2; i <= ws.rowCount; i++) {
     ws.getRow(i).eachCell((c, col) => {
       c.font = { name: "Arial", size: 10 };
-      c.alignment = { horizontal: col === 3 ? "left" : "center", vertical: "middle" };
+      c.alignment = { horizontal: col === 4 ? "left" : "center", vertical: "middle" };
       c.border = {
         top: { style: "thin", color: { argb: "FFD9D9D9" } },
         left: { style: "thin", color: { argb: "FFD9D9D9" } },
@@ -5044,69 +5110,79 @@ async function exportarOtrasBodegas(filas, filtroTag = "") {
 // NO se oculta: se cuenta aparte y se puede ver en el detalle.
 const OB_SOSPECHOSO = 100000;
 
-const OB_FAM_COL = {
-  "501": "#38bdf8", "3110": "#2dd4bf", "3120": "#a78bfa", "102": "#f59e0b",
-  "503": "#10b981", "101": "#f97316", "3130": "#ec4899", "505": "#8b5cf6",
-  "451": "#eab308", "520": "#14b8a6", "T-10": "#64748b", "OTRO": "#475569"
+const OB_GRUPO_COL = {
+  "CASCO (en análisis)": "#38bdf8",
+  "Exportación": "#a78bfa",
+  "TECH": "#f97316",
+  "Otras marcas casco": "#2dd4bf",
+  "Repuestos / Visores": "#10b981",
+  "Maleteros": "#f59e0b",
+  "Accesorios": "#eab308",
+  "Textil": "#ec4899",
+  "Souvenir": "#8b5cf6",
+  "Obsequios": "#14b8a6",
+  "Exhibición": "#64748b",
+  "Publicidad": "#94a3b8",
+  "Herramienta": "#78716c"
 };
-const obColor = f => OB_FAM_COL[f] || "#475569";
+const obGrupoCol = g => OB_GRUPO_COL[g] || "#475569";
 
 function OtrasBodegasPanel({ rows, isMobile }) {
-  const [vista, setVista] = useState("resumen");
+  const [vista, setVista] = useState("grupos");
+  const [grupo, setGrupo] = useState("todos");
   const [bodega, setBodega] = useState("todas");
-  const [fam, setFam] = useState("todas");
   const [busca, setBusca] = useState("");
   const [orden, setOrden] = useState("saldo");
 
   // El WMS escribe la misma bodega de varias formas ("Recibo"/"RECIBO"/"recibo").
-  // Se normaliza para no partir una bodega en tres.
   const norm = u => String(u || "").trim().toUpperCase();
 
-  // Filas enriquecidas con familia y marca de saldo dudoso, una sola vez.
   const enrich = useMemo(() => rows.map(r => ({
     ...r,
-    bod: norm(r.ubi),
+    bod: r.enRack ? "RACK (calles)" : norm(r.ubi),
     fam: familia(r.desc),
     dudoso: r.saldo >= OB_SOSPECHOSO
   })), [rows]);
 
+  // Un saldo absurdo en una sola fila es error de digitación del WMS: se saca
+  // de los agregados porque aplasta la escala, pero se sigue viendo en Detalle.
   const limpias = useMemo(() => enrich.filter(r => !r.dudoso), [enrich]);
   const dudosas = useMemo(() => enrich.filter(r => r.dudoso), [enrich]);
 
-  // Matriz familia × bodega (solo con filas limpias)
   const resumen = useMemo(() => {
-    const bod = {}, fam = {}, cel = {};
+    const gr = {}, bo = {}, cel = {};
     for (const r of limpias) {
-      if (!bod[r.bod]) bod[r.bod] = { nombre: r.bod, u: 0, refs: new Set(), fams: {} };
-      bod[r.bod].u += r.saldo;
-      bod[r.bod].refs.add(r.ref);
-      bod[r.bod].fams[r.fam] = (bod[r.bod].fams[r.fam] || 0) + r.saldo;
-      if (!fam[r.fam]) fam[r.fam] = { nombre: r.fam, u: 0, refs: new Set() };
-      fam[r.fam].u += r.saldo;
-      fam[r.fam].refs.add(r.ref);
-      cel[`${r.fam}|${r.bod}`] = (cel[`${r.fam}|${r.bod}`] || 0) + r.saldo;
+      if (!gr[r.grupo]) gr[r.grupo] = { nombre: r.grupo, u: 0, refs: new Set(), rack: 0, fuera: 0, bods: {} };
+      gr[r.grupo].u += r.saldo;
+      gr[r.grupo].refs.add(r.ref);
+      if (r.enRack) gr[r.grupo].rack += r.saldo; else gr[r.grupo].fuera += r.saldo;
+      gr[r.grupo].bods[r.bod] = (gr[r.grupo].bods[r.bod] || 0) + r.saldo;
+      if (!bo[r.bod]) bo[r.bod] = { nombre: r.bod, u: 0, refs: new Set() };
+      bo[r.bod].u += r.saldo;
+      bo[r.bod].refs.add(r.ref);
+      cel[`${r.grupo}|${r.bod}`] = (cel[`${r.grupo}|${r.bod}`] || 0) + r.saldo;
     }
     return {
-      bodegas: Object.values(bod).sort((a, b) => b.u - a.u),
-      familias: Object.values(fam).sort((a, b) => b.u - a.u),
+      grupos: Object.values(gr).sort((a, b) => b.u - a.u),
+      bodegas: Object.values(bo).sort((a, b) => b.u - a.u),
       cel,
-      total: Object.values(fam).reduce((t, f) => t + f.u, 0)
+      total: Object.values(gr).reduce((t, g) => t + g.u, 0)
     };
   }, [limpias]);
 
   const filt = useMemo(() => {
     let arr = enrich;
+    if (grupo !== "todos") arr = arr.filter(r => r.grupo === grupo);
     if (bodega !== "todas") arr = arr.filter(r => r.bod === bodega);
-    if (fam !== "todas") arr = arr.filter(r => r.fam === fam);
     const q = busca.trim().toLowerCase();
     if (q) arr = arr.filter(r => String(r.ref).toLowerCase().includes(q) || String(r.desc).toLowerCase().includes(q));
     arr = [...arr];
     if (orden === "saldo") arr.sort((a, b) => b.saldo - a.saldo);
     else if (orden === "ref") arr.sort((a, b) => (+a.ref || 0) - (+b.ref || 0));
     else if (orden === "bodega") arr.sort((a, b) => a.bod.localeCompare(b.bod) || b.saldo - a.saldo);
-    else if (orden === "familia") arr.sort((a, b) => a.fam.localeCompare(b.fam) || b.saldo - a.saldo);
+    else if (orden === "grupo") arr.sort((a, b) => a.grupo.localeCompare(b.grupo) || b.saldo - a.saldo);
     return arr;
-  }, [enrich, bodega, fam, busca, orden]);
+  }, [enrich, grupo, bodega, busca, orden]);
 
   const totU = filt.filter(r => !r.dudoso).reduce((t, r) => t + r.saldo, 0);
   const totRef = new Set(filt.map(r => r.ref)).size;
@@ -5126,18 +5202,32 @@ function OtrasBodegasPanel({ rows, isMobile }) {
     React.createElement("div", { style: { fontSize: 10, color: C.t4 } }, sub)
   );
 
-  // Barra apilada de composición por familia dentro de una bodega
-  const barra = (fams, total) => React.createElement("div", {
+  const barra = (partes, total, colorFn) => React.createElement("div", {
     style: { display: "flex", height: 8, borderRadius: 4, overflow: "hidden", background: C.bg3, marginTop: 8 }
   },
-    Object.entries(fams).sort((a, b) => b[1] - a[1]).map(([f, u]) =>
+    Object.entries(partes).sort((a, b) => b[1] - a[1]).map(([k, u]) =>
       React.createElement("div", {
-        key: f,
-        title: `${f}: ${u.toLocaleString()} u (${Math.round(u / total * 100)}%)`,
-        style: { width: `${u / total * 100}%`, background: obColor(f) }
+        key: k,
+        title: `${k}: ${u.toLocaleString()} u (${Math.round(u / total * 100)}%)`,
+        style: { width: `${u / total * 100}%`, background: colorFn(k) }
       })
     )
   );
+
+  // Paleta estable por bodega, derivada del orden de tamaño.
+  const BOD_PAL = ["#38bdf8", "#2dd4bf", "#a78bfa", "#f59e0b", "#10b981", "#f97316", "#ec4899", "#8b5cf6", "#eab308", "#64748b"];
+  const bodIdx = {};
+  resumen.bodegas.forEach((b, i) => { bodIdx[b.nombre] = BOD_PAL[i % BOD_PAL.length]; });
+  const obBodCol = b => bodIdx[b] || "#475569";
+
+  // Con el inventario excluido aparecen ~170 ubicaciones, casi todas con unas
+  // pocas unidades. Mostrarlas todas vuelve la matriz y el listado ilegibles,
+  // así que se corta en las principales y el resto se agrupa/resume sin perderse.
+  const TOP_BOD = 12;
+  const bodTop = resumen.bodegas.slice(0, TOP_BOD);
+  const bodResto = resumen.bodegas.slice(TOP_BOD);
+  const restoU = bodResto.reduce((t, b) => t + b.u, 0);
+  const celResto = g => bodResto.reduce((t, b) => t + (resumen.cel[`${g}|${b.nombre}`] || 0), 0);
 
   return React.createElement("div", null,
     React.createElement("div", {
@@ -5146,8 +5236,8 @@ function OtrasBodegasPanel({ rows, isMobile }) {
         padding: "10px 14px", marginBottom: 14, fontSize: 11, color: C.t2, lineHeight: 1.6
       }
     },
-      React.createElement("b", { style: { color: C.yellow } }, "Fuera del rack. "),
-      "Estas unidades no están en las 4 calles: no cuentan como piso ni altura y no entran en reposición ni en Stock.",
+      React.createElement("b", { style: { color: C.yellow } }, "Fuera del análisis del CEDI. "),
+      "Todo lo que el tablero no cuenta: exportaciones, TECH, repuestos, maleteros, accesorios, y el casco en análisis que está fuera del rack. Nada de esto entra en piso, altura, reposición ni rupturas.",
       dudosas.length > 0 && React.createElement("span", null,
         " ", React.createElement("b", { style: { color: C.red } },
           `${dudosas.length} fila${dudosas.length > 1 ? "s" : ""} con saldo improbable`),
@@ -5157,14 +5247,14 @@ function OtrasBodegasPanel({ rows, isMobile }) {
     React.createElement("div", {
       style: { display: "grid", gridTemplateColumns: isMobile ? "repeat(2,1fr)" : "repeat(4,1fr)", gap: 9, marginBottom: 14 }
     },
-      card("Bodegas", resumen.bodegas.length, C.accent, "ubicaciones distintas"),
-      card("Familias", resumen.familias.length, C.teal, "líneas almacenadas"),
-      card("Unidades", resumen.total.toLocaleString(), C.green, "total fuera del rack"),
+      card("Unidades", resumen.total.toLocaleString(), C.green, "fuera del análisis"),
+      card("Grupos", resumen.grupos.length, C.accent, "categorías de producto"),
+      card("Bodegas", resumen.bodegas.length, C.teal, "ubicaciones distintas"),
       card("Referencias", new Set(limpias.map(r => r.ref)).size.toLocaleString(), C.purple, "SKUs distintos")
     ),
 
-    React.createElement("div", { style: { display: "flex", gap: 4, marginBottom: 14 } },
-      [["resumen", "▦ Resumen por bodega"], ["matriz", "⊞ Familia × Bodega"], ["detalle", "☰ Detalle"]].map(([k, l]) =>
+    React.createElement("div", { style: { display: "flex", gap: 4, marginBottom: 14, flexWrap: "wrap" } },
+      [["grupos", "▦ Por grupo"], ["bodegas", "🏬 Por bodega"], ["matriz", "⊞ Grupo × Bodega"], ["detalle", "☰ Detalle"]].map(([k, l]) =>
         React.createElement("button", {
           key: k,
           onClick: () => setVista(k),
@@ -5177,12 +5267,58 @@ function OtrasBodegasPanel({ rows, isMobile }) {
       )
     ),
 
-    // ── VISTA 1: tarjetas por bodega con composición ──
-    vista === "resumen" && React.createElement("div", {
+    // ── VISTA 1: por grupo de producto ──
+    vista === "grupos" && React.createElement("div", {
       style: { display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(2,1fr)", gap: 12 }
     },
-      resumen.bodegas.map(b => {
-        const tops = Object.entries(b.fams).sort((x, y) => y[1] - x[1]);
+      resumen.grupos.map(g => React.createElement("div", {
+        key: g.nombre,
+        style: { background: C.bg2, border: `1px solid ${C.b0}`, borderRadius: 12, padding: "14px 16px", borderLeft: `3px solid ${obGrupoCol(g.nombre)}` }
+      },
+        React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 } },
+          React.createElement("span", { style: { fontSize: 13, fontWeight: 700, color: obGrupoCol(g.nombre) } }, g.nombre),
+          React.createElement("span", {
+            style: { fontFamily: "'JetBrains Mono',monospace", fontSize: 15, fontWeight: 800, color: C.t1 }
+          }, g.u.toLocaleString(), React.createElement("span", { style: { fontSize: 10, color: C.t4, marginLeft: 3 } }, "u"))
+        ),
+        React.createElement("div", { style: { fontSize: 10, color: C.t4, marginTop: 2 } },
+          `${g.refs.size.toLocaleString()} referencias · ${Math.round(g.u / resumen.total * 100)}% del total · ${g.rack.toLocaleString()} u en rack / ${g.fuera.toLocaleString()} u fuera`),
+        barra(g.bods, g.u, obBodCol),
+        React.createElement("div", { style: { display: "flex", flexWrap: "wrap", gap: 6, marginTop: 10 } },
+          Object.entries(g.bods).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([b, u]) =>
+            React.createElement("button", {
+              key: b,
+              onClick: () => { setGrupo(g.nombre); setBodega(b); setVista("detalle"); },
+              title: "Ver el detalle de este grupo en esta bodega",
+              style: {
+                display: "flex", alignItems: "center", gap: 5, background: C.bg3,
+                border: `1px solid ${C.b0}`, borderRadius: 6, padding: "3px 8px",
+                cursor: "pointer", fontFamily: "inherit"
+              }
+            },
+              React.createElement("span", { style: { width: 8, height: 8, borderRadius: 2, background: obBodCol(b), flexShrink: 0 } }),
+              React.createElement("span", { style: { fontSize: 10, fontWeight: 700, color: C.t2 } }, b),
+              React.createElement("span", { style: { fontSize: 10, color: C.t4, fontFamily: "'JetBrains Mono',monospace" } }, u.toLocaleString())
+            )
+          )
+        )
+      ))
+    ),
+
+    // ── VISTA 2: por bodega ──
+    vista === "bodegas" && React.createElement("div", null,
+      bodResto.length > 0 && React.createElement("div", {
+        style: { fontSize: 11, color: C.t4, marginBottom: 10 }
+      }, `Mostrando las ${TOP_BOD} bodegas mayores. Las otras ${bodResto.length} suman ${restoU.toLocaleString()} u — búscalas en el Detalle.`),
+      React.createElement("div", {
+      style: { display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(2,1fr)", gap: 12 }
+    },
+      bodTop.map(b => {
+        const comp = {};
+        for (const g of resumen.grupos) {
+          const v = resumen.cel[`${g.nombre}|${b.nombre}`] || 0;
+          if (v > 0) comp[g.nombre] = v;
+        }
         return React.createElement("div", {
           key: b.nombre,
           style: { background: C.bg2, border: `1px solid ${C.b0}`, borderRadius: 12, padding: "14px 16px" }
@@ -5196,69 +5332,76 @@ function OtrasBodegasPanel({ rows, isMobile }) {
             }, b.u.toLocaleString(), React.createElement("span", { style: { fontSize: 10, color: C.t4, marginLeft: 3 } }, "u"))
           ),
           React.createElement("div", { style: { fontSize: 10, color: C.t4, marginTop: 2 } },
-            `${b.refs.size} referencias · ${Object.keys(b.fams).length} familias · ${Math.round(b.u / resumen.total * 100)}% del total`),
-          barra(b.fams, b.u),
+            `${b.refs.size.toLocaleString()} referencias · ${Object.keys(comp).length} grupos · ${Math.round(b.u / resumen.total * 100)}% del total`),
+          barra(comp, b.u, obGrupoCol),
           React.createElement("div", { style: { display: "flex", flexWrap: "wrap", gap: 6, marginTop: 10 } },
-            tops.map(([f, u]) => React.createElement("button", {
-              key: f,
-              onClick: () => { setFam(f); setBodega(b.nombre); setVista("detalle"); },
-              title: "Ver el detalle de esta familia en esta bodega",
-              style: {
-                display: "flex", alignItems: "center", gap: 5, background: C.bg3,
-                border: `1px solid ${C.b0}`, borderRadius: 6, padding: "3px 8px",
-                cursor: "pointer", fontFamily: "inherit"
-              }
-            },
-              React.createElement("span", { style: { width: 8, height: 8, borderRadius: 2, background: obColor(f), flexShrink: 0 } }),
-              React.createElement("span", { style: { fontSize: 10, fontWeight: 700, color: C.t2 } }, f),
-              React.createElement("span", { style: { fontSize: 10, color: C.t4, fontFamily: "'JetBrains Mono',monospace" } }, u.toLocaleString())
-            ))
+            Object.entries(comp).sort((x, y) => y[1] - x[1]).map(([g, u]) =>
+              React.createElement("button", {
+                key: g,
+                onClick: () => { setGrupo(g); setBodega(b.nombre); setVista("detalle"); },
+                style: {
+                  display: "flex", alignItems: "center", gap: 5, background: C.bg3,
+                  border: `1px solid ${C.b0}`, borderRadius: 6, padding: "3px 8px",
+                  cursor: "pointer", fontFamily: "inherit"
+                }
+              },
+                React.createElement("span", { style: { width: 8, height: 8, borderRadius: 2, background: obGrupoCol(g), flexShrink: 0 } }),
+                React.createElement("span", { style: { fontSize: 10, fontWeight: 700, color: C.t2 } }, g),
+                React.createElement("span", { style: { fontSize: 10, color: C.t4, fontFamily: "'JetBrains Mono',monospace" } }, u.toLocaleString())
+              )
+            )
           )
         );
       })
-    ),
+    )),
 
-    // ── VISTA 2: matriz familia × bodega ──
+    // ── VISTA 3: matriz grupo × bodega ──
     vista === "matriz" && React.createElement("div", {
       style: { background: C.bg2, border: `1px solid ${C.b0}`, borderRadius: 12, overflow: "hidden" }
     },
       React.createElement("div", { style: SCROLL_BOX },
-        React.createElement("table", { style: { width: "100%", borderCollapse: "collapse", minWidth: 640 } },
+        React.createElement("table", { style: { width: "100%", borderCollapse: "collapse", minWidth: 760 } },
           React.createElement("thead", null,
             React.createElement("tr", null,
-              React.createElement(TH, null, "Familia"),
-              resumen.bodegas.map(b => React.createElement(TH, { key: b.nombre, right: true }, b.nombre)),
+              React.createElement(TH, null, "Grupo"),
+              bodTop.map(b => React.createElement(TH, { key: b.nombre, right: true }, b.nombre)),
+              bodResto.length > 0 && React.createElement(TH, { right: true }, `Otras (${bodResto.length})`),
               React.createElement(TH, { right: true }, "Total")
             )
           ),
           React.createElement("tbody", null,
-            resumen.familias.map(f => React.createElement("tr", {
-              key: f.nombre,
+            resumen.grupos.map(g => React.createElement("tr", {
+              key: g.nombre,
               style: { borderTop: `1px solid ${C.bg3}` }
             },
               React.createElement(TD, null,
                 React.createElement("span", { style: { display: "inline-flex", alignItems: "center", gap: 7 } },
-                  React.createElement("span", { style: { width: 9, height: 9, borderRadius: 2, background: obColor(f.nombre) } }),
-                  React.createElement("span", { style: { fontWeight: 700, color: C.t1, fontSize: 12 } }, f.nombre)
+                  React.createElement("span", { style: { width: 9, height: 9, borderRadius: 2, background: obGrupoCol(g.nombre) } }),
+                  React.createElement("span", { style: { fontWeight: 700, color: C.t1, fontSize: 11 } }, g.nombre)
                 )
               ),
-              resumen.bodegas.map(b => {
-                const v = resumen.cel[`${f.nombre}|${b.nombre}`] || 0;
+              bodTop.map(b => {
+                const v = resumen.cel[`${g.nombre}|${b.nombre}`] || 0;
                 return React.createElement(TD, {
                   key: b.nombre, right: true, mono: true, fs: 11,
                   c: v > 0 ? C.t1 : C.t4,
-                  style: v > 0 ? { background: `${obColor(f.nombre)}${v / f.u > 0.5 ? "26" : "12"}` } : {}
+                  style: v > 0 ? { background: `${obGrupoCol(g.nombre)}${v / g.u > 0.5 ? "26" : "12"}` } : {}
                 }, v > 0 ? v.toLocaleString() : "·");
               }),
-              React.createElement(TD, { right: true, mono: true, fw: 700, c: C.green }, f.u.toLocaleString())
+              bodResto.length > 0 && (() => {
+                const v = celResto(g.nombre);
+                return React.createElement(TD, { right: true, mono: true, fs: 11, c: v > 0 ? C.t3 : C.t4 }, v > 0 ? v.toLocaleString() : "·");
+              })(),
+              React.createElement(TD, { right: true, mono: true, fw: 700, c: C.green }, g.u.toLocaleString())
             ))
           ),
           React.createElement("tfoot", null,
             React.createElement("tr", { style: { borderTop: `2px solid ${C.b1}` } },
               React.createElement(TD, { fw: 700, c: C.t3, fs: 11 }, "TOTAL"),
-              resumen.bodegas.map(b => React.createElement(TD, {
+              bodTop.map(b => React.createElement(TD, {
                 key: b.nombre, right: true, mono: true, fw: 700, c: C.accent, fs: 11
               }, b.u.toLocaleString())),
+              bodResto.length > 0 && React.createElement(TD, { right: true, mono: true, fw: 700, c: C.t3, fs: 11 }, restoU.toLocaleString()),
               React.createElement(TD, { right: true, mono: true, fw: 800, c: C.green }, resumen.total.toLocaleString())
             )
           )
@@ -5266,7 +5409,7 @@ function OtrasBodegasPanel({ rows, isMobile }) {
       )
     ),
 
-    // ── VISTA 3: detalle fila por fila ──
+    // ── VISTA 4: detalle ──
     vista === "detalle" && React.createElement("div", null,
       React.createElement("div", {
         style: { display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 12 }
@@ -5278,9 +5421,20 @@ function OtrasBodegasPanel({ rows, isMobile }) {
           style: {
             background: C.bg2, border: `1px solid ${C.b0}`, color: C.t1, borderRadius: 8,
             padding: "8px 12px", fontSize: 12, fontFamily: "inherit",
-            minWidth: isMobile ? "100%" : 240, flex: isMobile ? "1 1 100%" : "0 1 auto"
+            minWidth: isMobile ? "100%" : 230, flex: isMobile ? "1 1 100%" : "0 1 auto"
           }
         }),
+        React.createElement("select", {
+          value: grupo,
+          onChange: e => setGrupo(e.target.value),
+          style: {
+            background: C.bg2, border: `1px solid ${C.b0}`, color: C.t1, borderRadius: 8,
+            padding: "8px 10px", fontSize: 11, fontFamily: "inherit", cursor: "pointer"
+          }
+        },
+          React.createElement("option", { value: "todos" }, `Todos los grupos (${resumen.grupos.length})`),
+          resumen.grupos.map(g => React.createElement("option", { key: g.nombre, value: g.nombre }, `${g.nombre} — ${g.u.toLocaleString()} u`))
+        ),
         React.createElement("select", {
           value: bodega,
           onChange: e => setBodega(e.target.value),
@@ -5292,19 +5446,8 @@ function OtrasBodegasPanel({ rows, isMobile }) {
           React.createElement("option", { value: "todas" }, `Todas las bodegas (${resumen.bodegas.length})`),
           resumen.bodegas.map(b => React.createElement("option", { key: b.nombre, value: b.nombre }, `${b.nombre} — ${b.u.toLocaleString()} u`))
         ),
-        React.createElement("select", {
-          value: fam,
-          onChange: e => setFam(e.target.value),
-          style: {
-            background: C.bg2, border: `1px solid ${C.b0}`, color: C.t1, borderRadius: 8,
-            padding: "8px 10px", fontSize: 11, fontFamily: "inherit", cursor: "pointer"
-          }
-        },
-          React.createElement("option", { value: "todas" }, `Todas las familias (${resumen.familias.length})`),
-          resumen.familias.map(f => React.createElement("option", { key: f.nombre, value: f.nombre }, `Familia ${f.nombre} — ${f.u.toLocaleString()} u`))
-        ),
         React.createElement("div", { style: { display: "flex", gap: 4 } },
-          [["saldo", "Saldo"], ["familia", "Familia"], ["bodega", "Bodega"], ["ref", "Ref."]].map(([k, l]) =>
+          [["saldo", "Saldo"], ["grupo", "Grupo"], ["bodega", "Bodega"], ["ref", "Ref."]].map(([k, l]) =>
             React.createElement("button", {
               key: k,
               onClick: () => setOrden(k),
@@ -5316,15 +5459,15 @@ function OtrasBodegasPanel({ rows, isMobile }) {
             }, l)
           )
         ),
-        (bodega !== "todas" || fam !== "todas" || busca) && React.createElement("button", {
-          onClick: () => { setBodega("todas"); setFam("todas"); setBusca(""); },
+        (grupo !== "todos" || bodega !== "todas" || busca) && React.createElement("button", {
+          onClick: () => { setGrupo("todos"); setBodega("todas"); setBusca(""); },
           style: {
             padding: "7px 11px", borderRadius: 7, fontSize: 10, fontWeight: 700, cursor: "pointer",
             fontFamily: "inherit", background: "transparent", color: C.t3, border: `1px solid ${C.b0}`
           }
         }, "✕ Limpiar"),
         React.createElement("button", {
-          onClick: () => exportarOtrasBodegas(filt, [bodega !== "todas" ? bodega : "", fam !== "todas" ? fam : ""].filter(Boolean).join("_")),
+          onClick: () => exportarOtrasBodegas(filt, [grupo !== "todos" ? grupo : "", bodega !== "todas" ? bodega : ""].filter(Boolean).join("_")),
           style: {
             padding: "7px 12px", borderRadius: 7, background: C.green, border: "none",
             color: C.bg0, fontWeight: 700, fontSize: 10, cursor: "pointer", fontFamily: "inherit"
@@ -5340,15 +5483,14 @@ function OtrasBodegasPanel({ rows, isMobile }) {
         style: { background: C.bg2, border: `1px solid ${C.b0}`, borderRadius: 12, overflow: "hidden" }
       },
         React.createElement("div", { style: SCROLL_BOX },
-          React.createElement("table", { style: { width: "100%", borderCollapse: "collapse", minWidth: 680 } },
+          React.createElement("table", { style: { width: "100%", borderCollapse: "collapse", minWidth: 760 } },
             React.createElement("thead", null,
               React.createElement("tr", null,
                 React.createElement(TH, null, "#"),
+                React.createElement(TH, null, "Grupo"),
                 React.createElement(TH, null, "Bodega"),
-                React.createElement(TH, null, "Fam."),
                 React.createElement(TH, null, "Ref."),
                 React.createElement(TH, null, "Descripción"),
-                React.createElement(TH, null, "Caja"),
                 React.createElement(TH, { right: true }, "Saldo")
               )
             ),
@@ -5358,25 +5500,21 @@ function OtrasBodegasPanel({ rows, isMobile }) {
                 style: { borderTop: `1px solid ${C.bg3}`, background: r.dudoso ? `${C.red}0e` : "transparent" }
               },
                 React.createElement(TD, { c: C.t4, fs: 10 }, i + 1),
-                React.createElement(TD, { mono: true, c: C.accent, fs: 11, fw: 700 }, r.bod),
                 React.createElement(TD, null,
                   React.createElement("span", {
-                    style: {
-                      display: "inline-flex", alignItems: "center", gap: 5, fontSize: 10,
-                      fontWeight: 700, color: C.t2
-                    }
+                    style: { display: "inline-flex", alignItems: "center", gap: 5, fontSize: 10, fontWeight: 700, color: C.t2 }
                   },
-                    React.createElement("span", { style: { width: 8, height: 8, borderRadius: 2, background: obColor(r.fam) } }),
-                    r.fam
+                    React.createElement("span", { style: { width: 8, height: 8, borderRadius: 2, background: obGrupoCol(r.grupo), flexShrink: 0 } }),
+                    r.grupo
                   )
                 ),
+                React.createElement(TD, { mono: true, c: C.accent, fs: 11, fw: 700 }, r.bod),
                 React.createElement(TD, { mono: true, c: C.teal, fw: 700 }, r.ref),
                 React.createElement(TD, { style: { maxWidth: 280 } },
                   React.createElement("div", {
                     style: { whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", color: C.t2, fontSize: 11 }
                   }, r.desc)
                 ),
-                React.createElement(TD, { mono: true, c: C.t4, fs: 10 }, r.cajap || "—"),
                 React.createElement(TD, { right: true, mono: true, c: r.dudoso ? C.red : C.green, fw: 700 },
                   r.dudoso
                     ? React.createElement("span", { title: "Saldo improbable — revisar en el WMS" }, "⚠ ", r.saldo.toLocaleString())
