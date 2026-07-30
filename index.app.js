@@ -5031,49 +5031,85 @@ async function exportarOtrasBodegas(filas, filtroTag = "") {
  * no cuentan como piso ni como altura, no entran en reposición y no aparecen
  * en Stock. Esta pestaña las hace visibles con filtro por bodega y referencia.
  * ──────────────────────────────────────────────────────────────────────────── */
+/* ────────────────────────────────────────────────────────────────────────────
+ * OtrasBodegasPanel — inventario que NO está en el rack de las 4 calles.
+ *
+ * Estas ubicaciones (Recibo, Magic, Promical, Nac…) existen en el export del
+ * WMS pero el resto del dashboard las ignora: no cuentan como piso ni altura y
+ * no entran en reposición. Aquí se ven agrupadas por familia y por bodega.
+ * ──────────────────────────────────────────────────────────────────────────── */
+// Un saldo absurdo en una sola fila es error de digitación del WMS (se detectó
+// una referencia con 115 millones de unidades en Recibo). Se saca de los
+// agregados —si no, una sola fila aplasta la escala de todo el gráfico— pero
+// NO se oculta: se cuenta aparte y se puede ver en el detalle.
+const OB_SOSPECHOSO = 100000;
+
+const OB_FAM_COL = {
+  "501": "#38bdf8", "3110": "#2dd4bf", "3120": "#a78bfa", "102": "#f59e0b",
+  "503": "#10b981", "101": "#f97316", "3130": "#ec4899", "505": "#8b5cf6",
+  "451": "#eab308", "520": "#14b8a6", "T-10": "#64748b", "OTRO": "#475569"
+};
+const obColor = f => OB_FAM_COL[f] || "#475569";
+
 function OtrasBodegasPanel({ rows, isMobile }) {
+  const [vista, setVista] = useState("resumen");
   const [bodega, setBodega] = useState("todas");
+  const [fam, setFam] = useState("todas");
   const [busca, setBusca] = useState("");
   const [orden, setOrden] = useState("saldo");
 
-  // Nombres distintos que en realidad son la misma bodega ("Recibo"/"RECIBO"/
-  // "recibo" llegan así desde el WMS). Se agrupan por nombre normalizado para
-  // no partir una misma bodega en tres filas del filtro.
+  // El WMS escribe la misma bodega de varias formas ("Recibo"/"RECIBO"/"recibo").
+  // Se normaliza para no partir una bodega en tres.
   const norm = u => String(u || "").trim().toUpperCase();
 
-  const bodegas = useMemo(() => {
-    const m = {};
-    for (const r of rows) {
-      const k = norm(r.ubi);
-      if (!m[k]) m[k] = { key: k, nombre: k, filas: 0, unidades: 0, refs: new Set() };
-      m[k].filas++;
-      m[k].unidades += r.saldo;
-      m[k].refs.add(r.ref);
+  // Filas enriquecidas con familia y marca de saldo dudoso, una sola vez.
+  const enrich = useMemo(() => rows.map(r => ({
+    ...r,
+    bod: norm(r.ubi),
+    fam: familia(r.desc),
+    dudoso: r.saldo >= OB_SOSPECHOSO
+  })), [rows]);
+
+  const limpias = useMemo(() => enrich.filter(r => !r.dudoso), [enrich]);
+  const dudosas = useMemo(() => enrich.filter(r => r.dudoso), [enrich]);
+
+  // Matriz familia × bodega (solo con filas limpias)
+  const resumen = useMemo(() => {
+    const bod = {}, fam = {}, cel = {};
+    for (const r of limpias) {
+      if (!bod[r.bod]) bod[r.bod] = { nombre: r.bod, u: 0, refs: new Set(), fams: {} };
+      bod[r.bod].u += r.saldo;
+      bod[r.bod].refs.add(r.ref);
+      bod[r.bod].fams[r.fam] = (bod[r.bod].fams[r.fam] || 0) + r.saldo;
+      if (!fam[r.fam]) fam[r.fam] = { nombre: r.fam, u: 0, refs: new Set() };
+      fam[r.fam].u += r.saldo;
+      fam[r.fam].refs.add(r.ref);
+      cel[`${r.fam}|${r.bod}`] = (cel[`${r.fam}|${r.bod}`] || 0) + r.saldo;
     }
-    return Object.values(m).sort((a, b) => b.unidades - a.unidades);
-  }, [rows]);
+    return {
+      bodegas: Object.values(bod).sort((a, b) => b.u - a.u),
+      familias: Object.values(fam).sort((a, b) => b.u - a.u),
+      cel,
+      total: Object.values(fam).reduce((t, f) => t + f.u, 0)
+    };
+  }, [limpias]);
 
   const filt = useMemo(() => {
-    let arr = rows;
-    if (bodega !== "todas") arr = arr.filter(r => norm(r.ubi) === bodega);
+    let arr = enrich;
+    if (bodega !== "todas") arr = arr.filter(r => r.bod === bodega);
+    if (fam !== "todas") arr = arr.filter(r => r.fam === fam);
     const q = busca.trim().toLowerCase();
     if (q) arr = arr.filter(r => String(r.ref).toLowerCase().includes(q) || String(r.desc).toLowerCase().includes(q));
     arr = [...arr];
     if (orden === "saldo") arr.sort((a, b) => b.saldo - a.saldo);
     else if (orden === "ref") arr.sort((a, b) => (+a.ref || 0) - (+b.ref || 0));
-    else if (orden === "bodega") arr.sort((a, b) => norm(a.ubi).localeCompare(norm(b.ubi)) || b.saldo - a.saldo);
+    else if (orden === "bodega") arr.sort((a, b) => a.bod.localeCompare(b.bod) || b.saldo - a.saldo);
+    else if (orden === "familia") arr.sort((a, b) => a.fam.localeCompare(b.fam) || b.saldo - a.saldo);
     return arr;
-  }, [rows, bodega, busca, orden]);
+  }, [enrich, bodega, fam, busca, orden]);
 
-  const totU = filt.reduce((t, r) => t + r.saldo, 0);
+  const totU = filt.filter(r => !r.dudoso).reduce((t, r) => t + r.saldo, 0);
   const totRef = new Set(filt.map(r => r.ref)).size;
-
-  // Un saldo absurdamente alto es error de digitación del WMS, no stock real
-  // (se detectó una referencia con 115 millones de unidades en "Recibo").
-  // Se marca en la fila en vez de ocultarla: el dato es del WMS y hay que verlo
-  // para poder corregirlo allá.
-  const SOSPECHOSO = 100000;
-  const nSosp = filt.filter(r => r.saldo >= SOSPECHOSO).length;
 
   const card = (label, valor, color, sub) => React.createElement("div", {
     style: {
@@ -5090,8 +5126,20 @@ function OtrasBodegasPanel({ rows, isMobile }) {
     React.createElement("div", { style: { fontSize: 10, color: C.t4 } }, sub)
   );
 
+  // Barra apilada de composición por familia dentro de una bodega
+  const barra = (fams, total) => React.createElement("div", {
+    style: { display: "flex", height: 8, borderRadius: 4, overflow: "hidden", background: C.bg3, marginTop: 8 }
+  },
+    Object.entries(fams).sort((a, b) => b[1] - a[1]).map(([f, u]) =>
+      React.createElement("div", {
+        key: f,
+        title: `${f}: ${u.toLocaleString()} u (${Math.round(u / total * 100)}%)`,
+        style: { width: `${u / total * 100}%`, background: obColor(f) }
+      })
+    )
+  );
+
   return React.createElement("div", null,
-    // ── Aviso de contexto ──
     React.createElement("div", {
       style: {
         background: `${C.yellow}12`, border: `1px solid ${C.yellow}40`, borderRadius: 10,
@@ -5099,134 +5147,252 @@ function OtrasBodegasPanel({ rows, isMobile }) {
       }
     },
       React.createElement("b", { style: { color: C.yellow } }, "Fuera del rack. "),
-      "Estas unidades no están en las 4 calles, así que NO cuentan como piso ni altura y no entran en reposición ni en Stock. Se listan aquí para que no queden invisibles."
+      "Estas unidades no están en las 4 calles: no cuentan como piso ni altura y no entran en reposición ni en Stock.",
+      dudosas.length > 0 && React.createElement("span", null,
+        " ", React.createElement("b", { style: { color: C.red } },
+          `${dudosas.length} fila${dudosas.length > 1 ? "s" : ""} con saldo improbable`),
+        " (≥ ", OB_SOSPECHOSO.toLocaleString(), " u) queda fuera de los totales por ser error de digitación del WMS; se ve en el Detalle.")
     ),
 
-    // ── Tarjetas resumen ──
     React.createElement("div", {
       style: { display: "grid", gridTemplateColumns: isMobile ? "repeat(2,1fr)" : "repeat(4,1fr)", gap: 9, marginBottom: 14 }
     },
-      card("Bodegas", bodegas.length, C.accent, "ubicaciones distintas"),
-      card("Referencias", totRef.toLocaleString(), C.teal, "SKUs en la vista"),
-      card("Unidades", totU.toLocaleString(), C.green, "suma de saldos"),
-      card("Saldos dudosos", nSosp, nSosp > 0 ? C.red : C.t4, `≥ ${SOSPECHOSO.toLocaleString()} u por fila`)
+      card("Bodegas", resumen.bodegas.length, C.accent, "ubicaciones distintas"),
+      card("Familias", resumen.familias.length, C.teal, "líneas almacenadas"),
+      card("Unidades", resumen.total.toLocaleString(), C.green, "total fuera del rack"),
+      card("Referencias", new Set(limpias.map(r => r.ref)).size.toLocaleString(), C.purple, "SKUs distintos")
     ),
 
-    // ── Controles ──
-    React.createElement("div", {
-      style: { display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 12 }
+    React.createElement("div", { style: { display: "flex", gap: 4, marginBottom: 14 } },
+      [["resumen", "▦ Resumen por bodega"], ["matriz", "⊞ Familia × Bodega"], ["detalle", "☰ Detalle"]].map(([k, l]) =>
+        React.createElement("button", {
+          key: k,
+          onClick: () => setVista(k),
+          style: {
+            padding: "8px 14px", borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: "pointer",
+            fontFamily: "inherit", background: vista === k ? C.accent : C.bg2,
+            color: vista === k ? C.bg0 : C.t3, border: `1px solid ${vista === k ? C.accent : C.b0}`
+          }
+        }, l)
+      )
+    ),
+
+    // ── VISTA 1: tarjetas por bodega con composición ──
+    vista === "resumen" && React.createElement("div", {
+      style: { display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(2,1fr)", gap: 12 }
     },
-      React.createElement("input", {
-        value: busca,
-        onChange: e => setBusca(e.target.value),
-        placeholder: "Buscar referencia o descripción...",
-        style: {
-          background: C.bg2, border: `1px solid ${C.b0}`, color: C.t1, borderRadius: 8,
-          padding: "8px 12px", fontSize: 12, fontFamily: "inherit", minWidth: isMobile ? "100%" : 260, flex: isMobile ? "1 1 100%" : "0 1 auto"
-        }
-      }),
-      React.createElement("select", {
-        value: bodega,
-        onChange: e => setBodega(e.target.value),
-        style: {
-          background: C.bg2, border: `1px solid ${C.b0}`, color: C.t1, borderRadius: 8,
-          padding: "8px 10px", fontSize: 11, fontFamily: "inherit", cursor: "pointer"
-        }
-      },
-        React.createElement("option", { value: "todas" }, `Todas las bodegas (${bodegas.length})`),
-        bodegas.map(b => React.createElement("option", { key: b.key, value: b.key }, `${b.nombre} — ${b.unidades.toLocaleString()} u`))
-      ),
-      React.createElement("div", { style: { display: "flex", gap: 4 } },
-        [["saldo", "Mayor saldo"], ["ref", "Referencia"], ["bodega", "Bodega"]].map(([k, l]) =>
-          React.createElement("button", {
-            key: k,
-            onClick: () => setOrden(k),
-            style: {
-              padding: "7px 11px", borderRadius: 7, fontSize: 10, fontWeight: 700, cursor: "pointer",
-              fontFamily: "inherit", background: orden === k ? C.accent : C.bg3,
-              color: orden === k ? C.bg0 : C.t3, border: `1px solid ${orden === k ? C.accent : C.b0}`
-            }
-          }, l)
-        )
-      ),
-      React.createElement("button", {
-        onClick: () => exportarOtrasBodegas(filt, bodega === "todas" ? "" : bodega),
-        style: {
-          padding: "7px 12px", borderRadius: 7, background: C.green, border: "none",
-          color: C.bg0, fontWeight: 700, fontSize: 10, cursor: "pointer", fontFamily: "inherit"
-        }
-      }, "📥 Excel")
+      resumen.bodegas.map(b => {
+        const tops = Object.entries(b.fams).sort((x, y) => y[1] - x[1]);
+        return React.createElement("div", {
+          key: b.nombre,
+          style: { background: C.bg2, border: `1px solid ${C.b0}`, borderRadius: 12, padding: "14px 16px" }
+        },
+          React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 } },
+            React.createElement("span", {
+              style: { fontFamily: "'JetBrains Mono',monospace", fontSize: 13, fontWeight: 700, color: C.accent }
+            }, b.nombre),
+            React.createElement("span", {
+              style: { fontFamily: "'JetBrains Mono',monospace", fontSize: 15, fontWeight: 800, color: C.t1 }
+            }, b.u.toLocaleString(), React.createElement("span", { style: { fontSize: 10, color: C.t4, marginLeft: 3 } }, "u"))
+          ),
+          React.createElement("div", { style: { fontSize: 10, color: C.t4, marginTop: 2 } },
+            `${b.refs.size} referencias · ${Object.keys(b.fams).length} familias · ${Math.round(b.u / resumen.total * 100)}% del total`),
+          barra(b.fams, b.u),
+          React.createElement("div", { style: { display: "flex", flexWrap: "wrap", gap: 6, marginTop: 10 } },
+            tops.map(([f, u]) => React.createElement("button", {
+              key: f,
+              onClick: () => { setFam(f); setBodega(b.nombre); setVista("detalle"); },
+              title: "Ver el detalle de esta familia en esta bodega",
+              style: {
+                display: "flex", alignItems: "center", gap: 5, background: C.bg3,
+                border: `1px solid ${C.b0}`, borderRadius: 6, padding: "3px 8px",
+                cursor: "pointer", fontFamily: "inherit"
+              }
+            },
+              React.createElement("span", { style: { width: 8, height: 8, borderRadius: 2, background: obColor(f), flexShrink: 0 } }),
+              React.createElement("span", { style: { fontSize: 10, fontWeight: 700, color: C.t2 } }, f),
+              React.createElement("span", { style: { fontSize: 10, color: C.t4, fontFamily: "'JetBrains Mono',monospace" } }, u.toLocaleString())
+            ))
+          )
+        );
+      })
     ),
 
-    // ── Resumen por bodega ──
-    React.createElement("div", {
-      style: { display: "flex", gap: 7, flexWrap: "wrap", marginBottom: 14 }
-    },
-      bodegas.map(b => React.createElement("button", {
-        key: b.key,
-        onClick: () => setBodega(bodega === b.key ? "todas" : b.key),
-        style: {
-          background: bodega === b.key ? `${C.accent}22` : C.bg2,
-          border: `1px solid ${bodega === b.key ? C.accent : C.b0}`,
-          borderRadius: 8, padding: "7px 11px", cursor: "pointer", fontFamily: "inherit", textAlign: "left"
-        }
-      },
-        React.createElement("div", {
-          style: { fontSize: 11, fontWeight: 700, color: bodega === b.key ? C.accent : C.t1, fontFamily: "'JetBrains Mono',monospace" }
-        }, b.nombre),
-        React.createElement("div", { style: { fontSize: 9, color: C.t4, marginTop: 2 } },
-          `${b.unidades.toLocaleString()} u · ${b.refs.size} refs`)
-      ))
-    ),
-
-    // ── Tabla ──
-    React.createElement("div", {
+    // ── VISTA 2: matriz familia × bodega ──
+    vista === "matriz" && React.createElement("div", {
       style: { background: C.bg2, border: `1px solid ${C.b0}`, borderRadius: 12, overflow: "hidden" }
     },
       React.createElement("div", { style: SCROLL_BOX },
-        React.createElement("table", { style: { width: "100%", borderCollapse: "collapse", minWidth: 620 } },
+        React.createElement("table", { style: { width: "100%", borderCollapse: "collapse", minWidth: 640 } },
           React.createElement("thead", null,
             React.createElement("tr", null,
-              React.createElement(TH, null, "#"),
-              React.createElement(TH, null, "Bodega"),
-              React.createElement(TH, null, "Ref."),
-              React.createElement(TH, null, "Descripción"),
-              React.createElement(TH, null, "Caja"),
-              React.createElement(TH, { right: true }, "Saldo")
+              React.createElement(TH, null, "Familia"),
+              resumen.bodegas.map(b => React.createElement(TH, { key: b.nombre, right: true }, b.nombre)),
+              React.createElement(TH, { right: true }, "Total")
             )
           ),
           React.createElement("tbody", null,
-            filt.slice(0, 400).map((r, i) => {
-              const sosp = r.saldo >= SOSPECHOSO;
-              return React.createElement("tr", {
-                key: `${r.ubi}|${r.ref}|${r.cajap}|${i}`,
-                style: { borderTop: `1px solid ${C.bg3}`, background: sosp ? `${C.red}0e` : "transparent" }
+            resumen.familias.map(f => React.createElement("tr", {
+              key: f.nombre,
+              style: { borderTop: `1px solid ${C.bg3}` }
+            },
+              React.createElement(TD, null,
+                React.createElement("span", { style: { display: "inline-flex", alignItems: "center", gap: 7 } },
+                  React.createElement("span", { style: { width: 9, height: 9, borderRadius: 2, background: obColor(f.nombre) } }),
+                  React.createElement("span", { style: { fontWeight: 700, color: C.t1, fontSize: 12 } }, f.nombre)
+                )
+              ),
+              resumen.bodegas.map(b => {
+                const v = resumen.cel[`${f.nombre}|${b.nombre}`] || 0;
+                return React.createElement(TD, {
+                  key: b.nombre, right: true, mono: true, fs: 11,
+                  c: v > 0 ? C.t1 : C.t4,
+                  style: v > 0 ? { background: `${obColor(f.nombre)}${v / f.u > 0.5 ? "26" : "12"}` } : {}
+                }, v > 0 ? v.toLocaleString() : "·");
+              }),
+              React.createElement(TD, { right: true, mono: true, fw: 700, c: C.green }, f.u.toLocaleString())
+            ))
+          ),
+          React.createElement("tfoot", null,
+            React.createElement("tr", { style: { borderTop: `2px solid ${C.b1}` } },
+              React.createElement(TD, { fw: 700, c: C.t3, fs: 11 }, "TOTAL"),
+              resumen.bodegas.map(b => React.createElement(TD, {
+                key: b.nombre, right: true, mono: true, fw: 700, c: C.accent, fs: 11
+              }, b.u.toLocaleString())),
+              React.createElement(TD, { right: true, mono: true, fw: 800, c: C.green }, resumen.total.toLocaleString())
+            )
+          )
+        )
+      )
+    ),
+
+    // ── VISTA 3: detalle fila por fila ──
+    vista === "detalle" && React.createElement("div", null,
+      React.createElement("div", {
+        style: { display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 12 }
+      },
+        React.createElement("input", {
+          value: busca,
+          onChange: e => setBusca(e.target.value),
+          placeholder: "Buscar referencia o descripción...",
+          style: {
+            background: C.bg2, border: `1px solid ${C.b0}`, color: C.t1, borderRadius: 8,
+            padding: "8px 12px", fontSize: 12, fontFamily: "inherit",
+            minWidth: isMobile ? "100%" : 240, flex: isMobile ? "1 1 100%" : "0 1 auto"
+          }
+        }),
+        React.createElement("select", {
+          value: bodega,
+          onChange: e => setBodega(e.target.value),
+          style: {
+            background: C.bg2, border: `1px solid ${C.b0}`, color: C.t1, borderRadius: 8,
+            padding: "8px 10px", fontSize: 11, fontFamily: "inherit", cursor: "pointer"
+          }
+        },
+          React.createElement("option", { value: "todas" }, `Todas las bodegas (${resumen.bodegas.length})`),
+          resumen.bodegas.map(b => React.createElement("option", { key: b.nombre, value: b.nombre }, `${b.nombre} — ${b.u.toLocaleString()} u`))
+        ),
+        React.createElement("select", {
+          value: fam,
+          onChange: e => setFam(e.target.value),
+          style: {
+            background: C.bg2, border: `1px solid ${C.b0}`, color: C.t1, borderRadius: 8,
+            padding: "8px 10px", fontSize: 11, fontFamily: "inherit", cursor: "pointer"
+          }
+        },
+          React.createElement("option", { value: "todas" }, `Todas las familias (${resumen.familias.length})`),
+          resumen.familias.map(f => React.createElement("option", { key: f.nombre, value: f.nombre }, `Familia ${f.nombre} — ${f.u.toLocaleString()} u`))
+        ),
+        React.createElement("div", { style: { display: "flex", gap: 4 } },
+          [["saldo", "Saldo"], ["familia", "Familia"], ["bodega", "Bodega"], ["ref", "Ref."]].map(([k, l]) =>
+            React.createElement("button", {
+              key: k,
+              onClick: () => setOrden(k),
+              style: {
+                padding: "7px 11px", borderRadius: 7, fontSize: 10, fontWeight: 700, cursor: "pointer",
+                fontFamily: "inherit", background: orden === k ? C.accent : C.bg3,
+                color: orden === k ? C.bg0 : C.t3, border: `1px solid ${orden === k ? C.accent : C.b0}`
+              }
+            }, l)
+          )
+        ),
+        (bodega !== "todas" || fam !== "todas" || busca) && React.createElement("button", {
+          onClick: () => { setBodega("todas"); setFam("todas"); setBusca(""); },
+          style: {
+            padding: "7px 11px", borderRadius: 7, fontSize: 10, fontWeight: 700, cursor: "pointer",
+            fontFamily: "inherit", background: "transparent", color: C.t3, border: `1px solid ${C.b0}`
+          }
+        }, "✕ Limpiar"),
+        React.createElement("button", {
+          onClick: () => exportarOtrasBodegas(filt, [bodega !== "todas" ? bodega : "", fam !== "todas" ? fam : ""].filter(Boolean).join("_")),
+          style: {
+            padding: "7px 12px", borderRadius: 7, background: C.green, border: "none",
+            color: C.bg0, fontWeight: 700, fontSize: 10, cursor: "pointer", fontFamily: "inherit"
+          }
+        }, "📥 Excel")
+      ),
+
+      React.createElement("div", {
+        style: { fontSize: 11, color: C.t3, marginBottom: 10 }
+      }, `${filt.length.toLocaleString()} filas · ${totRef.toLocaleString()} referencias · ${totU.toLocaleString()} u`),
+
+      React.createElement("div", {
+        style: { background: C.bg2, border: `1px solid ${C.b0}`, borderRadius: 12, overflow: "hidden" }
+      },
+        React.createElement("div", { style: SCROLL_BOX },
+          React.createElement("table", { style: { width: "100%", borderCollapse: "collapse", minWidth: 680 } },
+            React.createElement("thead", null,
+              React.createElement("tr", null,
+                React.createElement(TH, null, "#"),
+                React.createElement(TH, null, "Bodega"),
+                React.createElement(TH, null, "Fam."),
+                React.createElement(TH, null, "Ref."),
+                React.createElement(TH, null, "Descripción"),
+                React.createElement(TH, null, "Caja"),
+                React.createElement(TH, { right: true }, "Saldo")
+              )
+            ),
+            React.createElement("tbody", null,
+              filt.slice(0, 400).map((r, i) => React.createElement("tr", {
+                key: `${r.bod}|${r.ref}|${r.cajap}|${i}`,
+                style: { borderTop: `1px solid ${C.bg3}`, background: r.dudoso ? `${C.red}0e` : "transparent" }
               },
                 React.createElement(TD, { c: C.t4, fs: 10 }, i + 1),
-                React.createElement(TD, { mono: true, c: C.accent, fs: 11, fw: 700 }, norm(r.ubi)),
+                React.createElement(TD, { mono: true, c: C.accent, fs: 11, fw: 700 }, r.bod),
+                React.createElement(TD, null,
+                  React.createElement("span", {
+                    style: {
+                      display: "inline-flex", alignItems: "center", gap: 5, fontSize: 10,
+                      fontWeight: 700, color: C.t2
+                    }
+                  },
+                    React.createElement("span", { style: { width: 8, height: 8, borderRadius: 2, background: obColor(r.fam) } }),
+                    r.fam
+                  )
+                ),
                 React.createElement(TD, { mono: true, c: C.teal, fw: 700 }, r.ref),
-                React.createElement(TD, { style: { maxWidth: 300 } },
+                React.createElement(TD, { style: { maxWidth: 280 } },
                   React.createElement("div", {
                     style: { whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", color: C.t2, fontSize: 11 }
                   }, r.desc)
                 ),
                 React.createElement(TD, { mono: true, c: C.t4, fs: 10 }, r.cajap || "—"),
-                React.createElement(TD, { right: true, mono: true, c: sosp ? C.red : C.green, fw: 700 },
-                  sosp
+                React.createElement(TD, { right: true, mono: true, c: r.dudoso ? C.red : C.green, fw: 700 },
+                  r.dudoso
                     ? React.createElement("span", { title: "Saldo improbable — revisar en el WMS" }, "⚠ ", r.saldo.toLocaleString())
                     : r.saldo.toLocaleString()
                 )
-              );
-            })
+              ))
+            )
           )
-        )
-      ),
-      filt.length > 400 && React.createElement("div", {
-        style: { padding: "9px 14px", fontSize: 10, color: C.t4, borderTop: `1px solid ${C.b0}` }
-      }, `Mostrando 400 de ${filt.length.toLocaleString()} filas — usa el buscador o el filtro por bodega para acotar. El Excel descarga las ${filt.length.toLocaleString()}.`),
-      !filt.length && React.createElement("div", {
-        style: { padding: "26px 14px", fontSize: 12, color: C.t4, textAlign: "center" }
-      }, "Sin resultados con estos filtros.")
+        ),
+        filt.length > 400 && React.createElement("div", {
+          style: { padding: "9px 14px", fontSize: 10, color: C.t4, borderTop: `1px solid ${C.b0}` }
+        }, `Mostrando 400 de ${filt.length.toLocaleString()} filas — acota con los filtros. El Excel descarga las ${filt.length.toLocaleString()}.`),
+        !filt.length && React.createElement("div", {
+          style: { padding: "26px 14px", fontSize: 12, color: C.t4, textAlign: "center" }
+        }, "Sin resultados con estos filtros.")
+      )
     )
   );
 }
