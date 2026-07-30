@@ -806,9 +806,15 @@ async function processFiles(wbInv, wbFact, onStep, marcasActivas) {
     };
     return (ord[a.est] || 0) - (ord[b.est] || 0) || b.uni - a.uni;
   });
+  // Unidades de cada referencia que están FUERA del rack (Recibo, Magic, etc.).
+  // Sirve para no afirmar "sin stock en ningún lado" cuando en realidad el
+  // producto está recibido pero todavía sin ubicar en las calles.
+  const fueraMap = {};
+  for (const o of otrasBodegas) fueraMap[o.ref] = (fueraMap[o.ref] || 0) + o.saldo;
   const rupturas = items.filter(it => it.comp > 0 && it.stock === 0).map(it => ({
     ...it,
-    stock_alt: stockAltMap[it.ref] || 0
+    stock_alt: stockAltMap[it.ref] || 0,
+    stock_fuera: fueraMap[it.ref] || 0
   })).sort((a, b) => b.comp - a.comp);
   const gapsReport = items.filter(it => it.gap > 0 && it.stock > 0).map(it => ({
     ...it,
@@ -12336,11 +12342,15 @@ function CEDIDashboard() {
     style: {
       color: C.yellow
     }
-  }, rupturas.filter(r => r.stock_alt > 0).length, " tienen stock en altura → BAJAR INMEDIATAMENTE."), rupturas.filter(r => r.stock_alt === 0).length > 0 && React.createElement(React.Fragment, null, " · ", React.createElement("strong", {
+  }, rupturas.filter(r => r.stock_alt > 0).length, " tienen stock en altura → BAJAR INMEDIATAMENTE."), rupturas.filter(r => r.stock_alt === 0 && r.stock_fuera > 0).length > 0 && React.createElement(React.Fragment, null, " · ", React.createElement("strong", {
+    style: {
+      color: C.accent
+    }
+  }, rupturas.filter(r => r.stock_alt === 0 && r.stock_fuera > 0).length, " están en otra bodega (Recibo/Magic) → UBICAR EN CALLE.")), rupturas.filter(r => r.stock_alt === 0 && r.stock_fuera === 0).length > 0 && React.createElement(React.Fragment, null, " · ", React.createElement("strong", {
     style: {
       color: C.red
     }
-  }, rupturas.filter(r => r.stock_alt === 0).length, " sin stock en ningún lado."))))), React.createElement("div", {
+  }, rupturas.filter(r => r.stock_alt === 0 && r.stock_fuera === 0).length, " sin stock en ningún lado."))))), React.createElement("div", {
     style: {
       display: "grid",
       gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr",
