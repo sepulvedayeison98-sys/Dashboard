@@ -5153,14 +5153,23 @@ function CEDIDashboard() {
     setLoadStep("Conectando con el repositorio...");
     await tick();
     const fetchWb = async url => {
+      // Cache-busting SIEMPRE (no solo en "Recargar" forzado): el query param
+      // ?v=timestamp cambia la URL en cada carga, así que ningún nivel de
+      // caché (navegador, CDN de GitHub Pages, proxy del operador móvil)
+      // puede servir una copia vieja — todos ven una URL que nunca han visto.
+      // "no-store" es la variante más estricta de fetch: ni siquiera consulta
+      // el caché local. Antes solo se usaba cache:"reload"/"default" (sin
+      // cache-busting), lo que dejó ver pedidos ya cerrados varios minutos
+      // después de actualizar los datos.
+      const bust = `${url}?v=${Date.now()}`;
       let resp;
       try {
-        resp = await fetch(url, {
-          cache: forzar ? "reload" : "default"
+        resp = await fetch(bust, {
+          cache: "no-store"
         });
       } catch (netErr) {
         try {
-          resp = await fetch(url);
+          resp = await fetch(bust);
         } catch (e2) {
           throw new Error(`Sin conexión o bloqueo al pedir ${url} (${netErr.message})`);
         }
