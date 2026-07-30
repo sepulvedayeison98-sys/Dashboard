@@ -7973,7 +7973,7 @@ function CEDIDashboard() {
         fontSize: 11,
         color: C.t3
       }
-    }, totalAcc, " acciones · Buffer ", bufH, "h×", bufF, "x · 🔬 vel. histórica 3m · R3: EXPO excluido"), React.createElement("div", {
+    }, totalAcc, " acciones · Buffer ", bufH, "h×", bufF, "x · 🔬 vel. histórica 2-30 jul · EXPO excluido"), React.createElement("div", {
       style: {
         display: "flex",
         gap: 6,
