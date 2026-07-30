@@ -342,6 +342,11 @@ async function processFiles(wbInv, wbFact, onStep, marcasActivas) {
   };
   const stockMap = {};
   const invByModule = {};
+  // Inventario que NO está en el rack de las 4 calles (Recibo, Magic, Promical,
+  // Nac, etc.). El resto del dashboard solo mira el rack, así que estas unidades
+  // eran invisibles: no aparecían en Stock, ni en piso/altura, ni en reposición.
+  // Se recogen aparte para la pestaña "Otras Bodegas".
+  const otrasBodegas = [];
   for (const r of invCasco) {
     const ref = String(r["Referencia"] || "").trim();
     const desc = String(r["Descripcion"] || "").trim();
@@ -350,6 +355,9 @@ async function processFiles(wbInv, wbFact, onStep, marcasActivas) {
     const cajap = String(r["cajap"] || "").trim();
     if (!ref) continue;
     const p = parseUbi(ubi);
+    if (!p && ubi && saldo > 0) {
+      otrasBodegas.push({ ref, desc, saldo, ubi, cajap });
+    }
     if (!stockMap[ref]) stockMap[ref] = {
       ref,
       desc,
@@ -973,7 +981,8 @@ async function processFiles(wbInv, wbFact, onStep, marcasActivas) {
     gapsReport,
     cityReport,
     modReport,
-    ubiMap
+    ubiMap,
+    otrasBodegas
   };
 }
 const HIST_KEY = 'cedi_hist_v1',
@@ -4945,6 +4954,277 @@ async function exportarSlotting(items, filtroTag = "") {
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 }
+async function exportarOtrasBodegas(filas, filtroTag = "") {
+  if (!window.ExcelJS) {
+    alert("Librería ExcelJS no disponible (no se pudo cargar). Reintenta con conexión.");
+    return;
+  }
+  const ahora = new Date();
+  const wb = new window.ExcelJS.Workbook();
+  const ws = wb.addWorksheet(filtroTag ? `Bodega ${filtroTag}`.slice(0, 31) : "Otras Bodegas", {
+    views: [{ state: "frozen", ySplit: 1 }]
+  });
+  ws.columns = [
+    { header: "Bodega", key: "bodega", width: 16 },
+    { header: "SKU", key: "sku", width: 12 },
+    { header: "Descripción", key: "desc", width: 52 },
+    { header: "Caja", key: "caja", width: 14 },
+    { header: "Saldo", key: "saldo", width: 12 },
+    { header: "Revisar", key: "flag", width: 22 }
+  ];
+  const SOSPECHOSO = 100000;
+  for (const f of filas || []) {
+    ws.addRow({
+      bodega: String(f.ubi || "").trim().toUpperCase(),
+      sku: String(f.ref),
+      desc: f.desc || "",
+      caja: f.cajap || "",
+      saldo: f.saldo || 0,
+      flag: (f.saldo || 0) >= SOSPECHOSO ? "SALDO IMPROBABLE" : ""
+    });
+  }
+  const NCOL = ws.columns.length;
+  ws.getRow(1).eachCell(c => {
+    c.font = { name: "Arial", size: 10, bold: true, color: { argb: "FFFFFFFF" } };
+    c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1F4E78" } };
+    c.alignment = { horizontal: "center", vertical: "middle" };
+    c.border = {
+      top: { style: "thin", color: { argb: "FFBFBFBF" } },
+      left: { style: "thin", color: { argb: "FFBFBFBF" } },
+      bottom: { style: "thin", color: { argb: "FFBFBFBF" } },
+      right: { style: "thin", color: { argb: "FFBFBFBF" } }
+    };
+  });
+  for (let i = 2; i <= ws.rowCount; i++) {
+    ws.getRow(i).eachCell((c, col) => {
+      c.font = { name: "Arial", size: 10 };
+      c.alignment = { horizontal: col === 3 ? "left" : "center", vertical: "middle" };
+      c.border = {
+        top: { style: "thin", color: { argb: "FFD9D9D9" } },
+        left: { style: "thin", color: { argb: "FFD9D9D9" } },
+        bottom: { style: "thin", color: { argb: "FFD9D9D9" } },
+        right: { style: "thin", color: { argb: "FFD9D9D9" } }
+      };
+    });
+  }
+  ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: NCOL } };
+  const buf = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `otras_bodegas_${filtroTag ? filtroTag.toLowerCase() + "_" : ""}${ahora.toISOString().slice(0, 10)}_${String(ahora.getHours()).padStart(2, "0")}${String(ahora.getMinutes()).padStart(2, "0")}.xlsx`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * OtrasBodegasPanel — inventario que NO está en el rack de las 4 calles.
+ *
+ * Estas ubicaciones (Recibo, Magic, Promical, Nac, TR4PL, Inventario…) existen
+ * en el export del WMS pero el resto del dashboard las ignora por completo:
+ * no cuentan como piso ni como altura, no entran en reposición y no aparecen
+ * en Stock. Esta pestaña las hace visibles con filtro por bodega y referencia.
+ * ──────────────────────────────────────────────────────────────────────────── */
+function OtrasBodegasPanel({ rows, isMobile }) {
+  const [bodega, setBodega] = useState("todas");
+  const [busca, setBusca] = useState("");
+  const [orden, setOrden] = useState("saldo");
+
+  // Nombres distintos que en realidad son la misma bodega ("Recibo"/"RECIBO"/
+  // "recibo" llegan así desde el WMS). Se agrupan por nombre normalizado para
+  // no partir una misma bodega en tres filas del filtro.
+  const norm = u => String(u || "").trim().toUpperCase();
+
+  const bodegas = useMemo(() => {
+    const m = {};
+    for (const r of rows) {
+      const k = norm(r.ubi);
+      if (!m[k]) m[k] = { key: k, nombre: k, filas: 0, unidades: 0, refs: new Set() };
+      m[k].filas++;
+      m[k].unidades += r.saldo;
+      m[k].refs.add(r.ref);
+    }
+    return Object.values(m).sort((a, b) => b.unidades - a.unidades);
+  }, [rows]);
+
+  const filt = useMemo(() => {
+    let arr = rows;
+    if (bodega !== "todas") arr = arr.filter(r => norm(r.ubi) === bodega);
+    const q = busca.trim().toLowerCase();
+    if (q) arr = arr.filter(r => String(r.ref).toLowerCase().includes(q) || String(r.desc).toLowerCase().includes(q));
+    arr = [...arr];
+    if (orden === "saldo") arr.sort((a, b) => b.saldo - a.saldo);
+    else if (orden === "ref") arr.sort((a, b) => (+a.ref || 0) - (+b.ref || 0));
+    else if (orden === "bodega") arr.sort((a, b) => norm(a.ubi).localeCompare(norm(b.ubi)) || b.saldo - a.saldo);
+    return arr;
+  }, [rows, bodega, busca, orden]);
+
+  const totU = filt.reduce((t, r) => t + r.saldo, 0);
+  const totRef = new Set(filt.map(r => r.ref)).size;
+
+  // Un saldo absurdamente alto es error de digitación del WMS, no stock real
+  // (se detectó una referencia con 115 millones de unidades en "Recibo").
+  // Se marca en la fila en vez de ocultarla: el dato es del WMS y hay que verlo
+  // para poder corregirlo allá.
+  const SOSPECHOSO = 100000;
+  const nSosp = filt.filter(r => r.saldo >= SOSPECHOSO).length;
+
+  const card = (label, valor, color, sub) => React.createElement("div", {
+    style: {
+      background: C.bg2, border: `1px solid ${C.b0}`, borderRadius: 11,
+      padding: "13px 14px", borderTop: `2px solid ${color}`, minWidth: 0
+    }
+  },
+    React.createElement("div", {
+      style: { fontSize: 9, fontWeight: 600, color: C.t3, textTransform: "uppercase", letterSpacing: "0.8px", marginBottom: 5 }
+    }, label),
+    React.createElement("div", {
+      style: { fontSize: 22, fontWeight: 800, color, lineHeight: 1, fontFamily: "'JetBrains Mono',monospace", marginBottom: 3 }
+    }, valor),
+    React.createElement("div", { style: { fontSize: 10, color: C.t4 } }, sub)
+  );
+
+  return React.createElement("div", null,
+    // ── Aviso de contexto ──
+    React.createElement("div", {
+      style: {
+        background: `${C.yellow}12`, border: `1px solid ${C.yellow}40`, borderRadius: 10,
+        padding: "10px 14px", marginBottom: 14, fontSize: 11, color: C.t2, lineHeight: 1.6
+      }
+    },
+      React.createElement("b", { style: { color: C.yellow } }, "Fuera del rack. "),
+      "Estas unidades no están en las 4 calles, así que NO cuentan como piso ni altura y no entran en reposición ni en Stock. Se listan aquí para que no queden invisibles."
+    ),
+
+    // ── Tarjetas resumen ──
+    React.createElement("div", {
+      style: { display: "grid", gridTemplateColumns: isMobile ? "repeat(2,1fr)" : "repeat(4,1fr)", gap: 9, marginBottom: 14 }
+    },
+      card("Bodegas", bodegas.length, C.accent, "ubicaciones distintas"),
+      card("Referencias", totRef.toLocaleString(), C.teal, "SKUs en la vista"),
+      card("Unidades", totU.toLocaleString(), C.green, "suma de saldos"),
+      card("Saldos dudosos", nSosp, nSosp > 0 ? C.red : C.t4, `≥ ${SOSPECHOSO.toLocaleString()} u por fila`)
+    ),
+
+    // ── Controles ──
+    React.createElement("div", {
+      style: { display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 12 }
+    },
+      React.createElement("input", {
+        value: busca,
+        onChange: e => setBusca(e.target.value),
+        placeholder: "Buscar referencia o descripción...",
+        style: {
+          background: C.bg2, border: `1px solid ${C.b0}`, color: C.t1, borderRadius: 8,
+          padding: "8px 12px", fontSize: 12, fontFamily: "inherit", minWidth: isMobile ? "100%" : 260, flex: isMobile ? "1 1 100%" : "0 1 auto"
+        }
+      }),
+      React.createElement("select", {
+        value: bodega,
+        onChange: e => setBodega(e.target.value),
+        style: {
+          background: C.bg2, border: `1px solid ${C.b0}`, color: C.t1, borderRadius: 8,
+          padding: "8px 10px", fontSize: 11, fontFamily: "inherit", cursor: "pointer"
+        }
+      },
+        React.createElement("option", { value: "todas" }, `Todas las bodegas (${bodegas.length})`),
+        bodegas.map(b => React.createElement("option", { key: b.key, value: b.key }, `${b.nombre} — ${b.unidades.toLocaleString()} u`))
+      ),
+      React.createElement("div", { style: { display: "flex", gap: 4 } },
+        [["saldo", "Mayor saldo"], ["ref", "Referencia"], ["bodega", "Bodega"]].map(([k, l]) =>
+          React.createElement("button", {
+            key: k,
+            onClick: () => setOrden(k),
+            style: {
+              padding: "7px 11px", borderRadius: 7, fontSize: 10, fontWeight: 700, cursor: "pointer",
+              fontFamily: "inherit", background: orden === k ? C.accent : C.bg3,
+              color: orden === k ? C.bg0 : C.t3, border: `1px solid ${orden === k ? C.accent : C.b0}`
+            }
+          }, l)
+        )
+      ),
+      React.createElement("button", {
+        onClick: () => exportarOtrasBodegas(filt, bodega === "todas" ? "" : bodega),
+        style: {
+          padding: "7px 12px", borderRadius: 7, background: C.green, border: "none",
+          color: C.bg0, fontWeight: 700, fontSize: 10, cursor: "pointer", fontFamily: "inherit"
+        }
+      }, "📥 Excel")
+    ),
+
+    // ── Resumen por bodega ──
+    React.createElement("div", {
+      style: { display: "flex", gap: 7, flexWrap: "wrap", marginBottom: 14 }
+    },
+      bodegas.map(b => React.createElement("button", {
+        key: b.key,
+        onClick: () => setBodega(bodega === b.key ? "todas" : b.key),
+        style: {
+          background: bodega === b.key ? `${C.accent}22` : C.bg2,
+          border: `1px solid ${bodega === b.key ? C.accent : C.b0}`,
+          borderRadius: 8, padding: "7px 11px", cursor: "pointer", fontFamily: "inherit", textAlign: "left"
+        }
+      },
+        React.createElement("div", {
+          style: { fontSize: 11, fontWeight: 700, color: bodega === b.key ? C.accent : C.t1, fontFamily: "'JetBrains Mono',monospace" }
+        }, b.nombre),
+        React.createElement("div", { style: { fontSize: 9, color: C.t4, marginTop: 2 } },
+          `${b.unidades.toLocaleString()} u · ${b.refs.size} refs`)
+      ))
+    ),
+
+    // ── Tabla ──
+    React.createElement("div", {
+      style: { background: C.bg2, border: `1px solid ${C.b0}`, borderRadius: 12, overflow: "hidden" }
+    },
+      React.createElement("div", { style: SCROLL_BOX },
+        React.createElement("table", { style: { width: "100%", borderCollapse: "collapse", minWidth: 620 } },
+          React.createElement("thead", null,
+            React.createElement("tr", null,
+              React.createElement(TH, null, "#"),
+              React.createElement(TH, null, "Bodega"),
+              React.createElement(TH, null, "Ref."),
+              React.createElement(TH, null, "Descripción"),
+              React.createElement(TH, null, "Caja"),
+              React.createElement(TH, { right: true }, "Saldo")
+            )
+          ),
+          React.createElement("tbody", null,
+            filt.slice(0, 400).map((r, i) => {
+              const sosp = r.saldo >= SOSPECHOSO;
+              return React.createElement("tr", {
+                key: `${r.ubi}|${r.ref}|${r.cajap}|${i}`,
+                style: { borderTop: `1px solid ${C.bg3}`, background: sosp ? `${C.red}0e` : "transparent" }
+              },
+                React.createElement(TD, { c: C.t4, fs: 10 }, i + 1),
+                React.createElement(TD, { mono: true, c: C.accent, fs: 11, fw: 700 }, norm(r.ubi)),
+                React.createElement(TD, { mono: true, c: C.teal, fw: 700 }, r.ref),
+                React.createElement(TD, { style: { maxWidth: 300 } },
+                  React.createElement("div", {
+                    style: { whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", color: C.t2, fontSize: 11 }
+                  }, r.desc)
+                ),
+                React.createElement(TD, { mono: true, c: C.t4, fs: 10 }, r.cajap || "—"),
+                React.createElement(TD, { right: true, mono: true, c: sosp ? C.red : C.green, fw: 700 },
+                  sosp
+                    ? React.createElement("span", { title: "Saldo improbable — revisar en el WMS" }, "⚠ ", r.saldo.toLocaleString())
+                    : r.saldo.toLocaleString()
+                )
+              );
+            })
+          )
+        )
+      ),
+      filt.length > 400 && React.createElement("div", {
+        style: { padding: "9px 14px", fontSize: 10, color: C.t4, borderTop: `1px solid ${C.b0}` }
+      }, `Mostrando 400 de ${filt.length.toLocaleString()} filas — usa el buscador o el filtro por bodega para acotar. El Excel descarga las ${filt.length.toLocaleString()}.`),
+      !filt.length && React.createElement("div", {
+        style: { padding: "26px 14px", fontSize: 12, color: C.t4, textAlign: "center" }
+      }, "Sin resultados con estos filtros.")
+    )
+  );
+}
+
 function CEDIDashboard() {
   const [phase, setPhase] = useState("upload");
   const [loadStep, setLoadStep] = useState("");
@@ -4960,7 +5240,7 @@ function CEDIDashboard() {
   const [tab, setTab] = useState("dashboard");
   // Pestañas protegidas con contraseña (solo CEDI Live y Reposición quedan libres).
   // Reutiliza la misma llave 'hist_ok' del histórico → una sola contraseña por sesión.
-  const TABS_BLOQUEADAS = ["pipeline", "stock", "slotting", "reporte", "historico"];
+  const TABS_BLOQUEADAS = ["pipeline", "stock", "otras", "slotting", "reporte", "historico"];
   const [tabsDesbloqueadas, setTabsDesbloqueadas] = useState(() => {
     try { return sessionStorage.getItem('hist_ok') === '1'; } catch (_) { return false; }
   });
@@ -6080,7 +6360,7 @@ function CEDIDashboard() {
     l: "SKUs en Piso",
     v: (st?.skusPiso || 0).toLocaleString(),
     c: C.accent,
-    s: "con pedidos activos"
+    s: "en piso (la mitad sin pedido hoy)"
   }, {
     l: "Total Ciudades",
     v: st?.totalCiudades || "64",
@@ -6146,6 +6426,9 @@ function CEDIDashboard() {
   }, {
     k: "stock",
     l: "📊 Stock"
+  }, {
+    k: "otras",
+    l: "🏬 Otras Bodegas"
   }, {
     k: "slotting",
     l: "⬆ Slotting"
@@ -11959,12 +12242,12 @@ function CEDIDashboard() {
     l: "Stock Piso",
     v: (st?.totalStock || 0).toLocaleString(),
     c: C.green,
-    s: "unidades nivel 1-2"
+    s: "unidades nivel 1 (alcance a mano)"
   }, {
     l: "Stock Altura",
     v: (st?.totalStockAlt || 0).toLocaleString(),
     c: C.purple,
-    s: "unidades nivel 3-5"
+    s: "unidades niveles 2-5 (montacargas)"
   }, {
     l: "Comprometido",
     v: (st?.totalComp || 0).toLocaleString(),
@@ -12428,7 +12711,14 @@ function CEDIDashboard() {
         background: pctMezcla > 80 ? C.red : C.orange
       }
     }))));
-  })))), tab === "historico" && React.createElement("div", {
+  })))), tab === "otras" && React.createElement("div", {
+    style: {
+      animation: "fadeUp .3s ease"
+    }
+  }, React.createElement(OtrasBodegasPanel, {
+    rows: data?.otrasBodegas || [],
+    isMobile: isMobile
+  })), tab === "historico" && React.createElement("div", {
     style: {
       animation: "fadeUp .3s ease"
     }
