@@ -401,27 +401,21 @@ async function processFiles(wbInv, wbFact, onStep, marcasActivas) {
   }
   onStep("Calculando comprometido vs stock (todos los pedidos)...");
   await tick();
-  // Pedidos masivos/atípicos: los que por su TAMAÑO no se pueden cubrir desde
-  // piso y distorsionarían el reabasto (ej. mayoristas de Bogotá con cientos/
-  // miles de unidades). Se definen SOLO por unidades totales del pedido. No se
-  // usa la marca PED-PLANO ni u/ref porque hay pedidos plano pequeños (45-126u)
-  // que la empresa NO considera masivos.
-  const UNI_MASIVO = 200; // unidades totales del pedido: >= esto = masivo
-  const pedidoAgg = {};
-  for (const r of allWmsRows) {
-    const ref = String(r["referencia"] || "").trim();
-    const cant = toNum(r["cantidad"]);
-    const picking = String(r["Picking"] || r["PedidoSiesa"] || "").trim();
-    if (!ref || cant <= 0 || !picking || !cascoRefs.has(ref)) continue;
-    if (!pedidoAgg[picking]) pedidoAgg[picking] = { refs: new Set(), uni: 0 };
-    pedidoAgg[picking].refs.add(ref);
-    pedidoAgg[picking].uni += cant;
-  }
+  // Pedidos masivos: DESACTIVADO por decisión de la operación (jul 2026).
+  //
+  // Antes, todo pedido con >= 200 u totales se marcaba "masivo" y quedaba FUERA
+  // del comprometido, del gap y de la reposición, con el argumento de que por su
+  // tamaño no se surte desde piso y distorsionaba el reabasto. En la práctica eso
+  // dejaba pedidos reales sin reflejarse en el abastecimiento, así que ahora
+  // TODOS los pedidos entran al flujo normal.
+  //
+  // El set se deja vacío (en vez de borrar el concepto) para que toda la lógica
+  // que consulta esMasivo/nMasivos siga funcionando sin tocarse y el cambio sea
+  // reversible: basta con volver a poblar pickingsMasivos con un umbral.
+  // Siguen excluidas las REQ no internas y los pedidos programados a futuro —
+  // esas exclusiones no formaban parte de esta decisión.
   const pickingsMasivos = new Set();
   const motivoMasivo = {};
-  for (const [pk, agg] of Object.entries(pedidoAgg)) {
-    if (agg.uni >= UNI_MASIVO) { pickingsMasivos.add(pk); motivoMasivo[pk] = `${agg.uni.toLocaleString()} u`; }
-  }
   const compMap = {};
   const ciudadPorRef = {};
   const pedidosRaw = {};
@@ -8593,7 +8587,10 @@ function CEDIDashboard() {
       animation: "fadeUp .3s ease"
     }
   }, (() => {
-    // ── Panel: Pedidos EXCLUIDOS del reabasto (masivos/atípicos y programados) ──
+    // ── Panel: Pedidos EXCLUIDOS del reabasto ──
+    // Los "masivos" ya no se excluyen (pickingsMasivos quedó vacío a propósito),
+    // así que en la práctica este panel hoy solo lista los programados a futuro.
+    // La rama de masivos se deja viva por si se reactiva el umbral más adelante.
     const peds = data?.pedidosActivos || [];
     const masivos = peds.filter(p => p.esMasivo).sort((a, b) => (b.uni || 0) - (a.uni || 0));
     const progs = peds.filter(p => p.programadoFuturo).sort((a, b) => (b.uni || 0) - (a.uni || 0));
@@ -8857,7 +8854,7 @@ function CEDIDashboard() {
         color: C.t3,
         marginBottom: 12
       }
-    }, "Todos los pedidos (incl. masivos/programados). El comprometido de Stock excluye esos"), React.createElement("div", {
+    }, "Todos los pedidos. El comprometido de Stock excluye los programados a futuro y las REQ no internas"), React.createElement("div", {
       style: {
         display: "flex",
         alignItems: "baseline",
