@@ -5040,7 +5040,7 @@ async function exportarOtrasBodegas(filas, filtroTag = "") {
     { header: "Ubicación", key: "ubi", width: 14 },
     { header: "SKU", key: "sku", width: 12 },
     { header: "Descripción", key: "desc", width: 52 },
-    { header: "Caja", key: "caja", width: 14 },
+    { header: "Cajas", key: "caja", width: 10 },
     { header: "Saldo", key: "saldo", width: 12 },
     { header: "Revisar", key: "flag", width: 22 }
   ];
@@ -5052,7 +5052,7 @@ async function exportarOtrasBodegas(filas, filtroTag = "") {
       ubi: String(f.ubiRaw || f.ubi || "").trim().toUpperCase(),
       sku: String(f.ref),
       desc: f.desc || "",
-      caja: f.cajap || "",
+      caja: f.cajas || 1,
       saldo: f.saldo || 0,
       flag: (f.saldo || 0) >= SOSPECHOSO ? "SALDO IMPROBABLE" : ""
     });
@@ -5186,12 +5186,31 @@ function OtrasBodegasPanel({ rows, isMobile }) {
     if (bodega !== "todas") arr = arr.filter(r => r.bod === bodega);
     const q = busca.trim().toLowerCase();
     if (q) arr = arr.filter(r => String(r.ref).toLowerCase().includes(q) || String(r.desc).toLowerCase().includes(q));
-    arr = [...arr];
-    if (orden === "saldo") arr.sort((a, b) => b.saldo - a.saldo);
-    else if (orden === "ref") arr.sort((a, b) => (+a.ref || 0) - (+b.ref || 0));
-    else if (orden === "bodega") arr.sort((a, b) => a.bod.localeCompare(b.bod) || b.saldo - a.saldo);
-    else if (orden === "grupo") arr.sort((a, b) => a.grupo.localeCompare(b.grupo) || b.saldo - a.saldo);
-    return arr;
+
+    // El WMS entrega una fila por CAJA, así que una misma posición aparecía
+    // repetida (ej. C2532 ocho veces con la misma referencia y 9 u cada una).
+    // Se agrupa por posición + referencia y se suma el saldo, guardando cuántas
+    // cajas lo componen: una posición con x cantidad de x SKU, que es como se
+    // ve en la bodega.
+    const idx = {};
+    const out = [];
+    for (const r of arr) {
+      const k = `${r.bod}|${r.ubiRaw}|${r.ref}`;
+      if (idx[k]) {
+        idx[k].saldo += r.saldo;
+        idx[k].cajas += 1;
+        if (r.dudoso) idx[k].dudoso = true;
+      } else {
+        const e = { ...r, cajas: 1 };
+        idx[k] = e;
+        out.push(e);
+      }
+    }
+    if (orden === "saldo") out.sort((a, b) => b.saldo - a.saldo);
+    else if (orden === "ref") out.sort((a, b) => (+a.ref || 0) - (+b.ref || 0) || a.ubiRaw.localeCompare(b.ubiRaw));
+    else if (orden === "bodega") out.sort((a, b) => a.bod.localeCompare(b.bod) || a.ubiRaw.localeCompare(b.ubiRaw) || b.saldo - a.saldo);
+    else if (orden === "grupo") out.sort((a, b) => a.grupo.localeCompare(b.grupo) || b.saldo - a.saldo);
+    return out;
   }, [enrich, grupo, bodega, busca, orden]);
 
   const totU = filt.filter(r => !r.dudoso).reduce((t, r) => t + r.saldo, 0);
@@ -5502,6 +5521,7 @@ function OtrasBodegasPanel({ rows, isMobile }) {
                 React.createElement(TH, null, "Ubicación"),
                 React.createElement(TH, null, "Ref."),
                 React.createElement(TH, null, "Descripción"),
+                React.createElement(TH, { right: true }, "Cajas"),
                 React.createElement(TH, { right: true }, "Saldo")
               )
             ),
@@ -5527,6 +5547,7 @@ function OtrasBodegasPanel({ rows, isMobile }) {
                     style: { whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", color: C.t2, fontSize: 11 }
                   }, r.desc)
                 ),
+                React.createElement(TD, { right: true, mono: true, c: C.t3, fs: 11 }, r.cajas),
                 React.createElement(TD, { right: true, mono: true, c: r.dudoso ? C.red : C.green, fw: 700 },
                   r.dudoso
                     ? React.createElement("span", { title: "Saldo improbable — revisar en el WMS" }, "⚠ ", r.saldo.toLocaleString())
