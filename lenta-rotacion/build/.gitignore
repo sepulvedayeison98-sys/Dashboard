@@ -1,0 +1,7 @@
+# Generados por build.sh — se reconstruyen, no se versionan
+tailwind.css
+bundle.js
+
+# Copias de trabajo de las fuentes (el original vive en ../)
+DashboardLentaRotacion.jsx
+exportExcel.js
