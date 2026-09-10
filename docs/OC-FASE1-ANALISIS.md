@@ -8,6 +8,36 @@
 
 ---
 
+## ⚠️ ERRATA — 27/08/2026
+
+Tras publicar este análisis obtuve acceso directo a los archivos reales de OneDrive/SharePoint
+(`Escritorio/OC CLIENTES` y `HISTORICO PROTEC`). **Cuatro afirmaciones de este documento son
+incorrectas** y se corrigen aquí hasta que se reescriba la Fase 1 completa:
+
+| Dice este documento | Realidad verificada en los archivos |
+|---|---|
+| «RADAR (bodega `INDU2`) es el canal de las OC» | **Falso.** El mundo de las OC no toca el CEDI. Las referencias de exportación (`ICH-3120_EXPO_ICAL`, `T-30_EXPO_ICWOM`) no existen en `Inventario.xlsx`: se fabrican contra la orden y se embarcan, nunca se almacenan. El canal real se llama **INTERNACIONAL** (columna `PEDIDO` del archivo de requisiciones). |
+| «Solo hay 29 días de datos; el histórico no puede alimentarse» | **Falso.** Existen **9 años** de histórico: `HISTORICO PROTEC/2018.xlsx` … `2026.xlsx`, 12 hojas mensuales cada uno. Solo 2026 tiene **663 filas de exportación**. |
+| «El cliente `ICAL` no aparece en los datos» | **Falso.** `ICAL` = **ALNUSAN CIA LTDA** (Quito, Ecuador, RUC 1792383358001). Es el cliente con más volumen: 136 filas en 2026. Le siguen UMA (80), ICMS (52), ICWOM (48), ICMC (36). |
+| «`Inventario.xlsx` es el maestro de productos del proyecto» | **Parcialmente falso.** Sirve para el CEDI, no para las OC de exportación. Cada OC trae una hoja `ITEMS` con el SKU del ERP ya explotado por talla — el resolvedor que este documento proponía construir ya existe, hecho a mano. |
+
+También quedan resueltas dos preguntas que el documento daba por abiertas:
+
+- **`# REP PLANTA`** = consecutivo de la requisición a planta (en el ERP: `002-REP-00001870`). Un REP agrupa varias referencias.
+- **`Código`** = código de la OC del cliente (`ICAL 201`, `ICDAV 037`). Además, el cliente es derivable de la propia referencia: `ICH-3110_EXPO_ICAL` → `ICAL`.
+
+**Hallazgo nuevo, urgente:** en la OC `ICAL-198` la celda de fecha es `=TODAY()` y la de vencimiento
+es `=fecha+5`. La fecha de la orden **se reescribe cada vez que se abre el archivo** — esa OC se creó
+el 10/08/2026 (según `Fecha creación` de sus ítems en el ERP) pero muestra 26/08/2026. Cualquier
+análisis de tiempos sobre estos Excel es falso hoy. La fecha real hay que tomarla del ERP o del REP.
+La fecha de vencimiento es vigencia de proforma (5 días), no compromiso de entrega: la pregunta 5
+sigue abierta.
+
+Lo demás del documento —modelo de datos, flujo de estados, arquitectura por capas y el resto de
+preguntas abiertas— sigue en pie a la espera de la reescritura.
+
+---
+
 ## Bloqueo principal
 
 **En el repositorio no hay ninguna orden de compra.** Ni Excel manual del comercial, ni Excel
