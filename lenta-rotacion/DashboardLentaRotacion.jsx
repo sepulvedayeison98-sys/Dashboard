@@ -2132,13 +2132,36 @@ function SeccionMulti({ rows }) {
 
 const POR_PAGINA = 50;
 
-function SeccionPrioridad({ rows, kpis }) {
+function SeccionPrioridad({ rows, kpis, bodegaUnica }) {
   const [pagina, setPagina] = useState(0);
   const [orden, setOrden] = useState({ key: 'prioridad', dir: 'desc' });
   const ctx = React.useContext(DrillCtx);
 
   // Solo se ofrece si el archivo trae la columna — no se inventa un cero.
   const tieneDisponible = useMemo(() => rows.some(r => r.disponible != null), [rows]);
+
+  // Vista tipo SIESA: un ítem por fila con la existencia total (sumada entre
+  // rangos de días, que es como SIESA la reporta), solo cuando el filtro deja
+  // una única bodega — si hay varias mezcladas no tiene sentido "un total".
+  const detalleBodega = useMemo(() => {
+    if (!bodegaUnica) return null;
+    const porItem = new Map();
+    for (const r of rows) {
+      if (!porItem.has(r.item)) {
+        porItem.set(r.item, { item: r.item, marca: r.marca, referencia: r.referencia, existencia: 0, disponible: 0, faltaDisponible: false });
+      }
+      const acc = porItem.get(r.item);
+      acc.existencia += r.unidades;
+      if (r.disponible == null) acc.faltaDisponible = true;
+      else acc.disponible += r.disponible;
+    }
+    const items = [...porItem.values()].sort((a, b) => b.existencia - a.existencia);
+    const totales = items.reduce((a, it) => ({
+      existencia: a.existencia + it.existencia,
+      disponible: a.disponible + (it.faltaDisponible ? 0 : it.disponible),
+    }), { existencia: 0, disponible: 0 });
+    return { items, totales, tieneDisponible: items.some(it => !it.faltaDisponible) };
+  }, [rows, bodegaUnica]);
 
   const ordenadas = useMemo(() => {
     const arr = [...rows];
@@ -2183,6 +2206,58 @@ function SeccionPrioridad({ rows, kpis }) {
           </div>
         ))}
       </div>
+
+      {detalleBodega && (
+        <div className="overflow-hidden rounded-xl border" style={{ borderColor: C.b0, boxShadow: SOMBRA.plana }}>
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b px-5 py-3.5" style={{ borderColor: C.bg3 }}>
+            <div>
+              <div className="text-sm font-semibold" style={{ color: C.t1 }}>Detalle por ítem — Bodega {bodegaUnica}</div>
+              <div className="mt-0.5 text-xs" style={{ color: C.t2 }}>
+                Existencia total por ítem (todos los rangos de días sumados), como lo reporta SIESA.
+              </div>
+            </div>
+            <div className="text-[11px] tabular-nums" style={{ color: C.t2 }}>{nf.format(detalleBodega.items.length)} ítems</div>
+          </div>
+          <div className="max-h-[420px] overflow-auto">
+            <table className="w-full text-xs">
+              <thead className="sticky top-0" style={{ backgroundColor: C.bg0 }}>
+                <tr>
+                  <th className="px-3 py-2 text-left text-[10px] font-medium uppercase tracking-wider" style={{ color: C.t2 }}>Bodega</th>
+                  <th className="px-3 py-2 text-left text-[10px] font-medium uppercase tracking-wider" style={{ color: C.t2 }}>Ítem</th>
+                  <th className="px-3 py-2 text-right text-[10px] font-medium uppercase tracking-wider" style={{ color: C.t2 }}>Existencia</th>
+                  <th className="px-3 py-2 text-right text-[10px] font-medium uppercase tracking-wider" style={{ color: C.t2 }}>Comprometida</th>
+                  <th className="px-3 py-2 text-right text-[10px] font-medium uppercase tracking-wider" style={{ color: C.t2 }}>Cant. disponible</th>
+                </tr>
+                <tr style={{ backgroundColor: C.accentDim }}>
+                  <td className="px-3 py-2 font-semibold" style={{ color: C.accent }} colSpan={2}>Total</td>
+                  <td className="px-3 py-2 text-right font-semibold tabular-nums" style={{ color: C.accent }}>{nf.format(detalleBodega.totales.existencia)}</td>
+                  <td className="px-3 py-2 text-right font-semibold tabular-nums" style={{ color: C.accent }}>
+                    {detalleBodega.tieneDisponible ? nf.format(detalleBodega.totales.existencia - detalleBodega.totales.disponible) : '—'}
+                  </td>
+                  <td className="px-3 py-2 text-right font-semibold tabular-nums" style={{ color: C.accent }}>
+                    {detalleBodega.tieneDisponible ? nf.format(detalleBodega.totales.disponible) : '—'}
+                  </td>
+                </tr>
+              </thead>
+              <tbody>
+                {detalleBodega.items.map(it => (
+                  <tr key={it.item} className="border-t hover:brightness-125" style={{ borderColor: C.bg3 }}>
+                    <td className="whitespace-nowrap px-3 py-2 font-mono" style={{ color: C.t2 }}>{bodegaUnica}</td>
+                    <td className="whitespace-nowrap px-3 py-2 font-mono" style={{ color: C.t1 }}>{it.item}</td>
+                    <td className="whitespace-nowrap px-3 py-2 text-right font-semibold tabular-nums" style={{ color: C.t1 }}>{nf.format(it.existencia)}</td>
+                    <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums" style={{ color: it.faltaDisponible ? C.t4 : C.t2 }}>
+                      {it.faltaDisponible ? '—' : nf.format(it.existencia - it.disponible)}
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums" style={{ color: it.faltaDisponible ? C.t4 : C.t2 }}>
+                      {it.faltaDisponible ? '—' : nf.format(it.disponible)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       <div className="overflow-hidden rounded-xl border" style={{ borderColor: C.b0, boxShadow: SOMBRA.plana }}>
         <div className="flex flex-wrap items-center justify-between gap-3 border-b px-5 py-3.5" style={{ borderColor: C.bg3 }}>
@@ -3158,7 +3233,7 @@ export default function App() {
           ) : seccion === 'multi' ? (
             <SeccionMulti rows={filtrados} />
           ) : seccion === 'prioridad' ? (
-            <SeccionPrioridad rows={filtrados} kpis={kpis} />
+            <SeccionPrioridad rows={filtrados} kpis={kpis} bodegaUnica={filtros.bodega.length === 1 ? filtros.bodega[0] : null} />
           ) : SECCION_CAMPO[seccion] ? (
             (() => {
               const campo = SECCION_CAMPO[seccion];
