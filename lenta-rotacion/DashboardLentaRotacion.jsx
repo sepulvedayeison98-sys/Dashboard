@@ -310,7 +310,17 @@ function detectarMapeo(columns) {
     const hit = columns.find(c => { const n = norm(c); return !ES_MONETARIA.test(n) && re.test(n); });
     if (hit) rangos[key] = hit;
   }
-  return { dim, rangos, opcionales };
+  // "Disponible" es una cantidad aparte de "existencia" (existencia menos lo
+  // comprometido) — SIESA trae ambas por rango (existencia_0_30,
+  // disponible_0_30, ...). Se detecta por separado, filtrando a columnas que
+  // digan "disponible", para no pisar la columna de existencia que ya usa
+  // `rangos` como la cantidad principal.
+  const rangosDisponible = {};
+  for (const { key, re } of PATRON_RANGO) {
+    const hit = columns.find(c => { const n = norm(c); return !ES_MONETARIA.test(n) && n.includes('disponible') && re.test(n); });
+    if (hit) rangosDisponible[key] = hit;
+  }
+  return { dim, rangos, rangosDisponible, opcionales };
 }
 
 /* ============================================================================
@@ -389,7 +399,7 @@ const limpiar = v => {
 };
 
 function normalizar(raw, mapeo) {
-  const { dim, rangos, opcionales } = mapeo;
+  const { dim, rangos, rangosDisponible, opcionales } = mapeo;
   const hechos = [];
   for (const r of raw.rows) {
     if (Object.values(r).some(esFilaTotal)) continue;
@@ -408,7 +418,11 @@ function normalizar(raw, mapeo) {
       const n = aNumero(r[col]);
       const u = Number.isNaN(n) ? 0 : Math.round(n);
       if (u === 0) continue;                       // regla 4: se descartan los ceros
-      hechos.push({ ...base, rango_dias: key, nivel_criticidad: RANGO_BY_KEY[key].nivel, unidades: u });
+      // "Disponible" viaja junto a la existencia del mismo rango, cuando el
+      // archivo trae esa columna — null si no, para no fingir un dato que no vino.
+      const colDisp = rangosDisponible?.[key];
+      const disponible = colDisp ? Math.round(aNumero(r[colDisp]) || 0) : null;
+      hechos.push({ ...base, rango_dias: key, nivel_criticidad: RANGO_BY_KEY[key].nivel, unidades: u, disponible });
     }
   }
   return hechos;
@@ -2123,11 +2137,15 @@ function SeccionPrioridad({ rows, kpis }) {
   const [orden, setOrden] = useState({ key: 'prioridad', dir: 'desc' });
   const ctx = React.useContext(DrillCtx);
 
+  // Solo se ofrece si el archivo trae la columna — no se inventa un cero.
+  const tieneDisponible = useMemo(() => rows.some(r => r.disponible != null), [rows]);
+
   const ordenadas = useMemo(() => {
     const arr = [...rows];
     const cmp = {
       prioridad: (a, b) => (b.nivel_criticidad - a.nivel_criticidad) || (b.unidades - a.unidades),
       unidades: (a, b) => b.unidades - a.unidades,
+      disponible: (a, b) => (b.disponible ?? 0) - (a.disponible ?? 0),
       marca: (a, b) => a.marca.localeCompare(b.marca, 'es'),
       referencia: (a, b) => a.referencia.localeCompare(b.referencia, 'es'),
       item: (a, b) => String(a.item).localeCompare(String(b.item), 'es', { numeric: true }),
@@ -2149,6 +2167,7 @@ function SeccionPrioridad({ rows, kpis }) {
     { key: 'item', label: 'Ítem', al: 'left' },
     { key: 'bodega', label: 'Bodega', al: 'left' },
     { key: 'unidades', label: 'Unidades', al: 'right' },
+    ...(tieneDisponible ? [{ key: 'disponible', label: 'Disponible', al: 'right' }] : []),
   ];
 
   return (
@@ -2218,6 +2237,11 @@ function SeccionPrioridad({ rows, kpis }) {
                     <td className="whitespace-nowrap px-3 py-2 font-mono" style={{ color: C.t2 }}>{r.item}</td>
                     <td className="whitespace-nowrap px-3 py-2 font-mono" style={{ color: C.t2 }}>{r.bodega}</td>
                     <td className="whitespace-nowrap px-3 py-2 text-right font-semibold tabular-nums" style={{ color: C.t1 }}>{nf.format(r.unidades)}</td>
+                    {tieneDisponible && (
+                      <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums" style={{ color: r.disponible == null ? C.t4 : C.t2 }}>
+                        {r.disponible == null ? '—' : nf.format(r.disponible)}
+                      </td>
+                    )}
                   </tr>
                 );
               })}
