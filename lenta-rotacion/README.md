@@ -25,6 +25,30 @@ Las opcionales generan su propia sección y su hoja en el Excel solo si vienen
 en el archivo. Si el detector se equivoca, la pantalla de configuración deja
 corregir el mapeo antes de procesar.
 
+## Alimentación automática desde SIESA
+
+`lenta-rotacion/data/inventario-siesa.xlsx` (cuando existe) es una copia del
+Excel que SIESA publica en vivo en SharePoint, mantenida al día por una
+Rutina programada — no se edita a mano. El flujo de carga del dashboard no
+cambia: para usar el dato fresco, descarga ese archivo del repo y cárgalo con
+el botón de siempre.
+
+La actualización corre así:
+
+1. Una sesión de Claude con el conector de Microsoft 365 autorizado descarga
+   el Excel desde SharePoint.
+2. `node scripts/sync-lenta-rotacion.js <ruta-descargada>` valida que el
+   archivo abre como Excel real y trae las columnas obligatorias de la tabla
+   de arriba; si algo falla, se detiene sin tocar el archivo publicado.
+3. Si el contenido cambió de verdad (comparación por hash, no por fecha),
+   reemplaza `lenta-rotacion/data/inventario-siesa.xlsx` y lo reporta; si es
+   idéntico al último, no hace nada — para no ensuciar el historial de git
+   con commits vacíos.
+
+Este archivo es independiente del `Inventario.xlsx` de la raíz del repo (el
+que usan `pipeline.html`, `montacargas.html` y `admin.html`) — nunca lo toca
+ni depende de él.
+
 ## Exportación a Excel
 
 El botón **Excel** genera un libro `.xlsx` con los filtros que estaban
