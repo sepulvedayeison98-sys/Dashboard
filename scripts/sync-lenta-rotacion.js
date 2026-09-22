@@ -34,6 +34,19 @@ const DESTINO = path.join(ROOT, "lenta-rotacion", "data", "inventario-siesa.xlsx
 // primero para no publicar un archivo que el dashboard va a rechazar.
 const COLUMNAS_OBLIGATORIAS = ["Bodega", "Ítem", "Marca", "Referencia"];
 
+// El export en vivo de SIESA no siempre trae los encabezados letra por letra
+// (p.ej. "Item" sin tilde, "MARCAS" en mayúscula/plural, "REFERENCIA" en
+// mayúscula) — se compara sin tildes, sin mayúsculas y sin el plural simple
+// para no rechazar un archivo válido solo por esa variación cosmética.
+function normalizarColumna(c) {
+  return String(c == null ? "" : c)
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/s$/, "");
+}
+
 function fallar(msg) {
   console.error(`ERROR: ${msg}`);
   process.exit(1);
@@ -65,8 +78,11 @@ function main() {
   let hIdx = matrix.findIndex(r => r.filter(c => typeof c === "string" && c.trim()).length >= 3);
   if (hIdx < 0) hIdx = 0;
   const columnas = matrix[hIdx].map(c => (c == null ? "" : String(c).trim()));
+  const columnasNormalizadas = columnas.map(normalizarColumna);
 
-  const faltantes = COLUMNAS_OBLIGATORIAS.filter(c => !columnas.includes(c));
+  const faltantes = COLUMNAS_OBLIGATORIAS.filter(
+    c => !columnasNormalizadas.includes(normalizarColumna(c))
+  );
   if (faltantes.length) {
     fallar(
       `faltan columnas obligatorias: ${faltantes.join(", ")} ` +
