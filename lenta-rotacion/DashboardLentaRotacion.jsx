@@ -129,11 +129,32 @@ const canalDe = bodega => CANAL_DE_BODEGA.get(String(bodega ?? '').trim().toUppe
    ExcelDataSource es intercambiable por ApiDataSource sin tocar nada aguas abajo.
    ==========================================================================*/
 
+// Cuando el HTML está publicado (GitHub Pages), esta ruta relativa apunta al
+// Excel que la Rutina de SIESA mantiene al día junto al propio archivo. Si se
+// abre el HTML como archivo local (doble clic) el fetch falla por CORS de
+// file:// y App cae al flujo manual de siempre — no hace falta detectarlo.
+const RUTA_DATO_AUTOMATICO = 'lenta-rotacion/data/inventario-siesa.xlsx';
+
 const ExcelDataSource = {
   id: 'excel',
   etiqueta: 'Excel manual',
   async load(file) {
     const buf = await file.arrayBuffer();
+    return this._parse(buf, { fuente: 'Excel manual', archivo: file.name, cargadoEn: new Date(), esAutomatico: false });
+  },
+  async loadFromUrl(url) {
+    const res = await fetch(url, { cache: 'no-store' });
+    if (!res.ok) throw new Error(`HTTP ${res.status} al pedir ${url}`);
+    const buf = await res.arrayBuffer();
+    const lastModified = res.headers.get('last-modified');
+    return this._parse(buf, {
+      fuente: 'SIESA (automático)',
+      archivo: url.split('/').pop(),
+      cargadoEn: lastModified ? new Date(lastModified) : new Date(),
+      esAutomatico: true,
+    });
+  },
+  _parse(buf, metaExtra) {
     const wb = XLSX.read(buf, { cellDates: false });
     const sheets = wb.SheetNames;
     const ws = wb.Sheets[sheets[0]];
@@ -150,7 +171,7 @@ const ExcelDataSource = {
 
     return {
       rows, columns, sheets,
-      meta: { fuente: 'Excel manual', archivo: file.name, cargadoEn: new Date(), hojaUsada: sheets[0], filaEncabezado: hIdx + 1 },
+      meta: { ...metaExtra, hojaUsada: sheets[0], filaEncabezado: hIdx + 1 },
     };
   },
 };
@@ -2708,6 +2729,27 @@ export default function App() {
     }
   }, [procesar]);
 
+  // Trae el Excel que la Rutina publica junto al HTML, sin pedirle a nadie que
+  // lo descargue ni lo arrastre. `avisarSiFalla` solo se usa en el refresco
+  // manual: en el intento silencioso al abrir la página, un 404 (todavía no
+  // hay dato publicado) o un fetch bloqueado (HTML abierto como archivo
+  // local) simplemente deja la pantalla de carga manual de siempre.
+  const cargarAutomatico = useCallback(async ({ avisarSiFalla = false } = {}) => {
+    try {
+      const rawData = await ExcelDataSource.loadFromUrl(RUTA_DATO_AUTOMATICO);
+      if (!rawData.rows.length) throw new Error('El archivo automático no contiene filas de datos.');
+      setRaw(rawData);
+      const m = detectarMapeo(rawData.columns);
+      const completo = Object.keys(ALIAS).every(c => m.dim[c]) && Object.keys(m.rangos).length > 0;
+      if (completo) procesar(rawData, m);
+      else { setMapeo(m); setEstado('configurar'); }
+    } catch (e) {
+      if (avisarSiFalla) setError(e.message || 'No se pudo actualizar desde SIESA.');
+    }
+  }, [procesar]);
+
+  useEffect(() => { cargarAutomatico(); /* solo al montar */ }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Cada dimensión opcional solo se ofrece (filtro + sección) si el archivo
   // cargado realmente trae su columna.
   const dimsPresentes = useMemo(() => {
@@ -2908,6 +2950,14 @@ export default function App() {
               style={{ borderColor: C.b0, color: C.t2 }}>
               <FileSpreadsheet className="h-3.5 w-3.5" />{raw.meta.archivo}
             </button>
+            {raw.meta.esAutomatico && (
+              <button onClick={() => cargarAutomatico({ avisarSiFalla: true })}
+                title="Vuelve a pedir el Excel que la Rutina publicó, sin recargar la página"
+                className="flex items-center gap-1.5 rounded-md border px-2 py-1 font-medium"
+                style={{ borderColor: C.b0, color: C.t2 }}>
+                <Clock className="h-3.5 w-3.5" />Actualizar
+              </button>
+            )}
 
             <button onClick={exportar} disabled={exportando === 'generando' || !filtrados.length}
               title="Descarga un Excel con los filtros aplicados, ya organizado en hojas por marca, gráfico, referencia y bodega"

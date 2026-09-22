@@ -29,9 +29,20 @@ corregir el mapeo antes de procesar.
 
 `lenta-rotacion/data/inventario-siesa.xlsx` (cuando existe) es una copia del
 Excel que SIESA publica en vivo en SharePoint, mantenida al día por una
-Rutina programada — no se edita a mano. El flujo de carga del dashboard no
-cambia: para usar el dato fresco, descarga ese archivo del repo y cárgalo con
-el botón de siempre.
+Rutina programada — no se edita a mano.
+
+Cuando `lenta-rotacion.html` está publicado (por ejemplo en GitHub Pages), al
+abrirlo intenta traer ese archivo solo, sin que nadie lo descargue ni lo
+cargue a mano: si lo encuentra y trae las columnas obligatorias, el panel
+queda listo de una vez, con un botón **Actualizar** en el encabezado para
+volver a pedirlo sin recargar la página. Si no lo encuentra (todavía no existe
+el archivo) o el HTML se abrió como archivo local (doble clic — el navegador
+bloquea ese `fetch` por CORS de `file://`), cae sin aviso al flujo manual de
+siempre: arrastrar o seleccionar el Excel.
+
+Quien tenga el link de la página publicada ve el dato al día sin hacer nada;
+solo quien tenga el conector de Microsoft 365 y permiso de escritura sobre
+este repo puede actualizar lo que todos ven.
 
 La actualización corre así:
 
