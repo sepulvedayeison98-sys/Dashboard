@@ -217,7 +217,11 @@ function histGuardar(historialPrevio, kpisGlobales) {
    Reconoce encabezados por alias y las columnas de rango por patrón numérico.
    ==========================================================================*/
 
-const norm = s => String(s ?? '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim();
+// El guion bajo cuenta como separador de palabra, igual que el espacio \u2014 el
+// export en vivo de SIESA trae encabezados en snake_case (id_item,
+// existencia_0_30) y sin este reemplazo ni el alias ni el patr\u00f3n de rango
+// los reconocen (\b no marca l\u00edmite entre dos caracteres de palabra).
+const norm = s => String(s ?? '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/_/g, ' ').replace(/\s+/g, ' ').trim();
 
 /* B\u00fasqueda con operadores, para no depender de una sola palabra suelta:
      ich 505        \u2192 deben aparecer ambos (Y)
@@ -266,11 +270,14 @@ const ALIAS_OPC = {
   grafico:        ['graficos', 'grafico'],
 };
 
+// El conector (a / - / hasta / y) es opcional: "existencia_0_30" normaliza a
+// "existencia 0 30" (números separados solo por espacio, sin palabra de
+// enlace), y debe reconocerse igual que "0 a 30 días" o "0-30".
 const PATRON_RANGO = [
-  { key: '0-30',  re: /\b0\s*(?:a|-|hasta|y)\s*30\b/ },
-  { key: '30-60', re: /\b30\s*(?:a|-|hasta|y)\s*60\b/ },
-  { key: '60-90', re: /\b60\s*(?:a|-|hasta|y)\s*90\b/ },
-  { key: '+90',   re: /(?:\bmas de\s*90|\b90\s*(?:o\s*mas|\+|en adelante|y mas)|\+\s*90)/ },
+  { key: '0-30',  re: /\b0\s*(?:a|-|hasta|y)?\s*30\b/ },
+  { key: '30-60', re: /\b30\s*(?:a|-|hasta|y)?\s*60\b/ },
+  { key: '60-90', re: /\b60\s*(?:a|-|hasta|y)?\s*90\b/ },
+  { key: '+90',   re: /\bmas de\s*90\b|\b90\s*(?:\+|mas|o\s*mas|y\s*mas|en adelante)\b|\+\s*90\b/ },
 ];
 const ES_MONETARIA = /costo|valor|precio|\$|importe|monto/;
 

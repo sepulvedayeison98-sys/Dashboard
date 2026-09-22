@@ -29,22 +29,36 @@ const XLSX = require("xlsx");
 const ROOT = path.resolve(__dirname, "..");
 const DESTINO = path.join(ROOT, "lenta-rotacion", "data", "inventario-siesa.xlsx");
 
-// Mismas obligatorias que documenta lenta-rotacion/README.md — si el detector
-// del dashboard no las encuentra, la carga falla ahí también. Se valida acá
-// primero para no publicar un archivo que el dashboard va a rechazar.
-const COLUMNAS_OBLIGATORIAS = ["Bodega", "Ítem", "Marca", "Referencia"];
+// Mismo detector por alias que ALIAS/detectarMapeo() usa en
+// DashboardLentaRotacion.jsx — si cambian los alias ahí, cambiarlos acá
+// también. El export en vivo de SIESA trae encabezados en snake_case
+// (bodega, id_item, marca, referencia_producto), no los nombres bonitos que
+// documenta el README, así que la comparación es por alias + substring
+// (igual que hace el dashboard), no por igualdad literal.
+const norm = s => String(s == null ? "" : s)
+  .toLowerCase()
+  .normalize("NFD")
+  .replace(/\p{Diacritic}/gu, "")
+  .replace(/\s+/g, " ")
+  .trim();
 
-// El export en vivo de SIESA no siempre trae los encabezados letra por letra
-// (p.ej. "Item" sin tilde, "MARCAS" en mayúscula/plural, "REFERENCIA" en
-// mayúscula) — se compara sin tildes, sin mayúsculas y sin el plural simple
-// para no rechazar un archivo válido solo por esa variación cosmética.
-function normalizarColumna(c) {
-  return String(c == null ? "" : c)
-    .trim()
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
-    .replace(/s$/, "");
+const ALIAS_OBLIGATORIAS = {
+  Bodega: ["bodega", "bodegas", "almacen", "centro", "cod bodega", "deposito"],
+  Ítem: ["item", "items", "codigo item", "cod item", "sku", "codigo", "material"],
+  Marca: ["marca", "marcas", "nombre marca", "marca producto", "desc marca"],
+  Referencia: ["referencia", "referencias", "ref", "modelo", "cod referencia"],
+};
+
+function encontrarColumna(columnas, alias) {
+  for (const a of alias) {
+    const hit = columnas.find(c => norm(c) === a);
+    if (hit) return hit;
+  }
+  for (const a of alias) {
+    const hit = columnas.find(c => norm(c).includes(a));
+    if (hit) return hit;
+  }
+  return null;
 }
 
 function fallar(msg) {
@@ -78,11 +92,10 @@ function main() {
   let hIdx = matrix.findIndex(r => r.filter(c => typeof c === "string" && c.trim()).length >= 3);
   if (hIdx < 0) hIdx = 0;
   const columnas = matrix[hIdx].map(c => (c == null ? "" : String(c).trim()));
-  const columnasNormalizadas = columnas.map(normalizarColumna);
 
-  const faltantes = COLUMNAS_OBLIGATORIAS.filter(
-    c => !columnasNormalizadas.includes(normalizarColumna(c))
-  );
+  const faltantes = Object.entries(ALIAS_OBLIGATORIAS)
+    .filter(([, alias]) => !encontrarColumna(columnas, alias))
+    .map(([nombre]) => nombre);
   if (faltantes.length) {
     fallar(
       `faltan columnas obligatorias: ${faltantes.join(", ")} ` +
@@ -105,7 +118,7 @@ function main() {
   fs.writeFileSync(DESTINO, buf);
   console.log(`CAMBIÓ — publicado ${path.relative(ROOT, DESTINO)}`);
   console.log(`  hoja usada: "${hoja}"  ·  filas: ${filas}  ·  columnas: ${columnas.filter(Boolean).length}`);
-  console.log(`  obligatorias presentes: ${COLUMNAS_OBLIGATORIAS.join(", ")}`);
+  console.log(`  obligatorias presentes: ${Object.keys(ALIAS_OBLIGATORIAS).join(", ")}`);
 }
 
 main();
