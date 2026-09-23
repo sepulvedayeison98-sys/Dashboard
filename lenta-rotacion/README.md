@@ -4,8 +4,9 @@ Herramienta analítica para identificar inventario que no rota. Lee un Excel de
 inventario, lo normaliza y lo presenta en 12 secciones con drill-down, filtros
 por canal y exportación a un libro Excel auditable.
 
-Corre entero en el navegador: no hay servidor, no hay base de datos, y el
-archivo que carga el usuario nunca sale de su máquina.
+Corre entero en el navegador. El archivo que carga el usuario no sale de su
+máquina, salvo que lo publique para todos con el botón **Publicar para todos**
+(ver abajo).
 
 ## Uso
 
@@ -40,9 +41,9 @@ el archivo) o el HTML se abrió como archivo local (doble clic — el navegador
 bloquea ese `fetch` por CORS de `file://`), cae sin aviso al flujo manual de
 siempre: arrastrar o seleccionar el Excel.
 
-Quien tenga el link de la página publicada ve el dato al día sin hacer nada;
-solo quien tenga el conector de Microsoft 365 y permiso de escritura sobre
-este repo puede actualizar lo que todos ven.
+Quien tenga el link de la página publicada ve el dato al día sin hacer nada.
+Lo que todos ven solo lo cambia la Rutina, o alguien con la clave de admin
+que use **Publicar para todos**.
 
 La actualización corre así:
 
@@ -63,6 +64,32 @@ La actualización corre así:
 Este archivo es independiente del `Inventario.xlsx` de la raíz del repo (el
 que usan `pipeline.html`, `montacargas.html` y `admin.html`) — nunca lo toca
 ni depende de él.
+
+## Publicar un Excel manual para todos
+
+Cargar un Excel con el botón solo cambia tu pantalla. Para que lo vean todos,
+usa **Publicar para todos** en la barra superior. Pide la clave de admin y tu
+nombre una vez, y quedan guardados en ese navegador. El archivo se guarda en
+Supabase (bucket `lenta-rotacion` y tabla `lenta_rotacion_publicacion`) a
+través de la Edge Function `publicar-lenta-rotacion`.
+
+**Qué ve cada persona al abrir el panel:** gana lo más reciente. Si la
+publicación manual es posterior a la fecha en que se guardó el Excel de SIESA
+del repo, todos ven la manual. En cuanto la Rutina trae un Excel de SIESA
+guardado después, vuelve a ganar SIESA sin que nadie haga nada. La barra
+muestra de dónde viene el dato y de qué fecha es. El botón aplica la misma
+guarda que el script: bloquea archivos con filas vacías en medio de los datos
+y pide confirmación si las filas caen más de 20 % o si el Excel es más viejo
+que el que ven todos.
+
+Instalación, una sola vez, por alguien con acceso al proyecto de Supabase:
+
+1. Correr `supabase/security/lenta-rotacion-publicacion.sql` en el SQL Editor.
+2. `supabase functions deploy publicar-lenta-rotacion --no-verify-jwt`
+3. `supabase secrets set ADMIN_SECRET=<clave>`, si todavía no existe.
+
+Mientras no esté instalado, el botón avisa que el servicio no está disponible
+y el panel funciona igual que antes.
 
 ## Exportación a Excel
 

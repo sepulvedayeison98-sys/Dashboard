@@ -135,26 +135,53 @@ const canalDe = bodega => CANAL_DE_BODEGA.get(String(bodega ?? '').trim().toUppe
 // file:// y App cae al flujo manual de siempre — no hace falta detectarlo.
 const RUTA_DATO_AUTOMATICO = 'lenta-rotacion/data/inventario-siesa.xlsx';
 
+// Publicación manual compartida (Supabase). Misma URL y publishable key que
+// shared/config.js — se copian porque este HTML es autocontenido. La key es
+// de solo lectura por RLS; publicar pasa por la Edge Function con la clave de
+// admin (ver supabase/functions/publicar-lenta-rotacion).
+const SUPA_URL = 'https://rfysmwpdzlxmadobdvzh.supabase.co';
+const SUPA_KEY = 'sb_publishable_LHZWmeFFmnua2j3y8dqqdw_rx0u3vad';
+const SUPA_H = { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}` };
+const URL_PUBLICACION = `${SUPA_URL}/rest/v1/lenta_rotacion_publicacion?id=eq.1&select=*`;
+const URL_PUBLICAR = `${SUPA_URL}/functions/v1/publicar-lenta-rotacion`;
+const urlArchivoPublicado = ruta => `${SUPA_URL}/storage/v1/object/public/lenta-rotacion/${ruta}`;
+
+// Nunca lanza: si la tabla no existe todavía o Supabase no responde, el panel
+// sigue con el dato de SIESA como siempre.
+async function leerPublicacion() {
+  try {
+    const res = await fetch(URL_PUBLICACION, { cache: 'no-store', headers: SUPA_H });
+    if (!res.ok) return null;
+    const filas = await res.json();
+    return Array.isArray(filas) && filas[0] ? filas[0] : null;
+  } catch (_) { return null; }
+}
+
 const ExcelDataSource = {
   id: 'excel',
   etiqueta: 'Excel manual',
   async load(file) {
     const buf = await file.arrayBuffer();
-    return this._parse(buf, { fuente: 'Excel manual', archivo: file.name, cargadoEn: new Date(), esAutomatico: false });
+    return this._parse(buf, { fuente: 'Excel manual', archivo: file.name, cargadoEn: new Date(), esAutomatico: false },
+      new Date(file.lastModified));
   },
-  async loadFromUrl(url) {
+  async loadFromUrl(url, metaExtra = {}) {
     const res = await fetch(url, { cache: 'no-store' });
     if (!res.ok) throw new Error(`HTTP ${res.status} al pedir ${url}`);
     const buf = await res.arrayBuffer();
     const lastModified = res.headers.get('last-modified');
+    const cargadoEn = lastModified ? new Date(lastModified) : new Date();
     return this._parse(buf, {
       fuente: 'SIESA (automático)',
       archivo: url.split('/').pop(),
-      cargadoEn: lastModified ? new Date(lastModified) : new Date(),
+      cargadoEn,
       esAutomatico: true,
-    });
+      ...metaExtra,
+    }, cargadoEn);
   },
-  _parse(buf, metaExtra) {
+  // fechaDato = cuándo se guardó el Excel (propiedad interna del libro); si no
+  // la trae, la fecha de respaldo. Es lo que decide qué versión ve todo el mundo.
+  _parse(buf, metaExtra, fechaRespaldo) {
     const wb = XLSX.read(buf, { cellDates: false });
     const sheets = wb.SheetNames;
     const ws = wb.Sheets[sheets[0]];
@@ -169,9 +196,19 @@ const ExcelDataSource = {
       .filter(r => r.some(c => c !== null && c !== ''))
       .map(r => Object.fromEntries(columns.map((c, i) => [c, r[i] ?? null])));
 
+    // Filas totalmente vacías dentro del rango de la hoja: firma de un Excel
+    // incompleto (así llegó el corte del 23-sep: 10.000 filas con datos y
+    // 15.451 en blanco). Mismo criterio que scripts/sync-lenta-rotacion.js.
+    const rango = ws['!ref'] ? XLSX.utils.decode_range(ws['!ref']) : null;
+    const filasVacias = rango ? Math.max(0, (rango.e.r - rango.s.r + 1) - matrix.length) : 0;
+
+    const fechaLibro = wb.Props && wb.Props.ModifiedDate ? new Date(wb.Props.ModifiedDate) : null;
+    const fechaDato = metaExtra.fechaDato ? new Date(metaExtra.fechaDato)
+      : fechaLibro && !isNaN(fechaLibro) ? fechaLibro : fechaRespaldo;
+
     return {
-      rows, columns, sheets,
-      meta: { ...metaExtra, hojaUsada: sheets[0], filaEncabezado: hIdx + 1 },
+      rows, columns, sheets, buf,
+      meta: { ...metaExtra, fechaDato, filasVacias, hojaUsada: sheets[0], filaEncabezado: hIdx + 1 },
     };
   },
 };
@@ -2835,15 +2872,31 @@ export default function App() {
     }
   }, [procesar]);
 
-  // Trae el Excel que la Rutina publica junto al HTML, sin pedirle a nadie que
-  // lo descargue ni lo arrastre. `avisarSiFalla` solo se usa en el refresco
-  // manual: en el intento silencioso al abrir la página, un 404 (todavía no
-  // hay dato publicado) o un fetch bloqueado (HTML abierto como archivo
-  // local) simplemente deja la pantalla de carga manual de siempre.
+  // Lo que ven todos al abrir: el Excel de SIESA que la Rutina publica junto
+  // al HTML, salvo que alguien haya publicado uno a mano DESPUÉS de que se
+  // guardó ese Excel de SIESA — gana lo más reciente. `avisarSiFalla` solo se
+  // usa en el refresco manual: en el intento silencioso al abrir la página, un
+  // 404 o un fetch bloqueado (HTML abierto como archivo local) simplemente
+  // deja la pantalla de carga manual de siempre.
+  const compartido = useRef(null);   // { filas, fechaDato } de lo que ven todos
   const cargarAutomatico = useCallback(async ({ avisarSiFalla = false } = {}) => {
     try {
-      const rawData = await ExcelDataSource.loadFromUrl(RUTA_DATO_AUTOMATICO);
+      const [siesa, pub] = await Promise.all([
+        ExcelDataSource.loadFromUrl(RUTA_DATO_AUTOMATICO).catch(e => e),
+        leerPublicacion(),
+      ]);
+      let rawData = siesa instanceof Error ? null : siesa;
+      if (pub && (!rawData || new Date(pub.publicado_en) > rawData.meta.fechaDato)) {
+        try {
+          rawData = await ExcelDataSource.loadFromUrl(urlArchivoPublicado(pub.ruta), {
+            fuente: 'Publicado a mano', archivo: pub.archivo, publicadoPor: pub.publicado_por,
+            fechaDato: pub.fecha_dato, cargadoEn: new Date(pub.publicado_en),
+          });
+        } catch (_) { /* Storage caído: se queda con SIESA si lo hay */ }
+      }
+      if (!rawData) throw (siesa instanceof Error ? siesa : new Error('No hay dato publicado.'));
       if (!rawData.rows.length) throw new Error('El archivo automático no contiene filas de datos.');
+      compartido.current = { filas: rawData.rows.length, fechaDato: rawData.meta.fechaDato };
       setRaw(rawData);
       const m = detectarMapeo(rawData.columns);
       const completo = Object.keys(ALIAS).every(c => m.dim[c]) && Object.keys(m.rangos).length > 0;
@@ -2853,6 +2906,61 @@ export default function App() {
       if (avisarSiFalla) setError(e.message || 'No se pudo actualizar desde SIESA.');
     }
   }, [procesar]);
+
+  // Publica para todos el Excel cargado a mano. La clave de admin y el nombre
+  // se piden una vez y quedan en este navegador; la clave nunca va en el HTML.
+  const [publicando, setPublicando] = useState(null);   // null | 'enviando' | 'ok' | mensaje de error
+  // Cada archivo nuevo empieza sin mensaje de publicación pendiente.
+  useEffect(() => { setPublicando(null); }, [raw]);  // eslint-disable-line react-hooks/exhaustive-deps
+  const publicar = useCallback(async () => {
+    const m = raw && raw.meta;
+    if (!m || m.esAutomatico) return;
+    if (m.filasVacias > 0) {
+      setPublicando(`El archivo trae ${nf.format(m.filasVacias)} filas vacías en medio de los datos: parece incompleto, no se publica.`);
+      return;
+    }
+    const ref = compartido.current;
+    if (ref && raw.rows.length < ref.filas * 0.8 && !window.confirm(
+      `Este archivo tiene ${nf.format(raw.rows.length)} filas y el que ven todos tiene ${nf.format(ref.filas)} (más de 20 % menos). ¿Publicar de todas formas?`)) return;
+    if (ref && m.fechaDato < ref.fechaDato && !window.confirm(
+      `Este Excel es del ${fmtFecha(m.fechaDato)}, más viejo que el que ven todos (${fmtFecha(ref.fechaDato)}). ¿Publicar de todas formas?`)) return;
+
+    const leer = k => { try { return localStorage.getItem(k) || ''; } catch (_) { return ''; } };
+    const guardar = (k, v) => { try { v ? localStorage.setItem(k, v) : localStorage.removeItem(k); } catch (_) {} };
+    const clave = leer('lenta_rotacion_clave_admin') || (window.prompt('Clave de admin para publicar:') || '').trim();
+    if (!clave) return;
+    const nombre = leer('lenta_rotacion_publicador') || (window.prompt('¿Tu nombre? (se muestra a quien vea el panel)') || '').trim();
+    if (!nombre) return;
+
+    setPublicando('enviando');
+    try {
+      const res = await fetch(URL_PUBLICAR, {
+        method: 'POST',
+        headers: {
+          ...SUPA_H,
+          'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          'x-admin-secret': clave,
+          'x-archivo': encodeURIComponent(m.archivo),
+          'x-publicado-por': encodeURIComponent(nombre),
+          'x-fecha-dato': m.fechaDato.toISOString(),
+          'x-filas': String(raw.rows.length),
+        },
+        body: raw.buf,
+      });
+      if (res.status === 403) { guardar('lenta_rotacion_clave_admin', ''); throw new Error('Clave de admin incorrecta.'); }
+      if (!res.ok) throw new Error(res.status === 404
+        ? 'El servicio de publicación todavía no está instalado en Supabase.'
+        : `No se pudo publicar (HTTP ${res.status}).`);
+      guardar('lenta_rotacion_clave_admin', clave);
+      guardar('lenta_rotacion_publicador', nombre);
+      setPublicando('ok');
+      await cargarAutomatico({ avisarSiFalla: true });
+    } catch (e) {
+      setPublicando(e instanceof TypeError
+        ? 'No se pudo contactar el servicio de publicación (¿ya está instalado en Supabase?).'
+        : e.message);
+    }
+  }, [raw, cargarAutomatico]);
 
   useEffect(() => { cargarAutomatico(); /* solo al montar */ }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -3050,8 +3158,10 @@ export default function App() {
           </div>
           <SelectorCanal valor={canal} onChange={setCanal} porCanal={porCanal} />
           <div className="flex items-center gap-4 text-[11px]" style={{ color: C.t2 }}>
-            <span className="flex items-center gap-1.5"><Database className="h-3.5 w-3.5" />Fuente: {raw.meta.fuente}</span>
-            <span className="flex items-center gap-1.5"><Clock className="h-3.5 w-3.5" />Última carga: {fmtFecha(raw.meta.cargadoEn)}</span>
+            <span className="flex items-center gap-1.5"><Database className="h-3.5 w-3.5" />Fuente: {raw.meta.fuente}{raw.meta.publicadoPor ? ` por ${raw.meta.publicadoPor}` : ''}</span>
+            <span className="flex items-center gap-1.5" title={`Cargado en este panel: ${fmtFecha(raw.meta.cargadoEn)}`}>
+              <Clock className="h-3.5 w-3.5" />Dato del: {fmtFecha(raw.meta.fechaDato || raw.meta.cargadoEn)}
+            </span>
             <button onClick={() => setVerCarga(v => !v)} className="flex items-center gap-1.5 rounded-md border px-2 py-1 font-medium"
               style={{ borderColor: C.b0, color: C.t2 }}>
               <FileSpreadsheet className="h-3.5 w-3.5" />{raw.meta.archivo}
@@ -3063,6 +3173,17 @@ export default function App() {
                 style={{ borderColor: C.b0, color: C.t2 }}>
                 <Clock className="h-3.5 w-3.5" />Actualizar
               </button>
+            )}
+            {!raw.meta.esAutomatico && (
+              <button onClick={publicar} disabled={publicando === 'enviando'}
+                title="Deja este Excel como el que ven todos al abrir el panel (pide la clave de admin)"
+                className="flex items-center gap-1.5 rounded-md border px-2 py-1 font-medium disabled:opacity-40"
+                style={{ borderColor: C.accent, color: C.t1 }}>
+                <Upload className="h-3.5 w-3.5" />{publicando === 'enviando' ? 'Publicando…' : 'Publicar para todos'}
+              </button>
+            )}
+            {publicando && !['enviando', 'ok'].includes(publicando) && (
+              <span className="max-w-[280px] text-[10px] leading-tight" style={{ color: C.red }}>{publicando}</span>
             )}
 
             <button onClick={exportar} disabled={exportando === 'generando' || !filtrados.length}
