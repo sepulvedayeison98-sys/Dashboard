@@ -55,6 +55,10 @@ La actualización corre así:
    reemplaza `lenta-rotacion/data/inventario-siesa.xlsx` y lo reporta; si es
    idéntico al último, no hace nada — para no ensuciar el historial de git
    con commits vacíos.
+4. Antes de publicar, rechaza el archivo si trae filas vacías en medio de
+   los datos o si sus filas caen más de 20 % frente al publicado — firma de
+   una lectura incompleta de SharePoint (pasó el 23-sep: 10.000 de 25.451
+   filas). `--aceptar-caida` salta esa comprobación cuando la caída es real.
 
 Este archivo es independiente del `Inventario.xlsx` de la raíz del repo (el
 que usan `pipeline.html`, `montacargas.html` y `admin.html`) — nunca lo toca

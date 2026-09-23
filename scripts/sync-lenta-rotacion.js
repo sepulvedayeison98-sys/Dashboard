@@ -9,14 +9,16 @@
  * reemplazar el archivo publicado solo si el contenido cambió de verdad.
  *
  * Uso:
- *   node scripts/sync-lenta-rotacion.js <ruta-al-xlsx-descargado>
+ *   node scripts/sync-lenta-rotacion.js <ruta-al-xlsx-descargado> [--aceptar-caida]
  *
  * Salida:
  *   - Código 0 y "CAMBIÓ" en stdout si reemplazó lenta-rotacion/data/inventario-siesa.xlsx
  *   - Código 0 y "SIN CAMBIOS" si el contenido era idéntico (no toca nada — evita
  *     commits vacíos)
- *   - Código 1 si el archivo no abre como Excel o le faltan columnas obligatorias
- *     (nunca reemplaza el archivo publicado con algo sospechoso)
+ *   - Código 1 si el archivo no abre como Excel, le faltan columnas obligatorias,
+ *     trae filas vacías en medio de los datos o sus filas caen más de 20 % frente
+ *     al publicado (nunca reemplaza el archivo publicado con algo sospechoso;
+ *     --aceptar-caida salta las dos últimas comprobaciones)
  *
  * Requiere: node_modules/xlsx — si no está, correr `npm install` en la raíz
  * primero (no forma parte de la instalación por defecto del repo).
@@ -105,6 +107,26 @@ function main() {
 
   const filas = matrix.length - hIdx - 1;
   const hashSha = buf => crypto.createHash("sha256").update(buf).digest("hex");
+
+  // Guarda de integridad: una reconstrucción incompleta del volcado de
+  // SharePoint dejó 15.451 filas en blanco y solo 10.000 con datos (23-sep),
+  // y pasó la validación de encabezados. Se rechaza antes de publicar.
+  const aceptarCaida = process.argv.includes("--aceptar-caida");
+  const conBlancas = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, blankrows: true });
+  const vacias = conBlancas.length - matrix.length;
+  if (vacias > 0 && !aceptarCaida) {
+    fallar(`${vacias} filas vacías dentro del rango de datos (${filas} con datos) — ` +
+      `reconstrucción incompleta, no se publica (usar --aceptar-caida si es legítimo)`);
+  }
+  if (fs.existsSync(DESTINO) && !aceptarCaida) {
+    const wbPub = XLSX.read(fs.readFileSync(DESTINO));
+    const wsPub = wbPub.Sheets[wbPub.SheetNames[0]];
+    const filasPub = XLSX.utils.sheet_to_json(wsPub, { header: 1, defval: null, blankrows: false }).length - 1;
+    if (filasPub > 0 && filas < filasPub * 0.8) {
+      fallar(`las filas con datos caen de ${filasPub} (publicado) a ${filas} (nuevo), más de 20 % — ` +
+        `no se publica (usar --aceptar-caida si es legítimo)`);
+    }
+  }
 
   if (fs.existsSync(DESTINO)) {
     const actual = fs.readFileSync(DESTINO);
