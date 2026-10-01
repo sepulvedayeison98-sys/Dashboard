@@ -111,11 +111,25 @@ function main() {
   // Guarda de integridad: una reconstrucción incompleta del volcado de
   // SharePoint dejó 15.451 filas en blanco y solo 10.000 con datos (23-sep),
   // y pasó la validación de encabezados. Se rechaza antes de publicar.
+  //
+  // Solo cuentan los huecos que están ANTES de la última fila con datos
+  // (eso sí es señal de una reconstrucción trunca). Filas en blanco después
+  // de la última fila real son normales — sobran del rango usado de Excel
+  // (celdas que alguna vez tuvieron contenido) y no indican datos perdidos;
+  // el 1-oct pasó esto exactamente: 4.661 blancas, todas después de la fila
+  // 21.386, cero intercaladas — se habría rechazado un archivo sano.
   const aceptarCaida = process.argv.includes("--aceptar-caida");
   const conBlancas = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, blankrows: true });
-  const vacias = conBlancas.length - matrix.length;
-  if (vacias > 0 && !aceptarCaida) {
-    fallar(`${vacias} filas vacías dentro del rango de datos (${filas} con datos) — ` +
+  let ultimaConDatos = -1;
+  for (let i = conBlancas.length - 1; i >= 0; i--) {
+    const r = conBlancas[i];
+    if (r && r.some(c => c !== null && c !== "")) { ultimaConDatos = i; break; }
+  }
+  const vaciasIntercaladas = conBlancas
+    .slice(0, ultimaConDatos + 1)
+    .filter(r => !r || r.every(c => c === null || c === "")).length;
+  if (vaciasIntercaladas > 0 && !aceptarCaida) {
+    fallar(`${vaciasIntercaladas} filas vacías intercaladas entre los datos (${filas} con datos) — ` +
       `reconstrucción incompleta, no se publica (usar --aceptar-caida si es legítimo)`);
   }
   if (fs.existsSync(DESTINO) && !aceptarCaida) {
