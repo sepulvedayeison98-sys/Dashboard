@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import * as XLSX from 'xlsx';
 import { PieChart, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip, Treemap, AreaChart, Area, LabelList } from 'recharts';
-import { Upload, FileSpreadsheet, CheckCircle2, AlertTriangle, XCircle, Search, X, Database, Clock, Settings2, ChevronRight, Lock, Filter, ArrowUpDown, ArrowUp, ArrowDown, Layers, Package, Warehouse, Tag, TrendingUp, TrendingDown, Minus, Palette, Download, Globe, Boxes, Shapes } from 'lucide-react';
+import { Upload, FileSpreadsheet, CheckCircle2, AlertTriangle, XCircle, Search, X, Database, Clock, Settings2, ChevronRight, Lock, Filter, ArrowUpDown, ArrowUp, ArrowDown, Layers, Package, Warehouse, Tag, TrendingUp, TrendingDown, Minus, Palette, Download, Globe, Boxes, Shapes, Maximize2, PanelRight } from 'lucide-react';
 import ExcelJS from 'exceljs';
 import { construirLibro, construirHTMLExcel } from './exportExcel.js';
 
@@ -1583,7 +1583,20 @@ const ORDEN_FILTROS = [
   ['bodega', 'Bodega'],
 ];
 
+/* El explorador abre a pantalla completa por defecto; la vista lateral queda
+   como opción y se recuerda por navegador. */
+const MODO_PANEL_KEY = 'lr-panel-modo';
+
 function PanelDetalle({ hechos, ruta, setRuta, onCerrar, onFiltrar }) {
+  const [modo, setModo] = useState(() => {
+    try { return localStorage.getItem(MODO_PANEL_KEY) === 'lateral' ? 'lateral' : 'completo'; } catch (_) { return 'completo'; }
+  });
+  const cambiarModo = () => {
+    const m = modo === 'completo' ? 'lateral' : 'completo';
+    setModo(m);
+    try { localStorage.setItem(MODO_PANEL_KEY, m); } catch (_) {}
+  };
+  const completo = modo === 'completo';
   const via = ruta.via || 'marca';
   const valores = ruta.valores || {};
   // Las dimensiones opcionales solo existen si el archivo trae su columna:
@@ -1628,9 +1641,9 @@ function PanelDetalle({ hechos, ruta, setRuta, onCerrar, onFiltrar }) {
 
   return (
     <>
-      <div className="fixed inset-0 z-30" style={{ backgroundColor: 'rgba(20,24,31,0.28)' }} onClick={onCerrar} />
-      <aside className="fixed right-0 top-0 z-40 flex h-full w-full max-w-xl flex-col shadow-2xl" style={{ backgroundColor: C.bg1 }}>
-        <div className="flex items-start justify-between gap-3 border-b px-5 py-3.5" style={{ borderColor: C.b0 }}>
+      {!completo && <div className="fixed inset-0 z-30" style={{ backgroundColor: 'rgba(20,24,31,0.28)' }} onClick={onCerrar} />}
+      <aside className={completo ? 'fixed inset-0 z-40 flex flex-col' : 'fixed right-0 top-0 z-40 flex h-full w-full max-w-xl flex-col shadow-2xl'} style={{ backgroundColor: C.bg1 }}>
+        <div className={`flex items-start justify-between gap-3 border-b py-3.5 ${completo ? 'px-6' : 'px-5'}`} style={{ borderColor: C.b0 }}>
           <div className="min-w-0">
             <div className="text-[10px] font-medium uppercase tracking-wider" style={{ color: C.t3 }}>
               Explorador · entrada por {CAMPO_META[via].singular.toLowerCase()}
@@ -1649,11 +1662,18 @@ function PanelDetalle({ hechos, ruta, setRuta, onCerrar, onFiltrar }) {
               ))}
             </div>
           </div>
-          <button onClick={onCerrar} className="shrink-0 rounded p-1 hover:brightness-125"><X className="h-4 w-4" style={{ color: C.t2 }} /></button>
+          <div className="flex shrink-0 items-center gap-1">
+            <button onClick={cambiarModo} className="flex items-center gap-1.5 rounded px-2 py-1 text-[11px] hover:brightness-125"
+              style={{ color: C.t2 }} title={completo ? 'Ver como panel lateral' : 'Ver a pantalla completa'}>
+              {completo ? <PanelRight className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+              {completo ? 'Vista lateral' : 'Pantalla completa'}
+            </button>
+            <button onClick={onCerrar} className="rounded p-1 hover:brightness-125" title="Cerrar"><X className="h-4 w-4" style={{ color: C.t2 }} /></button>
+          </div>
         </div>
 
-        <div className="border-b px-5 py-3" style={{ borderColor: C.bg3, backgroundColor: C.bg0 }}>
-          <div className="grid grid-cols-4 gap-3">
+        <div className={`border-b py-3 ${completo ? 'px-6' : 'px-5'}`} style={{ borderColor: C.bg3, backgroundColor: C.bg0 }}>
+          <div className={`grid grid-cols-4 gap-3 ${completo ? 'max-w-3xl' : ''}`}>
             {[['Unidades', nf.format(kpis.total), C.t1],
               ['Crítico ≥60', nf.format(kpis.critico), C.red],
               ['% crítico', pf(kpis.pctCritico, 1), C.red],
@@ -1667,11 +1687,11 @@ function PanelDetalle({ hechos, ruta, setRuta, onCerrar, onFiltrar }) {
           <div className="mt-2.5"><BarraComposicion rangos={kpis.porRango} total={kpis.total} alto={6} /></div>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+        <div className={`min-h-0 flex-1 overflow-y-auto py-4 ${completo ? 'px-6' : 'px-5'}`}>
           {!nivel ? (
             <>
               <div className="mb-3 text-xs font-semibold" style={{ color: C.t1 }}>Desglose por antigüedad</div>
-              <div className="space-y-2">
+              <div className={completo ? 'grid grid-cols-2 gap-2 lg:grid-cols-4' : 'space-y-2'}>
                 {ORDEN_ASC.filter(k => kpis.porRango[k]).map(k => (
                   <div key={k} className="flex items-center gap-3 rounded-md border p-3" style={{ borderColor: C.bg3 }}>
                     <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ backgroundColor: RANGO_BY_KEY[k].color }} />
@@ -1700,7 +1720,11 @@ function PanelDetalle({ hechos, ruta, setRuta, onCerrar, onFiltrar }) {
                 <div className="py-12 text-center text-xs" style={{ color: C.t3 }}>Sin registros en este nivel</div>
               )}
 
-              <div className="space-y-1">
+              {completo && hijos.length > 0 && (
+                <TablaHijos hijos={hijos} nivel={nivel} meta={meta} esUltimo={esUltimo} bajar={bajar} />
+              )}
+
+              {!completo && <div className="space-y-1">
                 {hijos.map(h => (
                   <div key={h.clave} className="rounded-md border p-2.5 transition-colors hover:brightness-125" style={{ borderColor: C.bg3 }}>
                     <div className="flex items-baseline gap-2">
@@ -1739,12 +1763,12 @@ function PanelDetalle({ hechos, ruta, setRuta, onCerrar, onFiltrar }) {
                     </div>
                   </div>
                 ))}
-              </div>
+              </div>}
             </>
           )}
         </div>
 
-        <div className="flex items-center gap-2 border-t px-5 py-3" style={{ borderColor: C.b0 }}>
+        <div className={`flex items-center gap-2 border-t py-3 ${completo ? 'px-6' : 'px-5'}`} style={{ borderColor: C.b0 }}>
           <button onClick={() => { onFiltrar(valores); onCerrar(); }}
             className="rounded-md px-3 py-1.5 text-xs font-medium text-white" style={{ backgroundColor: C.accent }}>
             Filtrar el dashboard por esta selección
@@ -1753,6 +1777,62 @@ function PanelDetalle({ hechos, ruta, setRuta, onCerrar, onFiltrar }) {
         </div>
       </aside>
     </>
+  );
+}
+
+/* Vista a pantalla completa del explorador: una fila por elemento con cada
+   rango en su columna, para comparar de un vistazo lo que en la vista lateral
+   se lee tarjeta por tarjeta. */
+function TablaHijos({ hijos, nivel, meta, esUltimo, bajar }) {
+  const th = 'px-3 py-2 text-[10px] font-medium uppercase tracking-wider';
+  return (
+    <div className="overflow-x-auto rounded-md border" style={{ borderColor: C.bg3 }}>
+      <table className="w-full text-xs">
+        <thead>
+          <tr className="border-b text-left" style={{ borderColor: C.bg3, color: C.t3, backgroundColor: C.bg0 }}>
+            <th className={th}>{meta.singular}</th>
+            <th className={`${th} text-right`}>Total</th>
+            {ORDEN_ASC.map(k => <th key={k} className={`${th} text-right`} style={{ color: RANGO_BY_KEY[k].color }}>{RANGO_BY_KEY[k].short}</th>)}
+            <th className={`${th} text-right`}>Crítico</th>
+            <th className={`${th} text-right`}>% crítico</th>
+            <th className={`${th} w-[22%]`}>Composición</th>
+            <th className={th}>Alcance</th>
+          </tr>
+        </thead>
+        <tbody>
+          {hijos.map(h => (
+            <tr key={h.clave} className="border-b last:border-b-0 hover:brightness-125" style={{ borderColor: C.bg3 }}>
+              <td className="max-w-[280px] px-3 py-2">
+                {esUltimo ? (
+                  <span className={`block truncate font-medium ${meta.mono ? 'font-mono' : ''}`} style={{ color: C.t1 }} title={h.clave}>{h.clave}</span>
+                ) : (
+                  <button onClick={() => bajar(h.clave)} title={`${h.clave} · clic para profundizar`}
+                    className={`block w-full truncate text-left font-medium hover:underline ${meta.mono ? 'font-mono' : ''}`} style={{ color: C.t1 }}>
+                    {h.clave}
+                  </button>
+                )}
+              </td>
+              <td className="px-3 py-2 text-right font-semibold tabular-nums" style={{ color: C.t1 }}>{nf.format(h.total)}</td>
+              {ORDEN_ASC.map(k => (
+                <td key={k} className="px-3 py-2 text-right tabular-nums" style={{ color: h.rangos[k] ? RANGO_BY_KEY[k].color : C.t4 }}>
+                  {h.rangos[k] ? nf.format(h.rangos[k]) : '—'}
+                </td>
+              ))}
+              <td className="px-3 py-2 text-right font-semibold tabular-nums" style={{ color: h.critico ? C.red : C.t4 }}>{h.critico ? nf.format(h.critico) : '—'}</td>
+              <td className="px-3 py-2 text-right tabular-nums" style={{ color: h.critico ? C.red : C.t4 }}>{h.total ? pf(h.critico / h.total, 1) : '—'}</td>
+              <td className="px-3 py-2"><BarraComposicion rangos={h.rangos} total={h.total} alto={6} /></td>
+              <td className="whitespace-nowrap px-3 py-2 text-[10px] tabular-nums" style={{ color: C.t3 }}>
+                {[
+                  nivel !== 'item' ? `${nf.format(h.items)} ítems` : null,
+                  nivel !== 'bodega' ? `${nf.format(h.bodegas)} bodegas` : null,
+                  nivel !== 'referencia' && nivel !== 'item' ? `${nf.format(h.refs)} referencias` : null,
+                ].filter(Boolean).join(' · ')}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
