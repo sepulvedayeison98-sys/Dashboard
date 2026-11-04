@@ -124,7 +124,6 @@ function hojaResumen(wb, { rows, kpis, meta, filtrosTexto }) {
 
   const kpiFilas = [
     ['Unidades totales', kpis.total, FMT_NUM],
-    ['Crítico ≥60 días', kpis.critico, FMT_NUM],
     ['% crítico', kpis.pctCritico, FMT_PCT],
     ['Lenta rotación (>30 días)', kpis.lenta, FMT_NUM],
     ['% lenta rotación', kpis.pctLenta, FMT_PCT],
@@ -168,39 +167,38 @@ function hojaDimension(wb, nombre, etiqueta, rows, campo, extras = []) {
   const datos = agrupar(rows, campo);
   const h = wb.addWorksheet(nombre, { views: [{ state: 'frozen', ySplit: 1 }] });
 
-  const cols = [etiqueta, 'Unidades', '0–30', '30–60', '60–90', '+90', 'Crítico ≥60', '% crítico', ...extras.map(e => e.titulo)];
+  const cols = [etiqueta, 'Unidades', '0–30', '30–60', '60–90', '+90', '% crítico', ...extras.map(e => e.titulo)];
   estiloEncabezado(h.addRow(cols));
 
   for (const d of datos) {
     const f = h.addRow([
       d.clave, d.total,
       d.rangos['0-30'] || 0, d.rangos['30-60'] || 0, d.rangos['60-90'] || 0, d.rangos['+90'] || 0,
-      d.critico, d.pctCritico,
+      d.pctCritico,
       ...extras.map(e => d[e.campo]),
     ]);
     f.getCell(1).font = { size: 10 };
-    for (let i = 2; i <= 7; i++) f.getCell(i).numFmt = FMT_NUM;
-    f.getCell(8).numFmt = FMT_PCT;
-    pintarSeveridad(f.getCell(8), d.pctCritico);
-    extras.forEach((_, i) => { f.getCell(9 + i).numFmt = FMT_NUM; });
+    for (let i = 2; i <= 6; i++) f.getCell(i).numFmt = FMT_NUM;
+    f.getCell(7).numFmt = FMT_PCT;
+    pintarSeveridad(f.getCell(7), d.pctCritico);
+    extras.forEach((_, i) => { f.getCell(8 + i).numFmt = FMT_NUM; });
     f.getCell(2).font = { bold: true, size: 10 };
-    f.getCell(7).font = { bold: true, size: 10, color: { argb: 'FFB42318' } };
   }
 
   // Fila de totales, para no tener que sumarlo a mano al abrir el archivo.
   const n = datos.length;
   if (n) {
     const sum = c => ({ formula: `SUBTOTAL(109,${c}2:${c}${n + 1})` });
-    const f = h.addRow(['TOTAL', sum('B'), sum('C'), sum('D'), sum('E'), sum('F'), sum('G'),
-      { formula: `IF(B${n + 2}=0,0,G${n + 2}/B${n + 2})` },
+    const f = h.addRow(['TOTAL', sum('B'), sum('C'), sum('D'), sum('E'), sum('F'),
+      { formula: `IF(B${n + 2}=0,0,(E${n + 2}+F${n + 2})/B${n + 2})` },
       ...extras.map(() => null)]);
     f.eachCell(c => {
       c.font = { bold: true, size: 10 };
       c.border = { top: { style: 'double', color: { argb: TINTA.encabezado } } };
       c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: TINTA.banda } };
     });
-    for (let i = 2; i <= 7; i++) f.getCell(i).numFmt = FMT_NUM;
-    f.getCell(8).numFmt = FMT_PCT;
+    for (let i = 2; i <= 6; i++) f.getCell(i).numFmt = FMT_NUM;
+    f.getCell(7).numFmt = FMT_PCT;
     h.autoFilter = { from: { row: 1, column: 1 }, to: { row: n + 1, column: cols.length } };
   }
 
@@ -337,7 +335,6 @@ export function construirHTMLExcel({ rows, kpis, meta, filtrosTexto, dimsExtra =
     ['', ''],
     [{ v: 'INDICADORES', negrita: true }, ''],
     [{ v: 'Unidades totales', negrita: true }, numero(kpis.total)],
-    [{ v: 'Crítico ≥60 días', negrita: true }, numero(kpis.critico)],
     [{ v: '% crítico', negrita: true }, `${(kpis.pctCritico * 100).toFixed(1)}%`],
     [{ v: 'Lenta rotación (>30 días)', negrita: true }, numero(kpis.lenta)],
     [{ v: '% lenta rotación', negrita: true }, `${(kpis.pctLenta * 100).toFixed(1)}%`],
@@ -380,7 +377,6 @@ export function construirHTMLExcel({ rows, kpis, meta, filtrosTexto, dimsExtra =
         { v: d.total, num: true, negrita: true },
         numero(d.rangos['0-30'] || 0), numero(d.rangos['30-60'] || 0),
         numero(d.rangos['60-90'] || 0), numero(d.rangos['+90'] || 0),
-        { v: d.critico, num: true, cls: 'cr' },
         { v: `${(pct * 100).toFixed(1)}%`, cls: sev },
         ...extras.map(([, c]) => numero(d[c])),
       ];
@@ -388,9 +384,9 @@ export function construirHTMLExcel({ rows, kpis, meta, filtrosTexto, dimsExtra =
     hojas.push({
       nombre,
       html: tablaHTML({
-        encabezados: [etiqueta, 'Unidades', '0–30', '30–60', '60–90', '+90', 'Crítico ≥60', '% crítico', ...extras.map(e => e[0])],
+        encabezados: [etiqueta, 'Unidades', '0–30', '30–60', '60–90', '+90', '% crítico', ...extras.map(e => e[0])],
         filas,
-        anchos: [28, 12, 10, 10, 10, 10, 12, 11, ...extras.map(() => 11)],
+        anchos: [28, 12, 10, 10, 10, 10, 11, ...extras.map(() => 11)],
       }),
     });
   }
