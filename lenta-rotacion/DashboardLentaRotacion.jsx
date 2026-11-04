@@ -1343,7 +1343,6 @@ const METRICA_INICIAL = '+90';
 
 const METRICAS_DIM = [
   { key: '+90', label: '+90' },
-  { key: 'critico', label: 'Crítico ≥60' },
   { key: '60-90', label: '60–90' },
   { key: '30-60', label: '30–60' },
   { key: 'total', label: 'Total' },
@@ -1971,7 +1970,6 @@ const tintaHeat = (t) => {
 
 const METRICAS_HEAT = [
   { key: '+90', label: '+90', filtra: r => r.rango_dias === '+90' },
-  { key: 'critico', label: 'Crítico ≥60', filtra: r => CRITICOS.includes(r.rango_dias) },
   { key: '60-90', label: '60–90', filtra: r => r.rango_dias === '60-90' },
   { key: 'total', label: 'Total', filtra: () => true },
 ];
